@@ -51,6 +51,11 @@ describe('Forwarding Listeners', () => {
 		expect(mockProcessManager.on).toHaveBeenCalledWith('command-exit', expect.any(Function));
 		expect(mockProcessManager.on).toHaveBeenCalledWith('query-complete', expect.any(Function));
 		expect(mockProcessManager.on).toHaveBeenCalledWith('exit', expect.any(Function));
+		expect(mockProcessManager.on).toHaveBeenCalledWith(
+			'terminal-command-state',
+			expect.any(Function)
+		);
+		expect(mockProcessManager.on).toHaveBeenCalledWith('terminal-cwd', expect.any(Function));
 	});
 
 	it('should forward slash-commands events to renderer', () => {
@@ -197,5 +202,37 @@ describe('Forwarding Listeners', () => {
 		handler?.(testSessionId, testExitCode);
 
 		expect(mockSafeSend).toHaveBeenCalledWith('process:command-exit', testSessionId, testExitCode);
+	});
+
+	it('should forward terminal-command-state events to renderer', () => {
+		setupForwardingListeners(mockProcessManager, mockDeps);
+
+		const handler = eventHandlers.get('terminal-command-state');
+		const testSessionId = 'test-session-123';
+		const testState = {
+			currentCommand: 'sleep 60',
+			commandRunning: true,
+			lastExitCode: undefined,
+		};
+
+		handler?.(testSessionId, testState);
+
+		expect(mockSafeSend).toHaveBeenCalledWith(
+			'process:terminal-command-state',
+			testSessionId,
+			testState
+		);
+	});
+
+	it('should forward terminal-cwd events to renderer', () => {
+		setupForwardingListeners(mockProcessManager, mockDeps);
+
+		const handler = eventHandlers.get('terminal-cwd');
+		const testSessionId = 'test-session-123';
+		const testCwd = '/tmp';
+
+		handler?.(testSessionId, testCwd);
+
+		expect(mockSafeSend).toHaveBeenCalledWith('process:terminal-cwd', testSessionId, testCwd);
 	});
 });
