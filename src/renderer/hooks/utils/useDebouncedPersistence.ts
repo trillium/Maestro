@@ -126,12 +126,19 @@ const prepareSessionForPersistence = (session: Session): Session => {
 	const activeTabExists = truncatedTabs.some((tab) => tab.id === session.activeTabId);
 	const newActiveTabId = activeTabExists ? session.activeTabId : truncatedTabs[0]?.id;
 
-	// Strip terminal tab runtime state - PTY processes don't survive app restart
+	// Clean terminal tabs:
+	// - PTY processes don't survive app restart, so reset pid/state/exitCode.
+	// - Preserve currentCommand verbatim and flip commandRunning to false; set
+	//   persistCommand when a command was live at persist time so the restart
+	//   re-execution flow can offer to re-run it (Phase 5 of terminal
+	//   persistence plan).
 	const cleanedTerminalTabs = (session.terminalTabs || []).map((tab) => ({
 		...tab,
 		pid: 0,
 		state: 'idle' as const,
 		exitCode: undefined,
+		commandRunning: false,
+		persistCommand: tab.commandRunning ? true : undefined,
 	}));
 
 	// Validate activeTerminalTabId against the cleaned terminal tabs list
