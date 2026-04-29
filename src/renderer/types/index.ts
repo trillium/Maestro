@@ -513,6 +513,10 @@ export interface TerminalTab {
 	exitCode?: number; // Exit code when state === 'exited'
 	scrollTop?: number; // Saved scroll position (restored on tab re-focus)
 	searchQuery?: string; // Preserved search query for the xterm.js search addon
+	// Shell integration / command persistence fields (Phase 3 of terminal persistence plan)
+	currentCommand?: string; // Command currently/last running in shell
+	commandRunning?: boolean; // Whether a command is actively executing
+	persistCommand?: boolean; // Flag: re-execute this command on restart
 }
 
 /**
