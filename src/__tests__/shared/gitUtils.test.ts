@@ -335,5 +335,19 @@ describe('gitUtils', () => {
 			expect(getImageMimeType('ico')).toBe('image/ico');
 			expect(getImageMimeType('bmp')).toBe('image/bmp');
 		});
+
+		it('handles uppercase extensions', () => {
+			expect(getImageMimeType('JPG')).toBe('image/jpeg');
+			expect(getImageMimeType('JPEG')).toBe('image/jpeg');
+			expect(getImageMimeType('SVG')).toBe('image/svg+xml');
+			expect(getImageMimeType('PNG')).toBe('image/png');
+			expect(getImageMimeType('GIF')).toBe('image/gif');
+		});
+
+		it('handles mixed-case extensions', () => {
+			expect(getImageMimeType('Png')).toBe('image/png');
+			expect(getImageMimeType('sVg')).toBe('image/svg+xml');
+			expect(getImageMimeType('JpG')).toBe('image/jpeg');
+		});
 	});
 });

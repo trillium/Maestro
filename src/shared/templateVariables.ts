@@ -211,10 +211,10 @@ export function substituteTemplateVariables(template: string, context: TemplateC
 		// Loop tracking (1-indexed, defaults to 1 if not in loop mode, 5-digit padded)
 		LOOP_NUMBER: String(loopNumber ?? 1).padStart(5, '0'),
 
-		// Date/Time variables
-		DATE: now.toISOString().split('T')[0],
+		// Date/Time variables (all in local time for consistency)
+		DATE: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
 		TIME: now.toTimeString().split(' ')[0],
-		DATETIME: `${now.toISOString().split('T')[0]} ${now.toTimeString().split(' ')[0]}`,
+		DATETIME: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${now.toTimeString().split(' ')[0]}`,
 		TIMESTAMP: String(now.getTime()),
 		DATE_SHORT: `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}/${String(now.getFullYear()).slice(-2)}`,
 		TIME_SHORT: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
@@ -238,9 +238,12 @@ export function substituteTemplateVariables(template: string, context: TemplateC
 	// Perform case-insensitive replacement
 	let result = template;
 	for (const [key, value] of Object.entries(replacements)) {
-		// Match {{KEY}} with case insensitivity
+		// Match {{KEY}} with case insensitivity.
+		// Use a function as the replacement to bypass JavaScript's special
+		// pattern interpretation of `$&`, `$$`, `$1`, etc., in the replacement
+		// string. Without this, values containing `$` are silently corrupted.
 		const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'gi');
-		result = result.replace(regex, value);
+		result = result.replace(regex, () => value);
 	}
 
 	return result;

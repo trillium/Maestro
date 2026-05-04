@@ -789,4 +789,103 @@ Please complete the tasks in {{DOCUMENT_NAME}}.`;
 			expect(result).toBe('LOG_Logger_2025-03-15_loop00007.md');
 		});
 	});
+
+	describe('Values containing $ (replace special patterns)', () => {
+		it('should preserve a literal $ in tab/agent name', () => {
+			const context = createTestContext({
+				session: createTestSession({ name: 'Build $5 widget' }),
+			});
+			const result = substituteTemplateVariables('Name: {{TAB_NAME}}', context);
+			expect(result).toBe('Name: Build $5 widget');
+		});
+
+		it('should preserve $$ literally (no collapse to single $)', () => {
+			const context = createTestContext({
+				session: createTestSession({ name: 'Pay $$ now' }),
+			});
+			const result = substituteTemplateVariables('{{TAB_NAME}}', context);
+			expect(result).toBe('Pay $$ now');
+		});
+
+		it('should preserve $& literally (does not duplicate the match)', () => {
+			const context = createTestContext({
+				session: createTestSession({ name: 'has $& here' }),
+			});
+			const result = substituteTemplateVariables('{{AGENT_NAME}}', context);
+			expect(result).toBe('has $& here');
+		});
+
+		it('should preserve $1 literally (no capture group reference)', () => {
+			const context = createTestContext({
+				session: createTestSession({ name: 'value $1 token' }),
+			});
+			const result = substituteTemplateVariables('{{TAB_NAME}}', context);
+			expect(result).toBe('value $1 token');
+		});
+
+		it("should preserve $` and $' literally", () => {
+			const context = createTestContext({
+				session: createTestSession({ name: "a $` and $' here" }),
+			});
+			const result = substituteTemplateVariables('{{TAB_NAME}}', context);
+			expect(result).toBe("a $` and $' here");
+		});
+
+		it('should preserve $ in path-like values (CWD/AGENT_PATH)', () => {
+			const context = createTestContext({
+				session: createTestSession({
+					cwd: '/Users/test/$DEFAULT/project',
+					fullPath: '/Users/test/$DEFAULT/project',
+				}),
+			});
+			const result = substituteTemplateVariables('cwd={{CWD}} path={{AGENT_PATH}}', context);
+			expect(result).toBe(
+				'cwd=/Users/test/$DEFAULT/project path=/Users/test/$DEFAULT/project'
+			);
+		});
+
+		it('should preserve $ in conductor profile (free-form text)', () => {
+			const context = createTestContext({
+				conductorProfile: 'I earn $100/hr; my var is $foo',
+			});
+			const result = substituteTemplateVariables('{{CONDUCTOR_PROFILE}}', context);
+			expect(result).toBe('I earn $100/hr; my var is $foo');
+		});
+
+		it('should still perform regular substitution (regression)', () => {
+			const context = createTestContext({
+				session: createTestSession({ name: 'Plain Name' }),
+			});
+			const result = substituteTemplateVariables(
+				'Hello {{TAB_NAME}} from {{TOOL_TYPE}}',
+				context
+			);
+			expect(result).toBe('Hello Plain Name from claude-code');
+		});
+	});
+
+	describe('Date/Time consistency (local timezone)', () => {
+		it('should derive {{DATE}} from local time, not UTC', () => {
+			// 2025-03-15T23:30:00 in PST (-08:00) is still 2025-03-15 locally
+			// but its UTC equivalent is 2025-03-16T07:30:00Z.
+			// Use a date whose UTC and local components differ to surface the bug.
+			// We pick local midnight-adjacent UTC time and vary timezones via the
+			// simpler approach: assert {{DATE}} equals YEAR-MONTH-DAY (local), which
+			// is the true invariant regardless of test-machine timezone.
+			const context = createTestContext();
+			const dateResult = substituteTemplateVariables('{{DATE}}', context);
+			const ymdResult = substituteTemplateVariables(
+				'{{YEAR}}-{{MONTH}}-{{DAY}}',
+				context
+			);
+			expect(dateResult).toBe(ymdResult);
+		});
+
+		it('should make {{DATETIME}} equal to {{DATE}} {{TIME}}', () => {
+			const context = createTestContext();
+			const datetimeResult = substituteTemplateVariables('{{DATETIME}}', context);
+			const composed = substituteTemplateVariables('{{DATE}} {{TIME}}', context);
+			expect(datetimeResult).toBe(composed);
+		});
+	});
 });

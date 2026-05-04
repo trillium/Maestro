@@ -331,7 +331,8 @@ export function isImageFile(filePath: string): boolean {
  * @returns MIME type string
  */
 export function getImageMimeType(ext: string): string {
-	if (ext === 'svg') return 'image/svg+xml';
-	if (ext === 'jpg') return 'image/jpeg';
-	return `image/${ext}`;
+	const lower = ext.toLowerCase();
+	if (lower === 'svg') return 'image/svg+xml';
+	if (lower === 'jpg') return 'image/jpeg';
+	return `image/${lower}`;
 }
