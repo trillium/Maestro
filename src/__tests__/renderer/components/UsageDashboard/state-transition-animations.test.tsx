@@ -371,11 +371,10 @@ describe('Usage Dashboard State Transition Animations', () => {
 				expect(sessionStatsSection).toHaveClass('dashboard-section-enter');
 				expect(sessionStatsSection).toHaveStyle({ animationDelay: '0ms' });
 
-				// Provider comparison is third (after agent-efficiency at 50ms)
-				// with 100ms delay
-				const agentSection = screen.getByTestId('section-agent-comparison');
-				expect(agentSection).toHaveClass('dashboard-section-enter');
-				expect(agentSection).toHaveStyle({ animationDelay: '100ms' });
+				// Agent efficiency is second with 50ms delay
+				const efficiencySection = screen.getByTestId('section-agent-efficiency');
+				expect(efficiencySection).toHaveClass('dashboard-section-enter');
+				expect(efficiencySection).toHaveStyle({ animationDelay: '50ms' });
 			});
 		});
 

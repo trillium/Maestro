@@ -60,18 +60,14 @@ import { PERFORMANCE_THRESHOLDS } from '../../../shared/performance-metrics';
 const OVERVIEW_SECTIONS = [
 	'year-in-pixels',
 	'summary-cards',
+	'agent-comparison',
 	'source-distribution',
 	'location-distribution',
 	'radial-activity',
 	'activity-heatmap',
 ] as const;
 const AGENTS_SECTIONS = ['agent-overview-cards'] as const;
-const AGENT_OVERVIEW_SECTIONS = [
-	'session-stats',
-	'agent-efficiency',
-	'agent-comparison',
-	'agent-usage',
-] as const;
+const AGENT_OVERVIEW_SECTIONS = ['session-stats', 'agent-efficiency', 'agent-usage'] as const;
 const ACTIVITY_SECTIONS = ['activity-heatmap', 'weekday-comparison', 'duration-trends'] as const;
 const AUTORUN_SECTIONS = ['autorun-stats', 'tasks-by-hour', 'longest-autoruns'] as const;
 
@@ -839,6 +835,34 @@ export function UsageDashboardModal({
 										</ChartErrorBoundary>
 									</div>
 
+									{/* Provider Comparison Chart - Full width bar chart */}
+									<div
+										ref={setSectionRef('agent-comparison')}
+										tabIndex={0}
+										role="region"
+										aria-label={getSectionLabel('agent-comparison')}
+										onKeyDown={(e) => handleSectionKeyDown(e, 'agent-comparison')}
+										className="outline-none rounded-lg transition-shadow dashboard-section-enter"
+										style={{
+											minHeight: '180px',
+											boxShadow:
+												focusedSection === 'agent-comparison'
+													? `0 0 0 2px ${theme.colors.accent}`
+													: 'none',
+											animationDelay: '100ms',
+										}}
+										data-testid="section-agent-comparison"
+									>
+										<ChartErrorBoundary theme={theme} chartName="Provider Comparison">
+											<AgentComparisonChart
+												data={data}
+												theme={theme}
+												colorBlindMode={colorBlindMode}
+												sessions={sessions}
+											/>
+										</ChartErrorBoundary>
+									</div>
+
 									{/* Distribution Charts Grid - 2 columns for donut charts */}
 									<div
 										className="grid gap-6 dashboard-section-enter"
@@ -1073,34 +1097,6 @@ export function UsageDashboardModal({
 									>
 										<ChartErrorBoundary theme={theme} chartName="Agent Efficiency">
 											<AgentEfficiencyChart
-												data={data}
-												theme={theme}
-												colorBlindMode={colorBlindMode}
-												sessions={sessions}
-											/>
-										</ChartErrorBoundary>
-									</div>
-
-									{/* Provider Comparison */}
-									<div
-										ref={setSectionRef('agent-comparison')}
-										tabIndex={0}
-										role="region"
-										aria-label={getSectionLabel('agent-comparison')}
-										onKeyDown={(e) => handleSectionKeyDown(e, 'agent-comparison')}
-										className="outline-none rounded-lg transition-shadow dashboard-section-enter"
-										style={{
-											minHeight: '180px',
-											boxShadow:
-												focusedSection === 'agent-comparison'
-													? `0 0 0 2px ${theme.colors.accent}`
-													: 'none',
-											animationDelay: '100ms',
-										}}
-										data-testid="section-agent-comparison"
-									>
-										<ChartErrorBoundary theme={theme} chartName="Provider Comparison">
-											<AgentComparisonChart
 												data={data}
 												theme={theme}
 												colorBlindMode={colorBlindMode}
