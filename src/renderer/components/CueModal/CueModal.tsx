@@ -267,7 +267,7 @@ export function CueModal({ theme, onClose, cueShortcutKeys }: CueModalProps) {
 
 					{/* Modal */}
 					<div
-						className="relative rounded-xl shadow-2xl flex flex-col"
+						className="relative rounded-xl shadow-2xl flex flex-col select-none"
 						style={{
 							width: '80vw',
 							maxWidth: 1400,

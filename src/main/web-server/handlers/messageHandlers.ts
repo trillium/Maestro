@@ -183,7 +183,7 @@ export interface MessageHandlerCallbacks {
 	starTab: (sessionId: string, tabId: string, starred: boolean) => Promise<boolean>;
 	reorderTab: (sessionId: string, fromIndex: number, toIndex: number) => Promise<boolean>;
 	toggleBookmark: (sessionId: string) => Promise<boolean>;
-	openFileTab: (sessionId: string, filePath: string) => Promise<boolean>;
+	openFileTab: (sessionId: string, filePath: string, switchToAgent: boolean) => Promise<boolean>;
 	refreshFileTree: (sessionId: string) => Promise<boolean>;
 	openBrowserTab: (sessionId: string, url: string) => Promise<boolean>;
 	openTerminalTab: (
@@ -1650,8 +1650,10 @@ export class WebSocketMessageHandler {
 	private handleOpenFileTab(client: WebClient, message: WebClientMessage): void {
 		const sessionId = message.sessionId as string;
 		const filePath = message.filePath as string;
+		// `switchToAgent` defaults to true so older clients keep the existing UX.
+		const switchToAgent = message.switchToAgent !== false;
 		logger.info(
-			`[Web] Received open_file_tab message: session=${sessionId}, filePath=${filePath}`,
+			`[Web] Received open_file_tab message: session=${sessionId}, filePath=${filePath}, switchToAgent=${switchToAgent}`,
 			LOG_CONTEXT
 		);
 
@@ -1691,7 +1693,7 @@ export class WebSocketMessageHandler {
 		}
 
 		this.callbacks
-			.openFileTab(sessionId, resolved)
+			.openFileTab(sessionId, resolved, switchToAgent)
 			.then((success) => {
 				this.send(client, {
 					type: 'open_file_tab_result',

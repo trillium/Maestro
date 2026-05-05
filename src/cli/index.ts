@@ -213,7 +213,11 @@ session
 program
 	.command('open-file <file-path>')
 	.description('Open a file as a preview tab in the Maestro desktop app')
-	.option('-s, --session <id>', 'Target session (defaults to active)')
+	.option(
+		'-s, --session <id>',
+		"Target agent (defaults to auto-detect by file path's owning agent)"
+	)
+	.option('--no-switch', "Don't switch the Maestro UI to the target agent/tab")
 	.action(openFile);
 
 // Open browser command - open a URL in a browser tab in the Maestro desktop app

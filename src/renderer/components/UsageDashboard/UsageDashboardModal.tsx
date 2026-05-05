@@ -38,6 +38,7 @@ import { EmptyState } from './EmptyState';
 import { DashboardSkeleton } from './ChartSkeletons';
 import { ChartErrorBoundary } from './ChartErrorBoundary';
 import { CueStats } from './CueStats';
+import { KeyboardStats } from './KeyboardStats';
 import type {
 	Theme,
 	Session,
@@ -84,7 +85,14 @@ const perfMetrics = getRendererPerfMetrics('UsageDashboard');
 // StatsTimeRange and StatsAggregation imported from shared/stats-types above
 
 // View mode options for the dashboard
-type ViewMode = 'overview' | 'agents' | 'agent-overview' | 'activity' | 'autorun' | 'cue';
+type ViewMode =
+	| 'overview'
+	| 'agents'
+	| 'agent-overview'
+	| 'activity'
+	| 'autorun'
+	| 'cue'
+	| 'shortcuts';
 
 interface UsageDashboardModalProps {
 	isOpen: boolean;
@@ -142,6 +150,7 @@ const BASE_VIEW_MODE_TABS: { value: ViewMode; label: string }[] = [
 	{ value: 'agents', label: 'Agents' },
 	{ value: 'activity', label: 'Activity' },
 	{ value: 'autorun', label: 'Auto Run' },
+	{ value: 'shortcuts', label: 'Shortcuts' },
 ];
 
 const EMPTY_SESSIONS: Session[] = [];
@@ -385,6 +394,8 @@ export function UsageDashboardModal({
 			case 'autorun':
 				return AUTORUN_SECTIONS;
 			case 'cue':
+				return [];
+			case 'shortcuts':
 				return [];
 			default:
 				return OVERVIEW_SECTIONS;
@@ -741,7 +752,11 @@ export function UsageDashboardModal({
 					{loading && !data ? (
 						<DashboardSkeleton
 							theme={theme}
-							viewMode={viewMode === 'cue' || viewMode === 'agent-overview' ? 'overview' : viewMode}
+							viewMode={
+								viewMode === 'cue' || viewMode === 'agent-overview' || viewMode === 'shortcuts'
+									? 'overview'
+									: viewMode
+							}
 							chartGridCols={layout.chartGridCols}
 							summaryCardsCols={layout.summaryCardsCols}
 							autoRunStatsCols={layout.autoRunStatsCols}
@@ -762,6 +777,20 @@ export function UsageDashboardModal({
 							>
 								Retry
 							</button>
+						</div>
+					) : viewMode === 'shortcuts' ? (
+						// The Shortcuts tab depends on its own data sources (settings store
+						// + shortcut_usage_daily) and renders fine without any AI queries,
+						// so it bypasses the AI-query empty-state gate.
+						<div
+							key={viewMode}
+							className="space-y-6 dashboard-content-enter"
+							data-testid="usage-dashboard-content"
+							role="tabpanel"
+							id={`tabpanel-${viewMode}`}
+							aria-labelledby={`tab-${viewMode}`}
+						>
+							<KeyboardStats timeRange={timeRange} theme={theme} />
 						</div>
 					) : !data ||
 					  (data.totalQueries === 0 && data.bySource.user === 0 && data.bySource.auto === 0) ? (

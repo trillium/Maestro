@@ -9,6 +9,7 @@ import type Database from 'better-sqlite3';
 import type { StatsTimeRange, StatsAggregation } from '../../shared/stats-types';
 import { PERFORMANCE_THRESHOLDS } from '../../shared/performance-metrics';
 import { getTimeRangeStart, perfMetrics, LOG_CONTEXT } from './utils';
+import { countImageAnnotationsSince } from './image-annotations';
 import { logger } from '../utils/logger';
 
 // ============================================================================
@@ -370,6 +371,7 @@ export function getAggregatedStats(db: Database.Database, range: StatsTimeRange)
 	const sessionStats = querySessionStats(db, startTime);
 	const bySessionByDay = queryBySessionByDay(db, startTime);
 	const worktreeStatus = queryByWorktreeStatus(db, startTime);
+	const imageAnnotations = countImageAnnotationsSince(db, startTime);
 
 	const totalDuration = perfMetrics.end(perfStart, 'getAggregatedStats:total', {
 		range,
@@ -400,5 +402,6 @@ export function getAggregatedStats(db: Database.Database, range: StatsTimeRange)
 		worktreeQueries: worktreeStatus.worktreeQueries,
 		parentQueries: worktreeStatus.parentQueries,
 		byWorktreeStatus: worktreeStatus.byWorktreeStatus,
+		imageAnnotations,
 	};
 }

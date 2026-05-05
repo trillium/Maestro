@@ -110,6 +110,8 @@ export interface StatsAggregation {
 		worktree: { count: number; duration: number };
 		parent: { count: number; duration: number };
 	};
+	/** Number of image annotations saved in the time range */
+	imageAnnotations: number;
 }
 
 /**
@@ -123,6 +125,15 @@ export interface StatsFilters {
 }
 
 /**
+ * One day of shortcut usage. `date` is the local-time YYYY-MM-DD bucket; `count`
+ * is the total number of shortcuts fired that day across the whole app.
+ */
+export interface ShortcutUsageDay {
+	date: string;
+	count: number;
+}
+
+/**
  * Database schema version for migrations
  */
-export const STATS_DB_VERSION = 5;
+export const STATS_DB_VERSION = 7;

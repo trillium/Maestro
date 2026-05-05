@@ -206,7 +206,7 @@ describe('GitDiffViewer', () => {
 			expect(screen.getByText('/test/project')).toBeInTheDocument();
 		});
 
-		it('shows file count for single file', () => {
+		it('shows current file position in header for single file', () => {
 			const onClose = vi.fn();
 			mockParseGitDiff.mockReturnValue([createMockParsedFile()]);
 
@@ -219,10 +219,10 @@ describe('GitDiffViewer', () => {
 				/>
 			);
 
-			expect(screen.getByText('1 file changed')).toBeInTheDocument();
+			expect(screen.getByText('File 1 of 1')).toBeInTheDocument();
 		});
 
-		it('shows file count for multiple files', () => {
+		it('shows current file position in header for multiple files', () => {
 			const onClose = vi.fn();
 			mockParseGitDiff.mockReturnValue([
 				createMockParsedFile({ oldPath: 'src/file1.ts', newPath: 'src/file1.ts' }),
@@ -238,7 +238,7 @@ describe('GitDiffViewer', () => {
 				/>
 			);
 
-			expect(screen.getByText('2 files changed')).toBeInTheDocument();
+			expect(screen.getByText('File 1 of 2')).toBeInTheDocument();
 		});
 
 		it('focuses the dialog on mount', () => {

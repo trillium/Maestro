@@ -311,7 +311,9 @@ interface MaestroAPI {
 			callback: (sessionId: string, fromIndex: number, toIndex: number) => void
 		) => () => void;
 		onRemoteToggleBookmark: (callback: (sessionId: string) => void) => () => void;
-		onRemoteOpenFileTab: (callback: (sessionId: string, filePath: string) => void) => () => void;
+		onRemoteOpenFileTab: (
+			callback: (sessionId: string, filePath: string, switchToAgent: boolean) => void
+		) => () => void;
 		onRemoteRefreshFileTree: (callback: (sessionId: string) => void) => () => void;
 		onRemoteNotifyToast: (
 			callback: (params: {
@@ -2647,6 +2649,7 @@ interface MaestroAPI {
 				worktree: { count: number; duration: number };
 				parent: { count: number; duration: number };
 			};
+			imageAnnotations: number;
 		}>;
 		// Export query events to CSV
 		exportCsv: (range: 'day' | 'week' | 'month' | 'quarter' | 'year' | 'all') => Promise<string>;
@@ -2665,6 +2668,18 @@ interface MaestroAPI {
 		getDatabaseSize: () => Promise<number>;
 		// Get earliest stat timestamp (null if no entries exist)
 		getEarliestTimestamp: () => Promise<number | null>;
+		// Record an image annotation save event
+		recordImageAnnotation: (createdAt: number) => Promise<string | null>;
+		// Record a keyboard shortcut firing (buckets into local-time day)
+		recordShortcutUsage: (firedAt: number) => Promise<string | null>;
+		// Get per-day shortcut usage counts within a time range
+		getShortcutUsageByDay: (
+			range: 'day' | 'week' | 'month' | 'quarter' | 'year' | 'all'
+		) => Promise<Array<{ date: string; count: number }>>;
+		// Get total shortcut firings within a time range
+		getShortcutUsageTotal: (
+			range: 'day' | 'week' | 'month' | 'quarter' | 'year' | 'all'
+		) => Promise<number>;
 		// Record session creation (launched)
 		recordSessionCreated: (event: {
 			sessionId: string;

@@ -787,7 +787,8 @@ describe('WebSocketMessageHandler', () => {
 			await vi.waitFor(() => {
 				expect(callbacks.openFileTab).toHaveBeenCalledWith(
 					'session-1',
-					'/home/user/project/src/index.ts'
+					'/home/user/project/src/index.ts',
+					true
 				);
 			});
 
@@ -796,6 +797,23 @@ describe('WebSocketMessageHandler', () => {
 			expect(response.success).toBe(true);
 			expect(response.sessionId).toBe('session-1');
 			expect(response.filePath).toBe('/home/user/project/src/index.ts');
+		});
+
+		it('should forward switchToAgent=false when --no-switch is used', async () => {
+			handler.handleMessage(client, {
+				type: 'open_file_tab',
+				sessionId: 'session-1',
+				filePath: '/home/user/project/src/index.ts',
+				switchToAgent: false,
+			});
+
+			await vi.waitFor(() => {
+				expect(callbacks.openFileTab).toHaveBeenCalledWith(
+					'session-1',
+					'/home/user/project/src/index.ts',
+					false
+				);
+			});
 		});
 
 		it('should reject open file tab with missing sessionId', () => {

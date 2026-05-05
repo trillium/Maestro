@@ -234,7 +234,7 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 							{cwd}
 						</span>
 						<span className="text-xs" style={{ color: theme.colors.textDim }}>
-							{parsedFiles.length} {parsedFiles.length === 1 ? 'file' : 'files'} changed
+							File {activeTab + 1} of {parsedFiles.length}
 						</span>
 					</div>
 					<div className="flex items-center gap-2">
@@ -405,25 +405,20 @@ export const GitDiffViewer = memo(function GitDiffViewer({
 							</div>
 						)}
 					</div>
-					<div className="flex items-center gap-6">
-						<span style={{ color: theme.colors.textDim }}>
-							Press{' '}
-							<kbd
-								className="px-1.5 py-0.5 rounded font-mono text-[10px] mx-0.5"
-								style={{
-									backgroundColor: theme.colors.bgActivity,
-									color: theme.colors.textMain,
-									border: `1px solid ${theme.colors.border}`,
-								}}
-							>
-								Enter
-							</kbd>{' '}
-							to toggle {viewType === 'unified' ? 'side-by-side' : 'unified'} view
-						</span>
-						<span style={{ color: theme.colors.textDim }}>
-							File {activeTab + 1} of {parsedFiles.length}
-						</span>
-					</div>
+					<span style={{ color: theme.colors.textDim }}>
+						Press{' '}
+						<kbd
+							className="px-1.5 py-0.5 rounded font-mono text-[10px] mx-0.5"
+							style={{
+								backgroundColor: theme.colors.bgActivity,
+								color: theme.colors.textMain,
+								border: `1px solid ${theme.colors.border}`,
+							}}
+						>
+							Enter
+						</kbd>{' '}
+						to toggle {viewType === 'unified' ? 'side-by-side' : 'unified'} view
+					</span>
 				</div>
 			</div>
 		</div>
