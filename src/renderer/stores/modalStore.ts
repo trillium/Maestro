@@ -90,6 +90,14 @@ export interface RenameTabModalData {
 	initialName: string;
 }
 
+/** Terminal tab startup command modal data */
+export interface TerminalStartupCommandModalData {
+	tabId: string;
+	initialCommand: string;
+	initialCwd: string;
+	defaultCwd: string;
+}
+
 /** Rename group modal data */
 export interface RenameGroupModalData {
 	groupId: string;
@@ -196,6 +204,7 @@ export type ModalId =
 	| 'promptComposer'
 	// Tab Management
 	| 'renameTab'
+	| 'terminalStartupCommand'
 	// Group Management
 	| 'renameGroup'
 	// Session Operations
@@ -265,6 +274,7 @@ export interface ModalDataMap {
 	confirm: ConfirmModalData;
 	renameInstance: RenameInstanceModalData;
 	renameTab: RenameTabModalData;
+	terminalStartupCommand: TerminalStartupCommandModalData;
 	renameGroup: RenameGroupModalData;
 	agentSessions: AgentSessionsModalData;
 	wizardResume: WizardResumeModalData;
@@ -663,6 +673,11 @@ export function getModalActions() {
 				openModal('renameTab', { tabId: '', initialName });
 			}
 		},
+
+		// Terminal Tab Startup Command Modal
+		openTerminalStartupCommandModal: (data: TerminalStartupCommandModalData) =>
+			openModal('terminalStartupCommand', data),
+		closeTerminalStartupCommandModal: () => closeModal('terminalStartupCommand'),
 
 		// Rename Group Modal
 		setRenameGroupModalOpen: (open: boolean) => {

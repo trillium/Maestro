@@ -50,6 +50,9 @@ export const MODAL_PRIORITIES = {
 	/** Rename tab modal */
 	RENAME_TAB: 875,
 
+	/** Terminal tab startup command configuration modal */
+	TERMINAL_STARTUP_COMMAND: 873,
+
 	/** Director's Notes modal - unified history and AI overview */
 	DIRECTOR_NOTES: 848,
 
