@@ -1,5 +1,11 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mockCaptureException = vi.fn();
+vi.mock('../../../../../renderer/utils/sentry', () => ({
+	captureException: (...args: unknown[]) => mockCaptureException(...args),
+}));
+
 import { useProcessKill } from '../../../../../renderer/components/ProcessMonitor/hooks/useProcessKill';
 
 describe('useProcessKill', () => {
@@ -7,6 +13,7 @@ describe('useProcessKill', () => {
 	let stopRunMock: ReturnType<typeof vi.fn>;
 
 	beforeEach(() => {
+		mockCaptureException.mockClear();
 		killMock = vi.fn().mockResolvedValue(undefined);
 		stopRunMock = vi.fn().mockResolvedValue(true);
 		(window as unknown as { maestro: unknown }).maestro = {
@@ -74,8 +81,9 @@ describe('useProcessKill', () => {
 		expect(onSettled).toHaveBeenCalledTimes(1);
 	});
 
-	it('swallows errors from the IPC dispatch', async () => {
-		killMock.mockRejectedValueOnce(new Error('boom'));
+	it('reports kill failures to Sentry but does not throw', async () => {
+		const error = new Error('boom');
+		killMock.mockRejectedValueOnce(error);
 		const { result } = renderHook(() => useProcessKill(vi.fn().mockResolvedValue(undefined)));
 		await expect(
 			act(async () => {
@@ -83,6 +91,10 @@ describe('useProcessKill', () => {
 			})
 		).resolves.not.toThrow();
 		expect(result.current.isKilling).toBe(false);
+		expect(mockCaptureException).toHaveBeenCalledWith(
+			error,
+			expect.objectContaining({ extra: expect.objectContaining({ processSessionId: 's-1' }) })
+		);
 	});
 
 	it('still calls refresh after a non-cue kill', async () => {
@@ -92,5 +104,26 @@ describe('useProcessKill', () => {
 			await result.current.kill('s-1');
 		});
 		expect(refresh).toHaveBeenCalledTimes(1);
+	});
+
+	it('still calls refresh in finally when the kill IPC throws', async () => {
+		killMock.mockRejectedValueOnce(new Error('boom'));
+		const refresh = vi.fn().mockResolvedValue(undefined);
+		const { result } = renderHook(() => useProcessKill(refresh));
+		await act(async () => {
+			await result.current.kill('s-1');
+		});
+		expect(refresh).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not throw when refresh itself rejects', async () => {
+		const refresh = vi.fn().mockRejectedValue(new Error('refresh-fail'));
+		const { result } = renderHook(() => useProcessKill(refresh));
+		await expect(
+			act(async () => {
+				await result.current.kill('s-1');
+			})
+		).resolves.not.toThrow();
+		expect(result.current.isKilling).toBe(false);
 	});
 });

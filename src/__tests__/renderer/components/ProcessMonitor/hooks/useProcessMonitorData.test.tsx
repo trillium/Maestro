@@ -1,5 +1,11 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mockCaptureException = vi.fn();
+vi.mock('../../../../../renderer/utils/sentry', () => ({
+	captureException: (...args: unknown[]) => mockCaptureException(...args),
+}));
+
 import { useProcessMonitorData } from '../../../../../renderer/components/ProcessMonitor/hooks/useProcessMonitorData';
 
 const setHidden = (hidden: boolean) => {
@@ -21,6 +27,7 @@ describe('useProcessMonitorData', () => {
 		// real-timer setTimeouts internally) does not deadlock against frozen fake
 		// timers. This mirrors the existing ProcessMonitor.test.tsx setup.
 		vi.useFakeTimers({ shouldAdvanceTime: true });
+		mockCaptureException.mockClear();
 		setHidden(false);
 		getActive = vi.fn().mockResolvedValue([]);
 		(window as unknown as { maestro: unknown }).maestro = {
@@ -88,10 +95,12 @@ describe('useProcessMonitorData', () => {
 		await waitFor(() => expect(getActive).toHaveBeenCalledTimes(3));
 	});
 
-	it('keeps polling after a fetch error (errors are swallowed)', async () => {
-		getActive.mockRejectedValueOnce(new Error('boom'));
+	it('keeps polling after a fetch error and reports it to Sentry', async () => {
+		const error = new Error('boom');
+		getActive.mockRejectedValueOnce(error);
 		renderHook(() => useProcessMonitorData());
 		await waitFor(() => expect(getActive).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(mockCaptureException).toHaveBeenCalledWith(error));
 		await act(async () => {
 			vi.advanceTimersByTime(2000);
 		});

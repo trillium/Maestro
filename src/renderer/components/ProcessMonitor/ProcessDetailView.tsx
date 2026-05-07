@@ -32,7 +32,7 @@ export function ProcessDetailView({ theme, detail, onBack, onClose }: ProcessDet
 	}, []);
 
 	const commandLine =
-		detail.command && detail.args
+		detail.command && detail.args && detail.args.length > 0
 			? `${detail.command} ${detail.args.join(' ')}`
 			: detail.command || 'N/A';
 

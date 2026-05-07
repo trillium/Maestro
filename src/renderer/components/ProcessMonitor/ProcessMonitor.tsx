@@ -93,8 +93,14 @@ export function ProcessMonitor(props: ProcessMonitorProps) {
 		refresh: data.refresh,
 	});
 
-	// Escape: close detail view when open, otherwise close the modal.
+	// Escape priority: KillConfirmDialog (handles its own Esc → onCancel) >
+	// detail view > modal close. The early return when killConfirm is open
+	// prevents this layer-stack handler from also closing the detail view or
+	// modal when the dialog's own onKeyDown is firing onCancel.
 	useModalLayer(MODAL_PRIORITIES.PROCESS_MONITOR, 'System Processes', () => {
+		if (killConfirm) {
+			return;
+		}
 		if (detailView) {
 			setDetailView(null);
 		} else {

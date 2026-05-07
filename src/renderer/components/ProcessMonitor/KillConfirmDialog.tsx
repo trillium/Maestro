@@ -67,7 +67,6 @@ export function KillConfirmDialog({
 						className="px-3 py-1.5 rounded text-sm flex items-center gap-2"
 						style={{ backgroundColor: theme.colors.error, color: 'white' }}
 						disabled={isKilling}
-						autoFocus
 					>
 						{isKilling ? (
 							<>

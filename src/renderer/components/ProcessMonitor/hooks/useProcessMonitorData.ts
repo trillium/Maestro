@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { logger } from '../../../utils/logger';
+import { captureException } from '../../../utils/sentry';
 import type { ActiveProcess } from '../types';
 
 const POLL_INTERVAL_MS = 2000;
@@ -23,6 +24,7 @@ export function useProcessMonitorData(): UseProcessMonitorDataResult {
 	const [isLoading, setIsLoading] = useState(true);
 	const [isRefreshing, setIsRefreshing] = useState(false);
 	const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+	const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	const fetchActiveProcesses = useCallback(async (showRefresh = false) => {
 		if (showRefresh) {
@@ -33,10 +35,17 @@ export function useProcessMonitorData(): UseProcessMonitorDataResult {
 			setActiveProcesses(processes);
 		} catch (error) {
 			logger.error('Failed to fetch active processes:', undefined, error);
+			captureException(error);
 		} finally {
 			setIsLoading(false);
 			if (showRefresh) {
-				setTimeout(() => setIsRefreshing(false), REFRESH_SPINNER_MIN_MS);
+				if (refreshTimeoutRef.current) {
+					clearTimeout(refreshTimeoutRef.current);
+				}
+				refreshTimeoutRef.current = setTimeout(() => {
+					setIsRefreshing(false);
+					refreshTimeoutRef.current = null;
+				}, REFRESH_SPINNER_MIN_MS);
 			}
 		}
 	}, []);
@@ -76,6 +85,10 @@ export function useProcessMonitorData(): UseProcessMonitorDataResult {
 
 		return () => {
 			stopPolling();
+			if (refreshTimeoutRef.current) {
+				clearTimeout(refreshTimeoutRef.current);
+				refreshTimeoutRef.current = null;
+			}
 			if (typeof document !== 'undefined') {
 				document.removeEventListener('visibilitychange', handleVisibilityChange);
 			}

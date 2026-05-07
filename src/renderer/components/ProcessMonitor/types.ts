@@ -49,7 +49,6 @@ export interface ProcessNode {
 	pid?: number;
 	processType?: ProcessTypeTag;
 	isAlive?: boolean;
-	expanded?: boolean;
 	children?: ProcessNode[];
 	toolType?: string;
 	cwd?: string;

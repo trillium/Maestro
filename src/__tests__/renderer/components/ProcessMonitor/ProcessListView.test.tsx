@@ -131,11 +131,14 @@ describe('ProcessListView', () => {
 	});
 
 	it('scrollIntoView fires when the selected node id changes', () => {
-		const scrollSpy = vi.fn();
-		Element.prototype.scrollIntoView = scrollSpy;
+		// vi.spyOn auto-restores the original prototype method via vi.restoreAllMocks().
+		const scrollSpy = vi
+			.spyOn(Element.prototype, 'scrollIntoView')
+			.mockImplementation(() => undefined);
 		const { rerender } = render(<ProcessListView {...baseProps} />);
 		scrollSpy.mockClear();
 		rerender(<ProcessListView {...baseProps} selectedNodeId="session-session-1" />);
 		expect(scrollSpy).toHaveBeenCalledTimes(1);
+		scrollSpy.mockRestore();
 	});
 });

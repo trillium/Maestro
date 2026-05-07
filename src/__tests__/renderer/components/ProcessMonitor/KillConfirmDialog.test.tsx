@@ -108,5 +108,9 @@ describe('KillConfirmDialog', () => {
 		);
 		expect(screen.getByText('Killing...')).toBeInTheDocument();
 		expect((screen.getByText('Cancel') as HTMLButtonElement).disabled).toBe(true);
+		// The confirm button renders the "Killing..." label inside it while killing.
+		const confirmButton = screen.getByText('Killing...').closest('button') as HTMLButtonElement;
+		expect(confirmButton).not.toBeNull();
+		expect(confirmButton.disabled).toBe(true);
 	});
 });

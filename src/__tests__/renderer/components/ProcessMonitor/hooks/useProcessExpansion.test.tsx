@@ -75,21 +75,9 @@ describe('useProcessExpansion', () => {
 	});
 
 	it('fully expands all depths on first load when no preference is stored', () => {
-		const { result } = renderHook(({ loading }) => useProcessExpansion(tree3, loading), {
-			initialProps: { loading: true },
-		});
-		act(() => {
-			// caller flips loading to false on next render
-		});
-		const { rerender } = renderHook(({ loading }) => useProcessExpansion(tree3, loading), {
-			initialProps: { loading: false },
-		});
-		// directly observe the first non-loading mount
-		void rerender;
-		void result;
-		const { result: r2 } = renderHook(() => useProcessExpansion(tree3, false));
-		expect(r2.current.expandedIds.has('g')).toBe(true);
-		expect(r2.current.expandedIds.has('s')).toBe(true);
+		const { result } = renderHook(() => useProcessExpansion(tree3, false));
+		expect(result.current.expandedIds.has('g')).toBe(true);
+		expect(result.current.expandedIds.has('s')).toBe(true);
 	});
 
 	it('toggleNode flips an id in/out of the expanded set', () => {
@@ -162,14 +150,17 @@ describe('useProcessExpansion', () => {
 	});
 
 	it('does not re-fire the initial-restore effect after the first run', () => {
-		const setItem = window.localStorage.setItem as ReturnType<typeof vi.fn>;
+		// The restore effect calls readStoredExpandedLevel() → localStorage.getItem.
+		// On the first non-loading render it reads once; subsequent renders should be
+		// guarded by hasExpandedInitially and read no further.
+		const getItem = window.localStorage.getItem as ReturnType<typeof vi.fn>;
 		const { rerender } = renderHook(({ tree }) => useProcessExpansion(tree, false), {
 			initialProps: { tree: tree3 },
 		});
-		const callsAfterInitial = setItem.mock.calls.length;
-		// Re-render with a fresh tree reference (simulates polling-driven memo recompute)
+		const callsAfterInitial = getItem.mock.calls.length;
+		// Re-render with a fresh tree reference (simulates polling-driven memo recompute).
 		const refreshed = JSON.parse(JSON.stringify(tree3)) as ProcessNode[];
 		rerender({ tree: refreshed });
-		expect(setItem.mock.calls.length).toBe(callsAfterInitial);
+		expect(getItem.mock.calls.length).toBe(callsAfterInitial);
 	});
 });
