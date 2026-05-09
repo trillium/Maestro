@@ -38,8 +38,8 @@ export function useAgentSshRemoteListener(): void {
 				// equals the new value (Zustand updates synchronously), so we'd
 				// have no way to distinguish a fresh attach from a duplicate
 				// event for the same remote — and would re-probe both cases.
-				const previousSshRemoteId = getSessions().find((s) => s.id === actualSessionId)
-					?.sshRemote?.id;
+				const previousSshRemoteId = getSessions().find((s) => s.id === actualSessionId)?.sshRemote
+					?.id;
 
 				setSessions((prev) =>
 					prev.map((s) => {
