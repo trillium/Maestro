@@ -86,59 +86,46 @@ export function useAgentThinkingListener(): void {
 										continue;
 									}
 
+									// Three log-update branches collapsed into one map call:
+									//   1. New thinking log when last log isn't thinking → append.
+									//   2. Continuation that combines cleanly → replace last log
+									//      with combined text.
+									//   3. Continuation that combined into malformed concatenated
+									//      tool names → replace last log with this chunk only
+									//      (drop the prior text rather than worsen the noise).
 									const lastLog = targetTab.logs[targetTab.logs.length - 1];
-									if (lastLog?.source === 'thinking') {
-										const combinedText = lastLog.text + bufferedContent;
-										if (isLikelyConcatenatedToolNames(combinedText)) {
-											logger.warn(
-												'[App] Detected malformed thinking content, replacing instead of appending'
-											);
-											updatedTabs = updatedTabs.map((tab) =>
-												tab.id === chunkTabId
-													? {
-															...tab,
-															logs: [
-																...tab.logs.slice(0, -1),
-																{
-																	...lastLog,
-																	text: bufferedContent,
-																},
-															],
-														}
-													: tab
-											);
-										} else {
-											updatedTabs = updatedTabs.map((tab) =>
-												tab.id === chunkTabId
-													? {
-															...tab,
-															logs: [
-																...tab.logs.slice(0, -1),
-																{
-																	...lastLog,
-																	text: combinedText,
-																},
-															],
-														}
-													: tab
-											);
-										}
-									} else {
+									const isContinuation = lastLog?.source === 'thinking';
+									const combinedText = isContinuation ? lastLog.text + bufferedContent : '';
+									const continuationIsMalformed =
+										isContinuation && isLikelyConcatenatedToolNames(combinedText);
+									if (continuationIsMalformed) {
+										logger.warn(
+											'[App] Detected malformed thinking content, replacing instead of appending'
+										);
+									}
+
+									let nextLogs: LogEntry[];
+									if (!isContinuation) {
 										const newLog: LogEntry = {
 											id: generateId(),
 											timestamp: Date.now(),
 											source: 'thinking',
 											text: bufferedContent,
 										};
-										updatedTabs = updatedTabs.map((tab) =>
-											tab.id === chunkTabId
-												? {
-														...tab,
-														logs: [...tab.logs, newLog],
-													}
-												: tab
-										);
+										nextLogs = [...targetTab.logs, newLog];
+									} else {
+										const replacementText = continuationIsMalformed
+											? bufferedContent
+											: combinedText;
+										nextLogs = [
+											...targetTab.logs.slice(0, -1),
+											{ ...lastLog, text: replacementText },
+										];
 									}
+
+									updatedTabs = updatedTabs.map((tab) =>
+										tab.id === chunkTabId ? { ...tab, logs: nextLogs } : tab
+									);
 								}
 
 								return updatedTabs === s.aiTabs ? s : { ...s, aiTabs: updatedTabs };

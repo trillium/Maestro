@@ -17,19 +17,31 @@ const mockProcess = {
 
 let originalRaf: typeof requestAnimationFrame;
 let originalCancelRaf: typeof cancelAnimationFrame;
-let scheduled: Array<() => void> = [];
+// Map id -> callback so cancelAnimationFrame can actually remove the queued
+// callback (matches real browser semantics). A vi.fn() stub here would let a
+// post-unmount flushRaf() still fire the callback, masking cleanup bugs.
+let scheduled: Map<number, () => void> = new Map();
+let nextRafId = 0;
+const cancelRafSpy = vi.fn();
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	cancelRafSpy.mockClear();
 	handler = undefined;
-	scheduled = [];
+	scheduled = new Map();
+	nextRafId = 0;
 	originalRaf = global.requestAnimationFrame;
 	originalCancelRaf = global.cancelAnimationFrame;
 	global.requestAnimationFrame = ((cb: FrameRequestCallback) => {
-		scheduled.push(() => cb(performance.now()));
-		return scheduled.length;
+		nextRafId += 1;
+		const id = nextRafId;
+		scheduled.set(id, () => cb(performance.now()));
+		return id;
 	}) as any;
-	global.cancelAnimationFrame = vi.fn() as any;
+	global.cancelAnimationFrame = ((id: number) => {
+		cancelRafSpy(id);
+		scheduled.delete(id);
+	}) as any;
 
 	useSessionStore.setState({
 		sessions: [],
@@ -47,8 +59,8 @@ afterEach(() => {
 });
 
 function flushRaf() {
-	const queued = scheduled.slice();
-	scheduled = [];
+	const queued = Array.from(scheduled.values());
+	scheduled.clear();
 	queued.forEach((cb) => cb());
 }
 
@@ -92,15 +104,25 @@ describe('useAgentThinkingListener', () => {
 		expect(useSessionStore.getState().sessions[0].aiTabs[0].logs).toHaveLength(0);
 	});
 
-	it('cancels pending RAF on unmount', () => {
+	it('cancels pending RAF on unmount and post-unmount flushRaf is a no-op', () => {
+		// First mount with no events scheduled — nothing to cancel.
 		renderHook(() => useAgentThinkingListener()).unmount();
-		expect(global.cancelAnimationFrame).not.toHaveBeenCalled();
+		expect(cancelRafSpy).not.toHaveBeenCalled();
+
+		// Second mount: schedule a RAF, unmount, then assert flushing the RAF
+		// queue does NOT invoke the previously scheduled callback (it was
+		// cancelled and removed from the queue).
+		const tab = createMockAITab({ id: 'tab-1', showThinking: 'on' });
+		const session = createMockSession({ id: 'sess-1', aiTabs: [tab] });
+		useSessionStore.setState({ sessions: [session] } as any);
 
 		const { unmount } = renderHook(() => useAgentThinkingListener());
 		handler!('sess-1-ai-tab-1', 'data');
-		// RAF is scheduled internally; unmount should cancel it.
 		unmount();
-		expect(global.cancelAnimationFrame).toHaveBeenCalled();
+		expect(cancelRafSpy).toHaveBeenCalled();
+
+		flushRaf();
+		expect(useSessionStore.getState().sessions[0].aiTabs[0].logs).toHaveLength(0);
 	});
 
 	it('ignores non-AI session ids', () => {

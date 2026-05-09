@@ -231,7 +231,7 @@ describe('runExitSynopsis', () => {
 		);
 	});
 
-	it('skips tab name persistence for UUID-prefix names', async () => {
+	it('skips tab name persistence for UPPERCASE UUID-prefix names (the auto-generated fallback)', async () => {
 		const deps = makeDeps();
 		deps.spawn.mockResolvedValue({ success: true, response: 'r' });
 		vi.mocked(parseSynopsis).mockReturnValue({
@@ -243,6 +243,28 @@ describe('runExitSynopsis', () => {
 		await runExitSynopsis(makeSynopsisData({ tabName: 'AB12CD34' }), deps);
 
 		expect((window as any).maestro.claude.updateSessionName).not.toHaveBeenCalled();
+	});
+
+	it('PERSISTS lowercase 8-hex tab names (real user-typed names, not the fallback)', async () => {
+		// Pins the case-sensitive regex: the fallback is always uppercase
+		// (`agentSessionId.substring(0, 8).toUpperCase()` in useAgentExitListener),
+		// so a lowercase 8-hex tabName can only have come from the user typing it
+		// and must be persisted as a real custom name.
+		const deps = makeDeps();
+		deps.spawn.mockResolvedValue({ success: true, response: 'r' });
+		vi.mocked(parseSynopsis).mockReturnValue({
+			shortSummary: 's',
+			fullSynopsis: 'f',
+			nothingToReport: false,
+		} as any);
+
+		await runExitSynopsis(makeSynopsisData({ tabName: 'ab12cd34' }), deps);
+
+		expect((window as any).maestro.claude.updateSessionName).toHaveBeenCalledWith(
+			'/cwd',
+			'agent-1',
+			'ab12cd34'
+		);
 	});
 
 	it('swallows errors thrown by spawn', async () => {

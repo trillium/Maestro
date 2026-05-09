@@ -17,6 +17,15 @@ import {
 } from '../../../utils/contextUsage';
 import type { BatchedUpdater } from './types';
 
+/**
+ * When the agent doesn't report a contextPercentage and we have to estimate,
+ * keep the estimate this many percentage points below the configured yellow
+ * warning threshold so an extrapolated value never trips the warning UI on
+ * its own — the user sees yellow only when the agent's reported usage
+ * crosses the bar, not when our heuristic does.
+ */
+const ESTIMATED_USAGE_YELLOW_GAP_PCT = 5;
+
 export interface UseAgentUsageListenerDeps {
 	batchedUpdater: BatchedUpdater;
 	contextWarningYellowThreshold: number;
@@ -58,7 +67,7 @@ export function useAgentUsageListener(deps: UseAgentUsageListenerDeps): void {
 						effectiveWindow
 					);
 					const yellowThreshold = deps.contextWarningYellowThreshold;
-					const maxEstimate = yellowThreshold - 5;
+					const maxEstimate = yellowThreshold - ESTIMATED_USAGE_YELLOW_GAP_PCT;
 					deps.batchedUpdater.updateContextUsage(actualSessionId, Math.min(estimated, maxEstimate));
 				}
 			}

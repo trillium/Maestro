@@ -13,7 +13,6 @@ import { useEffect } from 'react';
 import { useSessionStore } from '../../../stores/sessionStore';
 import { REGEX_AI_TAB } from '../../../utils/sessionIdParser';
 import { gitService } from '../../../services/git';
-import { logger } from '../../../utils/logger';
 
 export function useAgentSshRemoteListener(): void {
 	useEffect(() => {
@@ -52,37 +51,35 @@ export function useAgentSshRemoteListener(): void {
 					const session = getSessions().find((s) => s.id === actualSessionId);
 					if (session && !session.isGitRepo) {
 						const remoteCwd = session.sessionSshRemoteConfig?.workingDirOverride || session.cwd;
+						// gitService.isRepo / getBranches / getTags route through
+						// `createIpcMethod`, which already swallows IPC failures,
+						// reports them to Sentry, and returns the configured
+						// default value. Wrapping with another try/catch here
+						// would silently absorb any genuine programmer error in
+						// this code path, so we leave them propagating.
 						void (async () => {
-							try {
-								const isGitRepo = await gitService.isRepo(remoteCwd, sshRemote.id);
-								if (isGitRepo) {
-									const [gitBranches, gitTags] = await Promise.all([
-										gitService.getBranches(remoteCwd, sshRemote.id),
-										gitService.getTags(remoteCwd, sshRemote.id),
-									]);
-									const gitRefsCacheTime = Date.now();
+							const isGitRepo = await gitService.isRepo(remoteCwd, sshRemote.id);
+							if (!isGitRepo) return;
 
-									setSessions((prev) =>
-										prev.map((s) => {
-											if (s.id !== actualSessionId) return s;
-											if (s.isGitRepo) return s;
-											return {
-												...s,
-												isGitRepo: true,
-												gitBranches,
-												gitTags,
-												gitRefsCacheTime,
-											};
-										})
-									);
-								}
-							} catch (err) {
-								logger.error(
-									`[SSH] Failed to check git repo status for ${actualSessionId}:`,
-									undefined,
-									err
-								);
-							}
+							const [gitBranches, gitTags] = await Promise.all([
+								gitService.getBranches(remoteCwd, sshRemote.id),
+								gitService.getTags(remoteCwd, sshRemote.id),
+							]);
+							const gitRefsCacheTime = Date.now();
+
+							setSessions((prev) =>
+								prev.map((s) => {
+									if (s.id !== actualSessionId) return s;
+									if (s.isGitRepo) return s;
+									return {
+										...s,
+										isGitRepo: true,
+										gitBranches,
+										gitTags,
+										gitRefsCacheTime,
+									};
+								})
+							);
 						})();
 					}
 				}

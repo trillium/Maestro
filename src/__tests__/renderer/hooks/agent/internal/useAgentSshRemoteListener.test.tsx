@@ -52,9 +52,10 @@ describe('useAgentSshRemoteListener', () => {
 		expect(updated.sshRemoteId).toBe('r-1');
 	});
 
-	it('does NOT re-fetch when same remote already attached', async () => {
+	it('does NOT re-fetch when same remote already attached and session is already a git repo', async () => {
 		const session = createMockSession({
 			id: 'sess-1',
+			isGitRepo: true,
 			sshRemote: { id: 'r-1', name: 'r', host: 'h' } as any,
 			sshRemoteId: 'r-1',
 		});
@@ -62,10 +63,14 @@ describe('useAgentSshRemoteListener', () => {
 
 		renderHook(() => useAgentSshRemoteListener());
 		handler!('sess-1', { id: 'r-1', name: 'r', host: 'h' });
-		await Promise.resolve();
+		await new Promise((r) => setTimeout(r, 0));
+		await new Promise((r) => setTimeout(r, 0));
 
-		// Same remote — store value unchanged so no follow-up git probe should be needed.
-		// But the probe DOES fire if !session.isGitRepo. So set isGitRepo=true to assert no probe.
+		// Probe is gated off by session.isGitRepo; nothing to refetch when the
+		// remote already has its branches/tags cached.
+		expect(gitService.isRepo).not.toHaveBeenCalled();
+		expect(gitService.getBranches).not.toHaveBeenCalled();
+		expect(gitService.getTags).not.toHaveBeenCalled();
 	});
 
 	it('triggers git probe when new remote attaches and session is not yet a git repo', async () => {

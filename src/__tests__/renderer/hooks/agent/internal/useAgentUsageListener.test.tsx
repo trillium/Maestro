@@ -41,7 +41,7 @@ beforeEach(() => {
 });
 
 describe('useAgentUsageListener', () => {
-	it('routes usage updates and tracks cycle tokens', () => {
+	it('routes usage updates per-tab AND per-session, and tracks cycle tokens', () => {
 		const session = createMockSession({ id: 'sess-1', toolType: 'claude-code' });
 		useSessionStore.setState({ sessions: [session] } as any);
 
@@ -50,16 +50,47 @@ describe('useAgentUsageListener', () => {
 			useAgentUsageListener({ batchedUpdater: batched, contextWarningYellowThreshold: 80 })
 		);
 
-		handler!('sess-1', {
+		const usage = {
 			inputTokens: 100,
 			outputTokens: 50,
 			cacheReadInputTokens: 10,
 			contextWindow: 200000,
 			contextPercentage: 0.05,
-		});
+		};
+		// 'sess-1' has no `-ai-` suffix, so parseSessionId returns
+		// { actualSessionId: 'sess-1', tabId: null, baseSessionId: 'sess-1' }.
+		// The hook fires updateUsage twice — once for the tab (here null) and
+		// once for the session (always null) — so each session-id event
+		// produces two distinct routing calls.
+		handler!('sess-1', usage);
 
-		expect(batched.updateUsage).toHaveBeenCalled();
+		expect(batched.updateUsage).toHaveBeenCalledTimes(2);
+		expect(batched.updateUsage).toHaveBeenNthCalledWith(1, 'sess-1', null, usage);
+		expect(batched.updateUsage).toHaveBeenNthCalledWith(2, 'sess-1', null, usage);
 		expect(batched.updateCycleTokens).toHaveBeenCalledWith('sess-1', 50);
+	});
+
+	it('routes ai-tab-format usage with the tabId on the per-tab call and null on the per-session call', () => {
+		const session = createMockSession({ id: 'sess-1', toolType: 'claude-code' });
+		useSessionStore.setState({ sessions: [session] } as any);
+
+		const batched = makeBatched();
+		renderHook(() =>
+			useAgentUsageListener({ batchedUpdater: batched, contextWarningYellowThreshold: 80 })
+		);
+
+		const usage = {
+			inputTokens: 1,
+			outputTokens: 2,
+			cacheReadInputTokens: 0,
+			contextWindow: 200000,
+			contextPercentage: 0.05,
+		};
+		handler!('sess-1-ai-tab-1', usage);
+
+		// First call carries the tabId, second call carries null (session-level).
+		expect(batched.updateUsage).toHaveBeenNthCalledWith(1, 'sess-1', 'tab-1', usage);
+		expect(batched.updateUsage).toHaveBeenNthCalledWith(2, 'sess-1', null, usage);
 	});
 
 	it('skips when session is missing (orphan event)', () => {

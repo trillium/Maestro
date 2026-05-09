@@ -83,11 +83,10 @@ export function useAgentExitListener(deps: UseAgentExitListenerDeps): void {
 				isFromAi = false;
 			}
 
-			if (isFromAi && tabIdFromSession) {
-				deps.activeHiddenToolRef.current?.delete(`${actualSessionId}:${tabIdFromSession}`);
-			}
-
-			// SAFETY CHECK: Verify the process is actually gone
+			// SAFETY CHECK: Verify the process is actually gone before mutating
+			// any per-tab state. We hold off on clearing `activeHiddenToolRef`
+			// until after this guard so a false-positive exit event doesn't
+			// drop bookkeeping for a process that's still alive.
 			if (isFromAi) {
 				try {
 					const activeProcesses = await window.maestro.process.getActiveProcesses();
@@ -102,6 +101,10 @@ export function useAgentExitListener(deps: UseAgentExitListenerDeps): void {
 				} catch (error) {
 					logger.error('[onExit] Failed to verify process status:', undefined, error);
 				}
+			}
+
+			if (isFromAi && tabIdFromSession) {
+				deps.activeHiddenToolRef.current?.delete(`${actualSessionId}:${tabIdFromSession}`);
 			}
 
 			let toastData: {

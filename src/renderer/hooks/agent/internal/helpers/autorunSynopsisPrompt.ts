@@ -17,7 +17,10 @@ export async function loadAgentListenersPrompts(force = false): Promise<void> {
 	if (!result.success) {
 		throw new Error(`Failed to load autorun-synopsis prompt: ${result.error}`);
 	}
-	cachedAutorunSynopsisPrompt = result.content!;
+	// `content` is typed as optional on the IPC response. Use a string fallback
+	// so `cachedAutorunSynopsisPrompt` always satisfies the `string | null`
+	// type contract (and `getAutorunSynopsisPrompt`'s `string` return type).
+	cachedAutorunSynopsisPrompt = result.content ?? '';
 	agentListenersPromptsLoaded = true;
 }
 
