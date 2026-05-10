@@ -42,6 +42,11 @@ export interface AutoRunSetupSheetProps {
 	 * document when not provided.
 	 */
 	currentDocument?: string | null;
+	/**
+	 * Open the Playbook Exchange sheet. When omitted, the entry point is
+	 * hidden — keeps tests / older callers working without the marketplace.
+	 */
+	onOpenMarketplace?: () => void;
 }
 
 /**
@@ -62,6 +67,7 @@ export function AutoRunSetupSheet({
 	sendRequest,
 	send,
 	currentDocument,
+	onOpenMarketplace,
 }: AutoRunSetupSheetProps) {
 	const colors = useThemeColors();
 	const [selectedFiles, setSelectedFiles] = useState<Set<string>>(() => {
@@ -601,6 +607,79 @@ export function AutoRunSetupSheet({
 						padding: '0 16px',
 					}}
 				>
+					{/* Playbook Exchange entry point */}
+					{onOpenMarketplace && (
+						<div style={{ marginBottom: '20px' }}>
+							<button
+								onClick={() => {
+									triggerHaptic(HAPTIC_PATTERNS.tap);
+									onOpenMarketplace();
+								}}
+								style={{
+									display: 'flex',
+									alignItems: 'center',
+									justifyContent: 'space-between',
+									width: '100%',
+									padding: '12px 14px',
+									borderRadius: '10px',
+									border: `1px solid ${colors.accent}`,
+									backgroundColor: `${colors.accent}10`,
+									color: colors.textMain,
+									cursor: 'pointer',
+									touchAction: 'manipulation',
+									WebkitTapHighlightColor: 'transparent',
+									// Replace the default outline with a focus ring
+									// rendered on :focus-visible so keyboard users
+									// retain a visible focus indicator.
+									outline: 'none',
+									boxShadow: 'none',
+									transition: 'box-shadow 0.15s ease',
+									minHeight: '44px',
+								}}
+								onFocus={(e) => {
+									e.currentTarget.style.boxShadow = `0 0 0 2px ${colors.accent}`;
+								}}
+								onBlur={(e) => {
+									e.currentTarget.style.boxShadow = 'none';
+								}}
+								aria-label="Browse Playbook Exchange"
+							>
+								<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+									<svg
+										width="18"
+										height="18"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke={colors.accent}
+										strokeWidth="2"
+										strokeLinecap="round"
+										strokeLinejoin="round"
+									>
+										<rect x="3" y="3" width="7" height="7" rx="1" />
+										<rect x="14" y="3" width="7" height="7" rx="1" />
+										<rect x="14" y="14" width="7" height="7" rx="1" />
+										<rect x="3" y="14" width="7" height="7" rx="1" />
+									</svg>
+									<span style={{ fontSize: '14px', fontWeight: 500 }}>
+										Browse Playbook Exchange
+									</span>
+								</div>
+								<svg
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke={colors.textDim}
+									strokeWidth="2"
+									strokeLinecap="round"
+									strokeLinejoin="round"
+								>
+									<polyline points="9 18 15 12 9 6" />
+								</svg>
+							</button>
+						</div>
+					)}
+
 					{/* Playbooks section — collapsible. Surfaces saved configurations
 					    so the mobile launch flow has parity with the desktop's playbook
 					    list (load / save / update / delete). */}

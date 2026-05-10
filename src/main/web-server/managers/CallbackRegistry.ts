@@ -96,6 +96,12 @@ import type {
 	NotifyCenterFlashCallback,
 	NotifyToastParams,
 	NotifyCenterFlashParams,
+	GetMarketplaceManifestCallback,
+	GetMarketplaceDocumentCallback,
+	GetMarketplaceReadmeCallback,
+	ImportMarketplacePlaybookCallback,
+	MarketplaceManifestResult,
+	MarketplaceImportResult,
 	ListDesktopSessionsCallback,
 	GetSessionHistoryCallback,
 	GetSessionHistoryOptions,
@@ -179,6 +185,10 @@ export interface WebServerCallbacks {
 	generateDirectorNotesSynopsis: GenerateDirectorNotesSynopsisCallback | null;
 	notifyToast: NotifyToastCallback | null;
 	notifyCenterFlash: NotifyCenterFlashCallback | null;
+	getMarketplaceManifest: GetMarketplaceManifestCallback | null;
+	getMarketplaceDocument: GetMarketplaceDocumentCallback | null;
+	getMarketplaceReadme: GetMarketplaceReadmeCallback | null;
+	importMarketplacePlaybook: ImportMarketplacePlaybookCallback | null;
 	listDesktopSessions: ListDesktopSessionsCallback | null;
 	getSessionHistory: GetSessionHistoryCallback | null;
 }
@@ -255,6 +265,10 @@ export class CallbackRegistry {
 		generateDirectorNotesSynopsis: null,
 		notifyToast: null,
 		notifyCenterFlash: null,
+		getMarketplaceManifest: null,
+		getMarketplaceDocument: null,
+		getMarketplaceReadme: null,
+		importMarketplacePlaybook: null,
 		listDesktopSessions: null,
 		getSessionHistory: null,
 	};
@@ -700,6 +714,37 @@ export class CallbackRegistry {
 		return this.callbacks.notifyCenterFlash(params);
 	}
 
+	async getMarketplaceManifest(options?: {
+		refresh?: boolean;
+	}): Promise<MarketplaceManifestResult | null> {
+		if (!this.callbacks.getMarketplaceManifest) return null;
+		return this.callbacks.getMarketplaceManifest(options);
+	}
+
+	async getMarketplaceDocument(
+		playbookPath: string,
+		filename: string
+	): Promise<{ content: string } | null> {
+		if (!this.callbacks.getMarketplaceDocument) return null;
+		return this.callbacks.getMarketplaceDocument(playbookPath, filename);
+	}
+
+	async getMarketplaceReadme(playbookPath: string): Promise<{ content: string | null } | null> {
+		if (!this.callbacks.getMarketplaceReadme) return null;
+		return this.callbacks.getMarketplaceReadme(playbookPath);
+	}
+
+	async importMarketplacePlaybook(
+		sessionId: string,
+		playbookId: string,
+		targetFolderName: string
+	): Promise<MarketplaceImportResult> {
+		if (!this.callbacks.importMarketplacePlaybook) {
+			return { success: false, error: 'Marketplace import not configured' };
+		}
+		return this.callbacks.importMarketplacePlaybook(sessionId, playbookId, targetFolderName);
+	}
+
 	listDesktopSessions(): DesktopSessionEntry[] {
 		return this.callbacks.listDesktopSessions?.() ?? [];
 	}
@@ -997,6 +1042,22 @@ export class CallbackRegistry {
 
 	setNotifyCenterFlashCallback(callback: NotifyCenterFlashCallback): void {
 		this.callbacks.notifyCenterFlash = callback;
+	}
+
+	setGetMarketplaceManifestCallback(callback: GetMarketplaceManifestCallback): void {
+		this.callbacks.getMarketplaceManifest = callback;
+	}
+
+	setGetMarketplaceDocumentCallback(callback: GetMarketplaceDocumentCallback): void {
+		this.callbacks.getMarketplaceDocument = callback;
+	}
+
+	setGetMarketplaceReadmeCallback(callback: GetMarketplaceReadmeCallback): void {
+		this.callbacks.getMarketplaceReadme = callback;
+	}
+
+	setImportMarketplacePlaybookCallback(callback: ImportMarketplacePlaybookCallback): void {
+		this.callbacks.importMarketplacePlaybook = callback;
 	}
 
 	setListDesktopSessionsCallback(callback: ListDesktopSessionsCallback): void {

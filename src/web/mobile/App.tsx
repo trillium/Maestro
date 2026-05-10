@@ -45,6 +45,7 @@ import { AutoRunIndicator } from './AutoRunIndicator';
 import { AutoRunPanel } from './AutoRunPanel';
 import { AutoRunDocumentViewer } from './AutoRunDocumentViewer';
 import { AutoRunSetupSheet } from './AutoRunSetupSheet';
+import { MarketplaceSheet } from './MarketplaceSheet';
 import { FolderPickerSheet } from './FolderPickerSheet';
 import { NotificationSettingsSheet } from './NotificationSettingsSheet';
 import { SettingsPanel } from './SettingsPanel';
@@ -1157,6 +1158,7 @@ export default function MobileApp() {
 	const [showAutoRunPanel, setShowAutoRunPanel] = useState(false);
 	const [autoRunViewingDoc, setAutoRunViewingDoc] = useState<string | null>(null);
 	const [showAutoRunSetup, setShowAutoRunSetup] = useState(false);
+	const [showMarketplaceSheet, setShowMarketplaceSheet] = useState(false);
 
 	// Notification settings sheet state
 	const [showNotificationSettings, setShowNotificationSettings] = useState(false);
@@ -1533,6 +1535,7 @@ export default function MobileApp() {
 		setShowAutoRunPanel(false);
 		setAutoRunViewingDoc(null);
 		setShowAutoRunSetup(false);
+		setShowMarketplaceSheet(false);
 	}, []);
 
 	const handleAutoRunOpenDocument = useCallback((filename: string) => {
@@ -1554,6 +1557,25 @@ export default function MobileApp() {
 	const handleAutoRunCloseSetup = useCallback(() => {
 		setShowAutoRunSetup(false);
 	}, []);
+
+	// Playbook Exchange (marketplace) handlers
+	const handleOpenMarketplaceSheet = useCallback(() => {
+		setShowMarketplaceSheet(true);
+		triggerHaptic(HAPTIC_PATTERNS.tap);
+	}, []);
+
+	const handleCloseMarketplaceSheet = useCallback(() => {
+		setShowMarketplaceSheet(false);
+	}, []);
+
+	const handleMarketplaceImported = useCallback(() => {
+		// Refresh AutoRun document list so newly imported docs appear in the
+		// setup sheet's selector. The MarketplaceSheet has already closed
+		// itself by the time this fires.
+		if (activeSessionId) {
+			loadAutoRunDocuments(activeSessionId);
+		}
+	}, [activeSessionId, loadAutoRunDocuments]);
 
 	const handleAutoRunOpenFolderPicker = useCallback(() => {
 		setShowFolderPicker(true);
@@ -3335,6 +3357,17 @@ export default function MobileApp() {
 					sendRequest={sendRequest}
 					send={send}
 					currentDocument={autoRunSelectedDoc}
+					onOpenMarketplace={handleOpenMarketplaceSheet}
+				/>
+			)}
+
+			{/* Playbook Exchange (marketplace) sheet - sits above AutoRun setup */}
+			{activeSessionId && showMarketplaceSheet && (
+				<MarketplaceSheet
+					sessionId={activeSessionId}
+					sendRequest={sendRequest}
+					onImported={handleMarketplaceImported}
+					onClose={handleCloseMarketplaceSheet}
 				/>
 			)}
 

@@ -128,6 +128,10 @@ import type {
 	GenerateDirectorNotesSynopsisCallback,
 	NotifyToastCallback,
 	NotifyCenterFlashCallback,
+	GetMarketplaceManifestCallback,
+	GetMarketplaceDocumentCallback,
+	GetMarketplaceReadmeCallback,
+	ImportMarketplacePlaybookCallback,
 	ListDesktopSessionsCallback,
 	GetSessionHistoryCallback,
 } from './types';
@@ -654,6 +658,22 @@ export class WebServer {
 		this.callbackRegistry.setNotifyCenterFlashCallback(callback);
 	}
 
+	setGetMarketplaceManifestCallback(callback: GetMarketplaceManifestCallback): void {
+		this.callbackRegistry.setGetMarketplaceManifestCallback(callback);
+	}
+
+	setGetMarketplaceDocumentCallback(callback: GetMarketplaceDocumentCallback): void {
+		this.callbackRegistry.setGetMarketplaceDocumentCallback(callback);
+	}
+
+	setGetMarketplaceReadmeCallback(callback: GetMarketplaceReadmeCallback): void {
+		this.callbackRegistry.setGetMarketplaceReadmeCallback(callback);
+	}
+
+	setImportMarketplacePlaybookCallback(callback: ImportMarketplacePlaybookCallback): void {
+		this.callbackRegistry.setImportMarketplacePlaybookCallback(callback);
+	}
+
 	setListDesktopSessionsCallback(callback: ListDesktopSessionsCallback): void {
 		this.callbackRegistry.setListDesktopSessionsCallback(callback);
 	}
@@ -976,6 +996,17 @@ export class WebServer {
 				this.killTerminalForWebCallback?.(sessionId) ?? false,
 			notifyToast: async (params) => this.callbackRegistry.notifyToast(params),
 			notifyCenterFlash: async (params) => this.callbackRegistry.notifyCenterFlash(params),
+			getMarketplaceManifest: async (options) =>
+				this.callbackRegistry.getMarketplaceManifest(options),
+			getMarketplaceDocument: async (playbookPath: string, filename: string) =>
+				this.callbackRegistry.getMarketplaceDocument(playbookPath, filename),
+			getMarketplaceReadme: async (playbookPath: string) =>
+				this.callbackRegistry.getMarketplaceReadme(playbookPath),
+			importMarketplacePlaybook: async (
+				sessionId: string,
+				playbookId: string,
+				targetFolderName: string
+			) => this.callbackRegistry.importMarketplacePlaybook(sessionId, playbookId, targetFolderName),
 			listDesktopSessions: () => this.callbackRegistry.listDesktopSessions(),
 			getSessionHistory: (tabId, options) =>
 				this.callbackRegistry.getSessionHistory(tabId, options),
