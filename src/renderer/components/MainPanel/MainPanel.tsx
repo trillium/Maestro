@@ -962,6 +962,7 @@ export const MainPanel = React.memo(
 							onToggleTabSaveToHistory={props.onToggleTabSaveToHistory}
 							onToggleTabShowThinking={props.onToggleTabShowThinking}
 							onWizardComplete={props.onWizardComplete}
+							onWizardCompleteAndStartAutoRun={props.onWizardCompleteAndStartAutoRun}
 							onWizardDocumentSelect={props.onWizardDocumentSelect}
 							onWizardContentChange={props.onWizardContentChange}
 							onWizardLetsGo={props.onWizardLetsGo}

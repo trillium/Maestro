@@ -219,6 +219,7 @@ export interface MainPanelContentProps {
 
 	// Wizard callbacks
 	onWizardComplete?: () => void;
+	onWizardCompleteAndStartAutoRun?: () => void;
 	onWizardDocumentSelect?: (index: number) => void;
 	onWizardContentChange?: (content: string, docIndex: number) => void;
 	onWizardLetsGo?: () => void;
@@ -370,6 +371,7 @@ export const MainPanelContent = React.memo(function MainPanelContent(props: Main
 		onToggleTabSaveToHistory,
 		onToggleTabShowThinking,
 		onWizardComplete,
+		onWizardCompleteAndStartAutoRun,
 		onWizardDocumentSelect,
 		onWizardContentChange,
 		onWizardLetsGo,
@@ -508,6 +510,7 @@ export const MainPanelContent = React.memo(function MainPanelContent(props: Main
 								isGenerating={activeTab?.wizardState?.isGeneratingDocs ?? false}
 								streamingContent={activeTab?.wizardState?.streamingContent}
 								onComplete={onWizardComplete || (() => {})}
+								onCompleteAndStartAutoRun={onWizardCompleteAndStartAutoRun}
 								onDocumentSelect={onWizardDocumentSelect || (() => {})}
 								folderPath={
 									activeTab?.wizardState?.subfolderPath ?? activeTab?.wizardState?.autoRunFolderPath
@@ -518,6 +521,7 @@ export const MainPanelContent = React.memo(function MainPanelContent(props: Main
 								totalDocuments={activeTab?.wizardState?.totalDocuments}
 								onCancel={onWizardCancelGeneration}
 								subfolderName={activeTab?.wizardState?.subfolderName}
+								startedAt={activeTab?.wizardState?.docGenerationStartedAt}
 							/>
 						) : activeSession.inputMode === 'ai' && activeTab?.wizardState?.isActive ? (
 							<WizardConversationView

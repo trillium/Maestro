@@ -1439,6 +1439,7 @@ function MaestroConsoleInner() {
 		handleLaunchWizardTab,
 		isWizardActiveForCurrentTab,
 		handleWizardComplete,
+		handleWizardCompleteAndStartAutoRun,
 		handleWizardLetsGo,
 		handleToggleWizardShowThinking,
 		handleWizardLaunchSession,
@@ -2480,6 +2481,7 @@ function MaestroConsoleInner() {
 
 		// Complex wizard handlers
 		onWizardComplete: handleWizardComplete,
+		onWizardCompleteAndStartAutoRun: handleWizardCompleteAndStartAutoRun,
 		onWizardLetsGo: handleWizardLetsGo,
 		onWizardRetry: retryInlineWizardMessage,
 		onWizardClearError: clearInlineWizardError,
