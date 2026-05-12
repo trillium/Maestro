@@ -10,6 +10,7 @@ import { WebServer } from './web-server';
 import { AgentDetector } from './agents';
 import { getAgentDefinition } from './agents/definitions';
 import { DEFAULT_CONTEXT_WINDOWS, FALLBACK_CONTEXT_WINDOW } from '../shared/agentConstants';
+import { shouldDropSentryEvent } from '../shared/sentryFilters';
 import type { AgentId } from '../shared/agentIds';
 import { CueEngine } from './cue/cue-engine';
 import { configureCueTelemetry } from './cue/cue-telemetry';
@@ -242,23 +243,12 @@ if (crashReportingEnabled && !isDevelopment) {
 				ipcMode: IPCMode.Classic,
 				// Only send errors, not performance data
 				tracesSampleRate: 0,
-				// Filter out sensitive data
+				// Filter out sensitive data + unfixable OS / Chromium / user-env noise.
+				// See src/shared/sentryFilters.ts for the full classification.
 				beforeSend(event) {
-					// Drop unfixable Windows drive-root noise: EBUSY/EPERM on always-locked
-					// system files (pagefile.sys, hiberfil.sys, DumpStack.log.tmp, ...) that
-					// show up when users point watchers at C:\ or similar. See MAESTRO-G5/G6.
-					const firstException = event.exception?.values?.[0];
-					const exceptionValue = firstException?.value ?? '';
-					if (
-						/^(EBUSY|EPERM): [^,]+, lstat /i.test(exceptionValue) &&
-						/(pagefile\.sys|hiberfil\.sys|swapfile\.sys|DumpStack\.log|System Volume Information)/i.test(
-							exceptionValue
-						)
-					) {
+					if (shouldDropSentryEvent(event)) {
 						return null;
 					}
-
-					// Remove any potential sensitive data from the event
 					if (event.user) {
 						delete event.user.ip_address;
 						delete event.user.email;
@@ -819,11 +809,17 @@ app.whenReady().then(async () => {
 				// Cmd+Shift+Z as NSMenu-level accelerators that intercept the
 				// keystroke at the OS layer before the renderer can see it
 				// (same trap as `role: 'close'` eating Cmd+W — see the note
-				// above the appMenu block). Native text inputs still handle
-				// Cmd+Z internally via the AppKit responder chain, so removing
-				// the menu items has no effect on text-field undo or
-				// copy/paste; it frees Cmd+Z for the image annotator's
-				// stroke-undo handler.
+				// above the appMenu block). Removing them frees Cmd+Z for the
+				// image annotator's stroke-undo handler.
+				//
+				// Side effect: Chromium in Electron relies on the Edit > Undo
+				// menu role to deliver Cmd+Z to focused textareas/inputs on
+				// macOS, so without it native text-field undo silently does
+				// nothing. The renderer-side `useTextEditorUndo` hook
+				// (src/renderer/hooks/keyboard/useTextEditorUndo.ts) restores
+				// that behavior by calling `document.execCommand('undo')` on
+				// text targets. The annotator's own Cmd+Z listener bails out
+				// for text targets, so the two paths don't conflict.
 				label: 'Edit',
 				submenu: [
 					{ role: 'cut' },

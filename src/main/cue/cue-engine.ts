@@ -62,6 +62,8 @@ import { createCueMetrics, type CueMetrics, type CueMetricsCollector } from './c
 import { createCueQueuePersistence, type CueQueuePersistence } from './cue-queue-persistence';
 import { countCueEvents, getRecentCueEvents, type CueEventRecord } from './cue-db';
 import { loadCueConfigDetailed } from './cue-yaml-loader';
+import { readCueConfigFile, writeCueConfigFile } from './config/cue-config-repository';
+import * as yaml from 'js-yaml';
 import { cueDebugLog } from '../../shared/cueDebug';
 import { captureException } from '../utils/sentry';
 import { recordRunCompleted as recordTelemetryRunCompleted } from './cue-telemetry';
@@ -709,6 +711,69 @@ export class CueEngine {
 	/** Returns the merged Cue settings from the first available session config */
 	getSettings() {
 		return this.queryService.getSettings();
+	}
+
+	/**
+	 * Persist updated global Cue settings to every known cue.yaml on disk and
+	 * refresh the in-memory session configs so the engine immediately reflects
+	 * the new values. Used by the Settings → Encore Features → Maestro Cue
+	 * panel, which autosaves on change without involving the pipeline editor.
+	 *
+	 * Strategy: read each unique session config root's raw YAML, swap only the
+	 * `settings:` block via js-yaml parse/dump (subscriptions, no_ancestor_fallback,
+	 * etc. are preserved verbatim from the parsed object — comments and exact
+	 * formatting are lost, same as the pipeline editor's save path).
+	 *
+	 * No-op safely when no sessions are registered (engine not yet bootstrapped):
+	 * in-memory settings remain at DEFAULT_CUE_SETTINGS and the next session's
+	 * cue.yaml load wins. The renderer warns the user when the call lands in
+	 * this state by inspecting the returned `writtenRoots` array.
+	 */
+	saveSettings(settings: import('./cue-types').CueSettings): { writtenRoots: string[] } {
+		// Dedupe by config root so two sessions sharing the same cue.yaml don't
+		// cause a double-write race. Prefer `configRoot` (config-from-ancestor
+		// case) over the session's own projectRoot.
+		const states = this.registry.snapshot();
+		const sessions = this.deps.getSessions();
+		const projectRootById = new Map(sessions.map((s) => [s.id, s.projectRoot]));
+		const roots = new Set<string>();
+		for (const [sessionId, state] of states) {
+			const root = state.configRoot ?? projectRootById.get(sessionId);
+			if (root) roots.add(root);
+		}
+
+		const writtenRoots: string[] = [];
+		for (const root of roots) {
+			try {
+				const file = readCueConfigFile(root);
+				if (!file) continue;
+				const parsed = (yaml.load(file.raw) ?? {}) as Record<string, unknown>;
+				const existingSettings = (parsed.settings ?? {}) as Record<string, unknown>;
+				parsed.settings = { ...existingSettings, ...settings };
+				const dumped = yaml.dump(parsed, {
+					indent: 2,
+					lineWidth: 120,
+					noRefs: true,
+					quotingType: "'",
+					forceQuotes: false,
+				});
+				writeCueConfigFile(root, dumped);
+				writtenRoots.push(root);
+			} catch (err) {
+				void captureException(err, {
+					operation: 'cue.saveSettings',
+					extra: { root },
+				});
+			}
+		}
+
+		// Mirror the new settings into in-memory state so getSettings() returns
+		// the updated values immediately (without waiting for a YAML re-read).
+		for (const state of states.values()) {
+			state.config.settings = { ...state.config.settings, ...settings };
+		}
+
+		return { writtenRoots };
 	}
 
 	/** Returns all sessions with their parsed subscriptions (for graph visualization) */
