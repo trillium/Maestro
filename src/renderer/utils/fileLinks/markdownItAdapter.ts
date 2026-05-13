@@ -116,8 +116,12 @@ function rewriteStandardLinks(
 function safeDecode(s: string): string {
 	try {
 		return decodeURIComponent(s);
-	} catch {
-		return s;
+	} catch (err) {
+		// Only swallow URIError (malformed percent-encoding, e.g. "%E0%A4%A").
+		// Any other error is unexpected and should surface — masking it would
+		// hide bugs (out-of-memory, polyfill regressions, etc.).
+		if (err instanceof URIError) return s;
+		throw err;
 	}
 }
 
@@ -140,8 +144,24 @@ function rewriteInlineWikiAndImageEmbeds(
 		if (token.type !== 'inline' || !token.children) continue;
 
 		const rewritten: ParserToken[] = [];
+		// Track nesting inside `<a>` so we don't rewrite the label text of an
+		// existing link (e.g. `[some src/x.ts text](url)`) — that would produce
+		// nested anchors, which is invalid HTML and breaks the parent link's
+		// click handling. The Rich-tier remarkFileLinks plugin already skips
+		// link descendants; this keeps Fast tier behavior in lockstep.
+		let inLink = 0;
 		for (const child of token.children) {
-			if (child.type !== 'text') {
+			if (child.type === 'link_open') {
+				inLink++;
+				rewritten.push(child);
+				continue;
+			}
+			if (child.type === 'link_close') {
+				inLink = Math.max(0, inLink - 1);
+				rewritten.push(child);
+				continue;
+			}
+			if (child.type !== 'text' || inLink > 0) {
 				rewritten.push(child);
 				continue;
 			}

@@ -52,20 +52,22 @@ export const PATH_PATTERN = new RegExp(
 /**
  * Absolute filesystem path: `/Users/name/Project/file.md`. Must end with
  * a recognized file extension. Lookahead allows whitespace, end-of-string,
- * or common punctuation as terminator.
+ * or common punctuation as terminator. Case-insensitive so `.MD` / `.Ts`
+ * still match the lowercase-only LINKABLE_EXTENSIONS list.
  */
 export const ABSOLUTE_PATH_PATTERN = new RegExp(
 	`\\/(?:[^/\\n]+\\/)+[^/\\n]+\\.(?:${LINKABLE_EXTENSIONS})(?=\\s|$|[.,;:!?\`'"\\)\\]}>])`,
-	'g'
+	'gi'
 );
 
 /**
  * Tilde-expanded path: `~/Documents/note.md`. Same shape as absolute path
  * but rooted at the user's home directory; resolution requires homeDir.
+ * Case-insensitive — see ABSOLUTE_PATH_PATTERN above.
  */
 export const TILDE_PATH_PATTERN = new RegExp(
 	`~\\/(?:[^\\s/]+\\/)*[^\\s/]+\\.(?:${LINKABLE_EXTENSIONS})(?=\\s|$|[.,;:!?\`'"\\)\\]}>])`,
-	'g'
+	'gi'
 );
 
 /** Anchored extension check for inline-code path validation. */

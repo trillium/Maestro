@@ -294,6 +294,38 @@ export const FilePreview = React.memo(
 			return file.content;
 		}, [file?.content, isMarkdown, isImage, isBinary, showFullContent]);
 
+		// Tier-aware search adapter, memoized so its identity only changes when
+		// the routing actually flips. useFilePreviewSearch lists searchAdapter
+		// in its effect dependency array, so an unstable identity would re-run
+		// the effect on every render — refs are stable so they don't belong in
+		// the deps even though the callbacks close over them.
+		//   Fast markdown  → markdownFast handle (block-virtualized hit map)
+		//   Fast text/code → textFast handle (page-virtualized hit map)
+		//   Giant any kind → GiantPreview handle (CM6 owns the search panel)
+		const searchAdapter = useMemo(() => {
+			if (previewTier === 'fast' && isMarkdown) {
+				return {
+					findHits: (q: string) => markdownFastRef.current?.findInContent(q) ?? [],
+					scrollToMatch: (m: { blockIndex: number }) => markdownFastRef.current?.scrollToMatch(m),
+				};
+			}
+			if (previewTier === 'fast' && !markdownEditMode && !isImage && !isBinary) {
+				return {
+					findHits: (q: string) => textFastRef.current?.findInContent(q) ?? [],
+					scrollToMatch: (m: { blockIndex: number }) => textFastRef.current?.scrollToMatch(m),
+				};
+			}
+			if (previewTier === 'giant' && !markdownEditMode && !isImage && !isBinary) {
+				return {
+					findHits: () => [],
+					scrollToMatch: () => {
+						/* CM6 owns scrolling */
+					},
+				};
+			}
+			return undefined;
+		}, [previewTier, isMarkdown, markdownEditMode, isImage, isBinary]);
+
 		// Search state and effects (code highlighting, markdown CSS Highlight API, edit textarea)
 		const {
 			searchQuery,
@@ -326,32 +358,7 @@ export const FilePreview = React.memo(
 			displayedContentLength: displayContent.length,
 			initialSearchQuery,
 			onSearchQueryChange,
-			// Tier-aware search adapter.
-			//   Fast markdown  → markdownFast handle (block-virtualized hit map)
-			//   Fast text/code → textFast handle (page-virtualized hit map)
-			//   Giant any kind → GiantPreview handle (delegates to CM6's
-			//                    native search panel; findHits returns [] so
-			//                    the count UI stays quiet and CM6 owns the
-			//                    navigation entirely)
-			searchAdapter:
-				previewTier === 'fast' && isMarkdown
-					? {
-							findHits: (q) => markdownFastRef.current?.findInContent(q) ?? [],
-							scrollToMatch: (m) => markdownFastRef.current?.scrollToMatch(m),
-						}
-					: previewTier === 'fast' && !markdownEditMode && !isImage && !isBinary
-						? {
-								findHits: (q) => textFastRef.current?.findInContent(q) ?? [],
-								scrollToMatch: (m) => textFastRef.current?.scrollToMatch(m),
-							}
-						: previewTier === 'giant' && !markdownEditMode && !isImage && !isBinary
-							? {
-									findHits: () => [],
-									scrollToMatch: () => {
-										/* CM6 owns scrolling */
-									},
-								}
-							: undefined,
+			searchAdapter,
 		});
 
 		// Bionify reading mode follows the global setting; disabled while search highlights are active.
