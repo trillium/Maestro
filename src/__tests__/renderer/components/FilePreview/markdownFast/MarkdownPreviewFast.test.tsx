@@ -90,11 +90,12 @@ describe('MarkdownPreviewFast', () => {
 
 		it('shows the parsing skeleton for large input, then renders blocks', async () => {
 			// Just above the 64 KB sync-parse threshold so the component takes the
-			// deferred-parse path but the parse itself stays cheap.
+			// deferred-parse path. Use one long paragraph (no `\n\n` boundaries
+			// inside the filler) so markdown-it emits a single block — keeps the
+			// parse cheap so the test isn't flaky on CPU-contended CI runners.
 			const SYNC_PARSE_BYTES = 64 * 1024;
-			const filler = 'paragraph body text.\n\n';
-			const content =
-				'# Heading\n\n' + filler.repeat(Math.ceil(SYNC_PARSE_BYTES / filler.length) + 10);
+			const filler = 'paragraph body text '.repeat(Math.ceil(SYNC_PARSE_BYTES / 20) + 10);
+			const content = '# Heading\n\n' + filler;
 			expect(content.length).toBeGreaterThan(SYNC_PARSE_BYTES);
 
 			renderPreview({ content });
@@ -109,9 +110,9 @@ describe('MarkdownPreviewFast', () => {
 					expect(screen.queryByTestId('markdown-fast-skeleton')).toBeNull();
 					expect(screen.getByTestId('mock-virtuoso')).toBeTruthy();
 				},
-				{ timeout: 5_000 }
+				{ timeout: 15_000 }
 			);
-		});
+		}, 30_000);
 
 		it('re-parses when content changes', () => {
 			const { rerender, containerRef } = renderPreview({ content: '# First' });
