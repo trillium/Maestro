@@ -81,6 +81,11 @@ const MarkdownPreviewFast = lazy(() => import('./markdownFast'));
 // TanStack Virtual + Shiki until a large file triggers the Fast tier.
 const TextPreviewFast = lazy(() => import('./textFast'));
 
+// Lazy-loaded Giant tier preview (CodeMirror 6). Used for multi-MB / multi-
+// million-line files where even the Fast tiers would struggle to parse +
+// render. CM6 is ~300 KB gz so we keep it well off the main bundle.
+const GiantPreview = lazy(() => import('./giantPreview'));
+
 export const FilePreview = React.memo(
 	forwardRef<FilePreviewHandle, FilePreviewProps>(function FilePreview(
 		{
@@ -164,6 +169,9 @@ export const FilePreview = React.memo(
 		// Imperative handle for the lazy-loaded text/code Fast tier preview.
 		// Cmd+F search delegates to this handle when in Fast tier non-markdown.
 		const textFastRef = useRef<import('./textFast').TextPreviewFastHandle>(null);
+		// Imperative handle for the lazy-loaded Giant tier preview. Cmd+F in
+		// Giant tier opens CodeMirror's native search panel via this handle.
+		const giantRef = useRef<import('./giantPreview').GiantPreviewHandle>(null);
 
 		// Reset full content view when file changes
 		useEffect(() => {
@@ -313,11 +321,13 @@ export const FilePreview = React.memo(
 			displayedContentLength: displayContent.length,
 			initialSearchQuery,
 			onSearchQueryChange,
-			// Fast tier: route search through the appropriate handle. Markdown
-			// uses the markdownFast handle; plain text and code use the
-			// textFast handle. In either case, match count covers the whole
-			// document (not just the currently-mounted pages) and navigation
-			// scrolls the virtualizer to the right block/page.
+			// Tier-aware search adapter.
+			//   Fast markdown  → markdownFast handle (block-virtualized hit map)
+			//   Fast text/code → textFast handle (page-virtualized hit map)
+			//   Giant any kind → GiantPreview handle (delegates to CM6's
+			//                    native search panel; findHits returns [] so
+			//                    the count UI stays quiet and CM6 owns the
+			//                    navigation entirely)
 			searchAdapter:
 				previewTier === 'fast' && isMarkdown
 					? {
@@ -329,7 +339,14 @@ export const FilePreview = React.memo(
 								findHits: (q) => textFastRef.current?.findInContent(q) ?? [],
 								scrollToMatch: (m) => textFastRef.current?.scrollToMatch(m),
 							}
-						: undefined,
+						: previewTier === 'giant' && !markdownEditMode && !isImage && !isBinary
+							? {
+									findHits: () => [],
+									scrollToMatch: () => {
+										/* CM6 owns scrolling */
+									},
+								}
+							: undefined,
 		});
 
 		// Bionify reading mode follows the global setting; disabled while search highlights are active.
@@ -910,6 +927,14 @@ export const FilePreview = React.memo(
 			if (e.key === 'f' && (e.metaKey || e.ctrlKey)) {
 				e.preventDefault();
 				e.stopPropagation();
+				// Giant tier: hand off to CodeMirror's native search panel.
+				// CM6 owns its own panel UI; layering the in-app search bar on
+				// top would just duplicate the count display while CM6 does the
+				// real work.
+				if (previewTier === 'giant' && giantRef.current) {
+					giantRef.current.openSearch();
+					return;
+				}
 				setSearchOpen(true);
 				setTimeout(() => searchInputRef.current?.focus(), 0);
 			} else if (e.key === 's' && (e.metaKey || e.ctrlKey) && isEditableText && markdownEditMode) {
@@ -1494,6 +1519,29 @@ export const FilePreview = React.memo(
 							onMatchCount={searchMode === 'text' ? setMatchCount : undefined}
 							onJqError={setJqError}
 						/>
+					) : previewTier === 'giant' && !markdownEditMode && !isImage && !isBinary ? (
+						<Suspense
+							fallback={
+								<div
+									style={{
+										padding: '24px',
+										color: theme.colors.textDim,
+										fontSize: '13px',
+									}}
+								>
+									Loading giant preview…
+								</div>
+							}
+						>
+							<GiantPreview
+								ref={giantRef}
+								content={file.content}
+								language={language}
+								theme={theme}
+								containerRef={markdownContainerRef}
+								filePath={file.path}
+							/>
+						</Suspense>
 					) : isMarkdown && previewTier === 'fast' && !markdownEditMode ? (
 						<Suspense
 							fallback={

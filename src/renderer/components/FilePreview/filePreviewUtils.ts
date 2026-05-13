@@ -47,11 +47,19 @@ export const FAST_TIER_BYTES = 256 * 1024; // 256KB
 /** Lines above this route to Fast tier instead of Rich (catches dense narrow content). */
 export const FAST_TIER_LINES = 5_000;
 
-/** Bytes above this route to Giant tier (CodeMirror 6) instead of Fast. */
-export const GIANT_TIER_BYTES = 4 * 1024 * 1024; // 4MB
+/**
+ * Bytes above this route to Giant tier (CodeMirror 6) instead of Fast.
+ *
+ * Bumped from the original plan's 4 MB to 8 MB so the Fast tier still owns
+ * the common "huge markdown" case (e.g. the user-reported 300k-line / ~15 MB
+ * file would otherwise lose rendered tables to CM6's source view). Giant
+ * kicks in only when markdown-it parse becomes the dominant latency — past
+ * ~8 MB, parse routinely exceeds 2 s on a modern Mac.
+ */
+export const GIANT_TIER_BYTES = 8 * 1024 * 1024; // 8MB
 
 /** Lines above this route to Giant tier. */
-export const GIANT_TIER_LINES = 200_000;
+export const GIANT_TIER_LINES = 500_000;
 
 export type PreviewTier = 'rich' | 'fast' | 'giant';
 
@@ -60,14 +68,15 @@ export type PreviewTier = 'rich' | 'fast' | 'giant';
  * length and `lines` from a single newline scan. Both are evaluated; the larger
  * tier wins so a long thin file (millions of one-char lines) still escalates.
  *
- * Phase 1 lands Fast tier; Giant tier returns 'fast' here until CodeMirror tier
- * ships, so the result is always currently-renderable.
+ * Tier landings:
+ *   - Phase 1: Fast tier (markdown).
+ *   - Phase 3: Fast tier (plain text + code).
+ *   - Phase 4: Giant tier (CodeMirror 6) for files over GIANT_TIER_BYTES /
+ *     GIANT_TIER_LINES — used for markdown, text, and code alike.
  */
 export function pickPreviewTier(bytes: number, lines: number): PreviewTier {
 	if (bytes > GIANT_TIER_BYTES || lines > GIANT_TIER_LINES) {
-		// TODO(Phase 4): return 'giant' once MarkdownPreviewGiant is implemented.
-		// Fast tier still beats Rich here, so prefer it as the safe fallback.
-		return 'fast';
+		return 'giant';
 	}
 	if (bytes > FAST_TIER_BYTES || lines > FAST_TIER_LINES) {
 		return 'fast';

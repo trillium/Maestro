@@ -336,20 +336,23 @@ describe('filePreviewUtils', () => {
 			expect(pickPreviewTier(1024, FAST_TIER_LINES + 1)).toBe('fast');
 		});
 
-		it('returns fast (giant fallback) when bytes exceed GIANT_TIER_BYTES', () => {
-			// Phase 1: Giant tier is not yet implemented, so it falls back to fast.
-			// Update this expectation to 'giant' when MarkdownPreviewGiant ships.
-			expect(pickPreviewTier(GIANT_TIER_BYTES + 1, 100)).toBe('fast');
+		it('escalates to giant when bytes exceed GIANT_TIER_BYTES', () => {
+			expect(pickPreviewTier(GIANT_TIER_BYTES + 1, 100)).toBe('giant');
 		});
 
-		it('returns fast (giant fallback) when lines exceed GIANT_TIER_LINES', () => {
-			expect(pickPreviewTier(1024, GIANT_TIER_LINES + 1)).toBe('fast');
+		it('escalates to giant when lines exceed GIANT_TIER_LINES', () => {
+			expect(pickPreviewTier(1024, GIANT_TIER_LINES + 1)).toBe('giant');
 		});
 
-		it('handles the user-reported 300k-line markdown case', () => {
-			// 300k lines × ~50 bytes ≈ 15MB — over the giant threshold but Phase 1
-			// safely routes to fast tier.
-			expect(pickPreviewTier(15 * 1024 * 1024, 300_000)).toBe('fast');
+		it('keeps the user-reported 300k-line markdown case in Fast (rendered) tier', () => {
+			// 300k lines × ~20 bytes ≈ 6MB — under the 8MB / 500k-line giant
+			// threshold so rendered markdown still wins. Truly enormous files
+			// (>8MB or >500k lines) fall through to Giant for source view.
+			expect(pickPreviewTier(6 * 1024 * 1024, 300_000)).toBe('fast');
+		});
+
+		it('routes truly enormous files to Giant', () => {
+			expect(pickPreviewTier(20 * 1024 * 1024, 1_000_000)).toBe('giant');
 		});
 	});
 
@@ -362,12 +365,12 @@ describe('filePreviewUtils', () => {
 			expect(FAST_TIER_LINES).toBe(5_000);
 		});
 
-		it('GIANT_TIER_BYTES is 4MB', () => {
-			expect(GIANT_TIER_BYTES).toBe(4 * 1024 * 1024);
+		it('GIANT_TIER_BYTES is 8MB', () => {
+			expect(GIANT_TIER_BYTES).toBe(8 * 1024 * 1024);
 		});
 
-		it('GIANT_TIER_LINES is 200,000', () => {
-			expect(GIANT_TIER_LINES).toBe(200_000);
+		it('GIANT_TIER_LINES is 500,000', () => {
+			expect(GIANT_TIER_LINES).toBe(500_000);
 		});
 
 		it('fast threshold is below giant threshold', () => {
