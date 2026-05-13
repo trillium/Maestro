@@ -61,21 +61,42 @@ export const GIANT_TIER_BYTES = 8 * 1024 * 1024; // 8MB
 /** Lines above this route to Giant tier. */
 export const GIANT_TIER_LINES = 500_000;
 
+/**
+ * Maximum length of any single line that the Fast tier can still render
+ * comfortably. Above this, the file is routed straight to Giant because the
+ * Fast tier renders each page with `white-space: pre`, and a multi-million-px
+ * wide div trips Chromium's wide-layer paths and pegs the main thread for
+ * tens of seconds (observed on a 488 KB single-line file).
+ *
+ * CodeMirror 6 handles arbitrary line widths via its `lineWrapping` extension,
+ * which is why escalation is the right answer rather than CSS workarounds in
+ * the Fast tier (`pre-wrap` + `overflow-wrap: anywhere` break the page-height
+ * model since one logical line can balloon to thousands of visual lines).
+ */
+export const LINE_LENGTH_GIANT_THRESHOLD = 10_000;
+
 export type PreviewTier = 'rich' | 'fast' | 'giant';
 
 /**
- * Pick a preview tier based on file size. Pass `bytes` from the file's content
- * length and `lines` from a single newline scan. Both are evaluated; the larger
- * tier wins so a long thin file (millions of one-char lines) still escalates.
+ * Pick a preview tier based on file size shape. Pass `bytes` (content length),
+ * `lines` (newline count + 1), and `maxLineLength` (longest single line).
+ * The Giant-friendliest condition wins — a file with a single 500k-char line
+ * routes to Giant even if its total bytes are under 8 MB.
  *
  * Tier landings:
  *   - Phase 1: Fast tier (markdown).
  *   - Phase 3: Fast tier (plain text + code).
  *   - Phase 4: Giant tier (CodeMirror 6) for files over GIANT_TIER_BYTES /
  *     GIANT_TIER_LINES — used for markdown, text, and code alike.
+ *   - Long-line escalation: lines above LINE_LENGTH_GIANT_THRESHOLD jump to
+ *     Giant regardless of byte / line count to avoid wide-layer freeze.
  */
-export function pickPreviewTier(bytes: number, lines: number): PreviewTier {
-	if (bytes > GIANT_TIER_BYTES || lines > GIANT_TIER_LINES) {
+export function pickPreviewTier(bytes: number, lines: number, maxLineLength = 0): PreviewTier {
+	if (
+		bytes > GIANT_TIER_BYTES ||
+		lines > GIANT_TIER_LINES ||
+		maxLineLength > LINE_LENGTH_GIANT_THRESHOLD
+	) {
 		return 'giant';
 	}
 	if (bytes > FAST_TIER_BYTES || lines > FAST_TIER_LINES) {
@@ -84,14 +105,35 @@ export function pickPreviewTier(bytes: number, lines: number): PreviewTier {
 	return 'rich';
 }
 
+/**
+ * Count newlines + return the longest single line, in one pass. Kept as one
+ * scan because both signals feed `pickPreviewTier` and we never want to walk
+ * a multi-MB string twice.
+ *
+ * Lines are 1-indexed by convention: an empty string has 0 lines, a string
+ * with no newlines has 1 line.
+ */
+export function scanLineStats(content: string): { lines: number; maxLineLength: number } {
+	if (!content) return { lines: 0, maxLineLength: 0 };
+	let lines = 1;
+	let maxLineLength = 0;
+	let currentLength = 0;
+	for (let i = 0; i < content.length; i++) {
+		if (content.charCodeAt(i) === 10) {
+			if (currentLength > maxLineLength) maxLineLength = currentLength;
+			currentLength = 0;
+			lines++;
+		} else {
+			currentLength++;
+		}
+	}
+	if (currentLength > maxLineLength) maxLineLength = currentLength;
+	return { lines, maxLineLength };
+}
+
 /** Count newlines without splitting the whole string (cheap O(n) scan). */
 export function countLines(content: string): number {
-	if (!content) return 0;
-	let count = 1;
-	for (let i = 0; i < content.length; i++) {
-		if (content.charCodeAt(i) === 10) count++;
-	}
-	return count;
+	return scanLineStats(content).lines;
 }
 
 // ─── Language Detection ───────────────────────────────────────────────────────

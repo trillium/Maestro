@@ -58,7 +58,7 @@ import {
 	LARGE_FILE_TOKEN_SKIP_THRESHOLD,
 	LARGE_FILE_PREVIEW_LIMIT,
 	pickPreviewTier,
-	countLines,
+	scanLineStats,
 } from './filePreviewUtils';
 import { BionifyTextBlock } from '../../utils/bionifyReadingMode';
 import { MarkdownImage } from './MarkdownImage';
@@ -258,15 +258,20 @@ export const FilePreview = React.memo(
 			return file.content.length > LARGE_FILE_TOKEN_SKIP_THRESHOLD;
 		}, [file?.content]);
 
-		// Choose preview tier based on file size. Applies to all text-like
-		// content (markdown, plain text, source code) — binary and image files
-		// always stay in Rich. Tier is memoized on path so switching tabs and
-		// coming back doesn't re-decide.
+		// Choose preview tier based on file size + line shape. Applies to all
+		// text-like content (markdown, plain text, source code) — binary and
+		// image files always stay in Rich. Tier is memoized on path so
+		// switching tabs and coming back doesn't re-decide.
+		//
+		// `scanLineStats` returns both line count and longest single line in
+		// one pass; the long-line signal pushes pathological files (e.g. a
+		// 488 KB single line) past Fast straight into Giant, where CM6's
+		// `lineWrapping` extension keeps the renderer responsive.
 		const autoTier = useMemo(() => {
 			if (!file?.content || isImage || isBinary) return 'rich' as const;
 			const bytes = file.content.length;
-			const lines = countLines(file.content);
-			return pickPreviewTier(bytes, lines);
+			const { lines, maxLineLength } = scanLineStats(file.content);
+			return pickPreviewTier(bytes, lines, maxLineLength);
 		}, [file?.path, file?.content, isImage, isBinary]);
 
 		// Effective tier respects the user's per-tab override, falling back to
