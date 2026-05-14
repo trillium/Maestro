@@ -40,6 +40,11 @@ import {
 } from '../../stores/claudeUsageStore';
 import { sampleUsage } from '../../agents/claude-usage-sampler';
 import { getMaestroPBinPath } from '../../agents/claude-usage-startup';
+import {
+	registerInteractiveReplay,
+	type ClaudeReplayContext,
+} from '../../agents/claude-interactive-replay';
+import type { ProcessConfig } from '../../process-manager/types';
 
 const LOG_CONTEXT = '[ProcessManager]';
 
@@ -745,6 +750,123 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 					mainWindow.webContents.send('process:claude-mode-resolved', config.sessionId, {
 						mode: resolvedClaudeMode.mode,
 						reason: resolvedClaudeMode.reason,
+					});
+				}
+
+				// ========================================================================
+				// Phase 3 task 1: reactive limit-hit detection for interactive Claude turns.
+				//
+				// When we spawned under interactive mode (maestro-p), watch for the
+				// per-phase-1 contract exit code 2 — that's maestro-p signaling the Max
+				// plan quota was hit mid-turn. On match, transparently respawn the same
+				// turn under api mode + `--resume <id>` with the same prompt. The user
+				// sees one continuous response with a mode-badge flip mid-stream.
+				// ========================================================================
+				if (
+					resolvedClaudeMode?.mode === 'interactive' &&
+					result.success &&
+					agent?.id === 'claude-code' &&
+					agent.apiCommand &&
+					claudeRealBinPath
+				) {
+					const replayConfigDir = (config.sessionCustomEnvVars ?? {}).CLAUDE_CONFIG_DIR;
+					const replayConfigDirKey = resolveConfigDirKey(
+						replayConfigDir ? { CLAUDE_CONFIG_DIR: replayConfigDir } : {}
+					);
+					const replayEnvForSample: Record<string, string> = {
+						...(config.sessionCustomEnvVars ?? {}),
+						MAESTRO_CLAUDE_BIN: claudeRealBinPath,
+					};
+
+					// Track the latest agentSessionId for the turn. The first turn for a
+					// brand-new tab spawns without --resume, but maestro-p discovers the
+					// session id via its filesystem watcher and emits a `session-id`
+					// event back through the parser. Capture that so the replay's
+					// --resume flag stays on the same conversation.
+					let latestAgentSessionId: string | undefined = config.agentSessionId;
+					const onSessionId = (sid: string, agentSid: string): void => {
+						if (sid === config.sessionId && agentSid) {
+							latestAgentSessionId = agentSid;
+						}
+					};
+					processManager.on('session-id', onSessionId);
+
+					// Closure that builds the api-mode ProcessConfig from the resolved
+					// inputs we already have in scope. Re-runs the arg-composition
+					// pipeline against `agent.apiModeArgs` so model/custom args/resume
+					// flags stay consistent with how the api-mode spawn would have
+					// looked if it had been chosen up front.
+					const apiBaseArgs = agent.apiModeArgs ?? agent.args;
+					const buildApiSpawnConfig = (): ProcessConfig => {
+						let apiArgs = buildAgentArgs(agent, {
+							baseArgs: apiBaseArgs,
+							prompt: config.prompt,
+							cwd: config.cwd,
+							readOnlyMode: config.readOnlyMode,
+							modelId: config.modelId,
+							yoloMode: config.yoloMode,
+							agentSessionId: latestAgentSessionId,
+						});
+						const apiOverrides = applyAgentConfigOverrides(agent, apiArgs, {
+							agentConfigValues,
+							sessionCustomModel: config.sessionCustomModel,
+							sessionCustomArgs: config.sessionCustomArgs,
+							sessionCustomEnvVars: config.sessionCustomEnvVars,
+						});
+						apiArgs = apiOverrides.args;
+
+						// API mode runs the real claude binary directly, so MAESTRO_CLAUDE_BIN
+						// is irrelevant. Strip it from the effective env to avoid confusing
+						// any downstream code that keys on its presence.
+						let apiCustomEnvVars = apiOverrides.effectiveCustomEnvVars;
+						if (apiCustomEnvVars && 'MAESTRO_CLAUDE_BIN' in apiCustomEnvVars) {
+							const { MAESTRO_CLAUDE_BIN: _ignored, ...rest } = apiCustomEnvVars;
+							apiCustomEnvVars = Object.keys(rest).length > 0 ? rest : undefined;
+						}
+
+						return {
+							sessionId: config.sessionId,
+							toolType: config.toolType,
+							cwd: config.cwd,
+							command: claudeRealBinPath!,
+							args: apiArgs,
+							requiresPty: agent.requiresPty,
+							prompt: config.prompt,
+							shell: shellToUse,
+							runInShell: useShell,
+							shellArgs: shellArgsStr,
+							shellEnvVars: globalShellEnvVars,
+							contextWindow,
+							customEnvVars: apiCustomEnvVars,
+							imageArgs: agent.imageArgs,
+							promptArgs: agent.promptArgs,
+							noPromptSeparator: agent.noPromptSeparator,
+							projectPath: config.cwd,
+							images: config.images,
+							sendPromptViaStdin: config.sendPromptViaStdin,
+							sendPromptViaStdinRaw: config.sendPromptViaStdinRaw,
+							querySource: config.querySource,
+							tabId: config.tabId,
+						};
+					};
+
+					const replayContext: ClaudeReplayContext = {
+						buildApiSpawnConfig,
+						configDir: replayConfigDir,
+						configDirKey: replayConfigDirKey,
+						cwd: config.cwd,
+						envForSample: replayEnvForSample,
+						maestroPBinPath: getMaestroPBinPath(),
+						onCleanup: () => {
+							processManager.off('session-id', onSessionId);
+						},
+					};
+
+					registerInteractiveReplay(config.sessionId, replayContext, {
+						processManager,
+						spawn: (cfg) => processManager.spawn(cfg),
+						sessionsStore,
+						getMainWindow,
 					});
 				}
 
