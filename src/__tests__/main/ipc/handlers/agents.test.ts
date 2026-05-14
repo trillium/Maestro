@@ -160,6 +160,7 @@ describe('agents IPC handlers', () => {
 				'agents:getAllCustomEnvVars',
 				'agents:getModels',
 				'agents:discoverSlashCommands',
+				'agents:setClaudeInteractiveMode',
 			];
 
 			for (const channel of expectedChannels) {
@@ -1138,6 +1139,173 @@ describe('agents IPC handlers', () => {
 			const result = await handler!({} as any, 'claude-code', '/test');
 
 			expect(result).toBeNull();
+		});
+	});
+
+	describe('agents:setClaudeInteractiveMode', () => {
+		let mockSessionsStore: {
+			get: ReturnType<typeof vi.fn>;
+			set: ReturnType<typeof vi.fn>;
+		};
+
+		beforeEach(() => {
+			mockSessionsStore = {
+				get: vi.fn().mockReturnValue([]),
+				set: vi.fn(),
+			};
+
+			// Re-register handlers with the sessions store dep wired in
+			handlers.clear();
+			registerAgentsHandlers({
+				...deps,
+				sessionsStore: mockSessionsStore as any,
+			});
+		});
+
+		it('should write through the new claudeInteractive block on the matching session', async () => {
+			const sessions = [
+				{
+					id: 'session-a',
+					name: 'A',
+					toolType: 'claude-code',
+					cwd: '/tmp/a',
+					projectRoot: '/tmp/a',
+				},
+				{
+					id: 'session-b',
+					name: 'B',
+					toolType: 'claude-code',
+					cwd: '/tmp/b',
+					projectRoot: '/tmp/b',
+					claudeInteractive: { mode: 'api', modeReason: 'auto' },
+				},
+			];
+			mockSessionsStore.get.mockReturnValue(sessions);
+
+			const handler = handlers.get('agents:setClaudeInteractiveMode');
+			const result = await handler!({} as any, 'session-b', 'interactive', 'user');
+
+			expect(result).toBe(true);
+			expect(mockSessionsStore.set).toHaveBeenCalledTimes(1);
+			const [key, written] = mockSessionsStore.set.mock.calls[0];
+			expect(key).toBe('sessions');
+			// session-a is untouched
+			expect(written[0]).toEqual(sessions[0]);
+			// session-b's claudeInteractive is replaced
+			expect(written[1].claudeInteractive).toEqual({
+				mode: 'interactive',
+				modeReason: 'user',
+			});
+		});
+
+		it('should preserve lastUsageSnapshotKey when updating mode + modeReason', async () => {
+			mockSessionsStore.get.mockReturnValue([
+				{
+					id: 's',
+					name: 'S',
+					toolType: 'claude-code',
+					cwd: '/x',
+					projectRoot: '/x',
+					claudeInteractive: {
+						mode: 'api',
+						modeReason: 'limit',
+						lastUsageSnapshotKey: '/Users/x/.claude-gmail',
+					},
+				},
+			]);
+
+			const handler = handlers.get('agents:setClaudeInteractiveMode');
+			await handler!({} as any, 's', 'interactive', 'user');
+
+			const [, written] = mockSessionsStore.set.mock.calls[0];
+			expect(written[0].claudeInteractive).toEqual({
+				mode: 'interactive',
+				modeReason: 'user',
+				lastUsageSnapshotKey: '/Users/x/.claude-gmail',
+			});
+		});
+
+		it('should be a no-op when mode + modeReason already match (skip disk write)', async () => {
+			mockSessionsStore.get.mockReturnValue([
+				{
+					id: 's',
+					name: 'S',
+					toolType: 'claude-code',
+					cwd: '/x',
+					projectRoot: '/x',
+					claudeInteractive: { mode: 'interactive', modeReason: 'user' },
+				},
+			]);
+
+			const handler = handlers.get('agents:setClaudeInteractiveMode');
+			const result = await handler!({} as any, 's', 'interactive', 'user');
+
+			expect(result).toBe(true);
+			expect(mockSessionsStore.set).not.toHaveBeenCalled();
+		});
+
+		it('should return false when the session is not found', async () => {
+			mockSessionsStore.get.mockReturnValue([
+				{
+					id: 'other',
+					name: 'O',
+					toolType: 'claude-code',
+					cwd: '/x',
+					projectRoot: '/x',
+				},
+			]);
+
+			const handler = handlers.get('agents:setClaudeInteractiveMode');
+			const result = await handler!({} as any, 'missing-id', 'api', 'user');
+
+			expect(result).toBe(false);
+			expect(mockSessionsStore.set).not.toHaveBeenCalled();
+		});
+
+		it('should reject invalid mode values', async () => {
+			const handler = handlers.get('agents:setClaudeInteractiveMode');
+			await expect(handler!({} as any, 's', 'bogus' as any, 'user')).rejects.toThrow(
+				/Invalid claudeInteractive mode/
+			);
+		});
+
+		it('should reject invalid modeReason values', async () => {
+			const handler = handlers.get('agents:setClaudeInteractiveMode');
+			await expect(handler!({} as any, 's', 'api', 'forced' as any)).rejects.toThrow(
+				/Invalid claudeInteractive modeReason/
+			);
+		});
+
+		it('should return false (not throw) when the sessions store is not provided', async () => {
+			handlers.clear();
+			registerAgentsHandlers(deps); // no sessionsStore
+
+			const handler = handlers.get('agents:setClaudeInteractiveMode');
+			const result = await handler!({} as any, 's', 'interactive', 'user');
+
+			expect(result).toBe(false);
+		});
+
+		it('should return false when the store write fails (e.g. ENOSPC)', async () => {
+			mockSessionsStore.get.mockReturnValue([
+				{
+					id: 's',
+					name: 'S',
+					toolType: 'claude-code',
+					cwd: '/x',
+					projectRoot: '/x',
+				},
+			]);
+			mockSessionsStore.set.mockImplementation(() => {
+				const err: NodeJS.ErrnoException = new Error('no space');
+				err.code = 'ENOSPC';
+				throw err;
+			});
+
+			const handler = handlers.get('agents:setClaudeInteractiveMode');
+			const result = await handler!({} as any, 's', 'interactive', 'user');
+
+			expect(result).toBe(false);
 		});
 	});
 

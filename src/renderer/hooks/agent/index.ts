@@ -121,3 +121,12 @@ export type {
 	UseAgentConfigurationOptions,
 	UseAgentConfigurationReturn,
 } from './useAgentConfiguration';
+
+// Per-session Claude headless-mode cycle (Claude Code only)
+export {
+	useClaudeInteractiveMode,
+	cycleFromInteractive,
+	nextClaudeModeCycle,
+	CLAUDE_MODE_CYCLE_ORDER,
+} from './useClaudeInteractiveMode';
+export type { ClaudeModeCycle, UseClaudeInteractiveModeReturn } from './useClaudeInteractiveMode';

@@ -733,6 +733,11 @@ interface MaestroAPI {
 			cwd: string,
 			customPath?: string
 		) => Promise<string[] | null>;
+		setClaudeInteractiveMode: (
+			sessionId: string,
+			mode: 'interactive' | 'api',
+			modeReason: 'user' | 'auto' | 'limit'
+		) => Promise<boolean>;
 	};
 	// Agent Sessions API - all methods accept optional sshRemoteId for SSH remote session storage access
 	agentSessions: {

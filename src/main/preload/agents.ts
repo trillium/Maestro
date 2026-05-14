@@ -180,6 +180,26 @@ export function createAgentsApi() {
 			customPath?: string
 		): Promise<string[] | null> =>
 			ipcRenderer.invoke('agents:discoverSlashCommands', agentId, cwd, customPath),
+
+		/**
+		 * Set the per-tab Claude headless-mode pin (Claude Code only) on a session.
+		 * Writes through to the on-disk sessions store synchronously so the next
+		 * spawn for `sessionId` sees the new pin without waiting for the renderer's
+		 * debounced session-persistence flush.
+		 *
+		 * @param mode 'interactive' runs maestro-p; 'api' runs claude --print.
+		 * @param modeReason 'user' for a manual per-tab pin (overlay menu cycle),
+		 *   'auto' to release the pin back to selector defaults, or 'limit' for
+		 *   the auto-fallback case (set by the spawner, not by manual UI).
+		 * @returns true on a successful write, false if the session is unknown or
+		 *   the underlying store write failed.
+		 */
+		setClaudeInteractiveMode: (
+			sessionId: string,
+			mode: 'interactive' | 'api',
+			modeReason: 'user' | 'auto' | 'limit'
+		): Promise<boolean> =>
+			ipcRenderer.invoke('agents:setClaudeInteractiveMode', sessionId, mode, modeReason),
 	};
 }
 

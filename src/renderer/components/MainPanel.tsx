@@ -39,6 +39,7 @@ import { useGitBranch, useGitDetail, useGitFileStatus } from '../contexts/GitSta
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
 import { calculateContextDisplay } from '../utils/contextUsage';
 import { useAgentCapabilities, useHoverTooltip } from '../hooks';
+import { useClaudeInteractiveMode } from '../hooks/agent/useClaudeInteractiveMode';
 import { safeClipboardWrite } from '../utils/clipboard';
 import { useUIStore } from '../stores/uiStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -476,6 +477,15 @@ export const MainPanel = React.memo(
 			onFileTabScrollPositionChange,
 			onFileTabSearchQueryChange,
 		} = props;
+
+		// Per-session Claude headless-mode cycle (only meaningful for Claude Code).
+		// `mode` is the current cycle position; `cycle()` advances it and triggers
+		// the kill-and-respawn flow so the next turn runs under the new pin.
+		const {
+			mode: claudeMode,
+			cycle: cycleClaudeMode,
+			isClaudeCode,
+		} = useClaudeInteractiveMode(activeSession?.id);
 
 		// Get the active tab for header display
 		// The header should show the active tab's data (UUID, name, cost, context), not session-level data
@@ -1491,6 +1501,9 @@ export const MainPanel = React.memo(
 									onFileTabClose={onFileTabClose}
 									// Accessibility
 									colorBlindMode={colorBlindMode}
+									// Claude headless-mode cycle (only wired for Claude Code sessions)
+									claudeMode={isClaudeCode ? claudeMode : undefined}
+									onCycleClaudeMode={isClaudeCode ? cycleClaudeMode : undefined}
 								/>
 							)}
 

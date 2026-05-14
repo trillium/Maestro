@@ -14,6 +14,7 @@ import { buildSshCommand, RemoteCommandOptions } from '../../utils/ssh-command-b
 import { stripAnsi } from '../../utils/stripAnsi';
 import { SshRemoteConfig } from '../../../shared/types';
 import { MaestroSettings } from './persistence';
+import type { SessionsData, StoredSession } from '../../stores/types';
 
 const LOG_CONTEXT = '[AgentDetector]';
 const CONFIG_LOG_CONTEXT = '[AgentConfig]';
@@ -42,6 +43,12 @@ export interface AgentsHandlerDependencies {
 	agentConfigsStore: Store<AgentConfigsData>;
 	/** The settings store (MaestroSettings) - required for SSH remote lookup */
 	settingsStore?: Store<MaestroSettings>;
+	/**
+	 * The sessions store. Required for handlers that mutate per-session state
+	 * (e.g. `agents:setClaudeInteractiveMode`, which updates the per-tab Claude
+	 * headless-mode pin that the spawner reads on the next turn).
+	 */
+	sessionsStore?: Store<SessionsData>;
 }
 
 /**
@@ -303,7 +310,7 @@ async function discoverModelsRemote(
  * - Custom paths: setCustomPath, getCustomPath, getAllCustomPaths
  */
 export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
-	const { getAgentDetector, agentConfigsStore, settingsStore } = deps;
+	const { getAgentDetector, agentConfigsStore, settingsStore, sessionsStore } = deps;
 
 	// Detect all available agents (supports SSH remote detection via optional sshRemoteId)
 	ipcMain.handle(
@@ -925,6 +932,86 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 					});
 					return null;
 				}
+			}
+		)
+	);
+
+	// Update a session's per-tab Claude headless-mode pin (Claude Code only).
+	// Mutates the on-disk `sessionsStore` synchronously so the next spawn for
+	// `sessionId` sees the new pin without depending on the renderer's debounced
+	// session-persistence flush. The renderer is expected to mirror the same
+	// update into its in-memory zustand store; this handler is the canonical
+	// write-through that the spawner reads from.
+	ipcMain.handle(
+		'agents:setClaudeInteractiveMode',
+		withIpcErrorLogging(
+			handlerOpts('setClaudeInteractiveMode', CONFIG_LOG_CONTEXT),
+			async (
+				sessionId: string,
+				mode: 'interactive' | 'api',
+				modeReason: 'user' | 'auto' | 'limit'
+			) => {
+				if (!sessionsStore) {
+					logger.warn(
+						'setClaudeInteractiveMode invoked without a sessions store; ignoring',
+						CONFIG_LOG_CONTEXT
+					);
+					return false;
+				}
+				if (mode !== 'interactive' && mode !== 'api') {
+					throw new Error(`Invalid claudeInteractive mode: ${mode}`);
+				}
+				if (modeReason !== 'user' && modeReason !== 'auto' && modeReason !== 'limit') {
+					throw new Error(`Invalid claudeInteractive modeReason: ${modeReason}`);
+				}
+
+				const sessions = sessionsStore.get('sessions', []) as StoredSession[];
+				const idx = sessions.findIndex((s) => s.id === sessionId);
+				if (idx === -1) {
+					logger.warn(
+						`setClaudeInteractiveMode: session not found: ${sessionId}`,
+						CONFIG_LOG_CONTEXT
+					);
+					return false;
+				}
+
+				const current = sessions[idx].claudeInteractive as
+					| { mode: 'interactive' | 'api'; modeReason: 'user' | 'auto' | 'limit' }
+					| undefined;
+				if (current && current.mode === mode && current.modeReason === modeReason) {
+					// No-op write: skip the disk hit and avoid waking watchers needlessly.
+					return true;
+				}
+
+				const updated: StoredSession[] = sessions.map((s, i) =>
+					i === idx
+						? {
+								...s,
+								claudeInteractive: {
+									...(current ?? {}),
+									mode,
+									modeReason,
+								},
+							}
+						: s
+				);
+
+				try {
+					sessionsStore.set('sessions', updated);
+				} catch (err) {
+					const code = (err as NodeJS.ErrnoException).code;
+					logger.warn(
+						`Failed to persist claudeInteractive update: ${code || (err as Error).message}`,
+						CONFIG_LOG_CONTEXT
+					);
+					return false;
+				}
+
+				logger.info(
+					`Updated claudeInteractive for session ${sessionId}: ${mode}/${modeReason}`,
+					CONFIG_LOG_CONTEXT
+				);
+				return true;
 			}
 		)
 	);

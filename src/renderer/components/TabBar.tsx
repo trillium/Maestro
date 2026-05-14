@@ -20,6 +20,7 @@ import {
 	Loader2,
 	ExternalLink,
 	FolderOpen,
+	Zap,
 } from 'lucide-react';
 import type { AITab, Theme, FilePreviewTab, UnifiedTab } from '../types';
 import { hasDraft } from '../utils/tabHelpers';
@@ -80,6 +81,21 @@ interface TabBarProps {
 	// === Accessibility ===
 	/** Whether colorblind-friendly colors should be used for extension badges */
 	colorBlindMode?: boolean;
+
+	// === Claude Code: per-session headless-mode cycle ===
+	/**
+	 * Current cycle position for the parent session's Claude headless mode.
+	 * Only meaningful when `onCycleClaudeMode` is also provided; otherwise
+	 * the menu item is hidden. All tabs in a Claude Code session share this
+	 * state because the pin lives on `session.claudeInteractive`, not per-tab.
+	 */
+	claudeMode?: 'auto' | 'force-interactive' | 'force-api';
+	/**
+	 * Advance the session's Claude headless mode to the next position
+	 * (auto → force-interactive → force-api → auto). Only wired for Claude
+	 * Code sessions; passing `undefined` hides the overlay menu item.
+	 */
+	onCycleClaudeMode?: () => void;
 }
 
 interface TabProps {
@@ -142,6 +158,10 @@ interface TabProps {
 	totalTabs?: number;
 	/** Tab index in the full list (0-based) */
 	tabIndex?: number;
+	/** Claude headless-mode cycle position for this tab's session. */
+	claudeMode?: 'auto' | 'force-interactive' | 'force-api';
+	/** Advance the session's Claude headless mode to the next position. */
+	onCycleClaudeMode?: () => void;
 }
 
 /**
@@ -228,6 +248,8 @@ const Tab = memo(function Tab({
 	onCloseTabsRight,
 	totalTabs,
 	tabIndex,
+	claudeMode,
+	onCycleClaudeMode,
 }: TabProps) {
 	const [isHovered, setIsHovered] = useState(false);
 	const [overlayOpen, setOverlayOpen] = useState(false);
@@ -452,6 +474,15 @@ const Tab = memo(function Tab({
 			setOverlayOpen(false);
 		},
 		[onCloseTabsRight, tabId]
+	);
+
+	const handleCycleClaudeModeClick = useCallback(
+		(e: React.MouseEvent) => {
+			e.stopPropagation();
+			onCycleClaudeMode?.();
+			setOverlayOpen(false);
+		},
+		[onCycleClaudeMode]
 	);
 
 	// Handlers for drag events using stable tabId
@@ -732,6 +763,35 @@ const Tab = memo(function Tab({
 									>
 										<Mail className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
 										Mark as Unread
+									</button>
+								)}
+
+								{/* Claude headless-mode cycle - only show for Claude Code sessions.
+								    Cycles auto → force interactive → force API → auto.
+								    Wired by parent only when activeSession.toolType === 'claude-code'. */}
+								{onCycleClaudeMode && claudeMode && (
+									<button
+										onClick={handleCycleClaudeModeClick}
+										className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-white/10 transition-colors"
+										style={{ color: theme.colors.textMain }}
+										title="Cycle Claude headless mode: auto → force interactive → force API"
+									>
+										<Zap
+											className="w-3.5 h-3.5"
+											style={{
+												color:
+													claudeMode === 'force-interactive'
+														? theme.colors.accent
+														: claudeMode === 'force-api'
+															? theme.colors.warning
+															: theme.colors.textDim,
+											}}
+										/>
+										{claudeMode === 'auto'
+											? 'Claude Mode: Auto'
+											: claudeMode === 'force-interactive'
+												? 'Claude Mode: Force Interactive'
+												: 'Claude Mode: Force API'}
 									</button>
 								)}
 
@@ -1537,6 +1597,9 @@ function TabBarInner({
 	onUnifiedTabReorder,
 	// Accessibility
 	colorBlindMode,
+	// Claude Code: per-session headless-mode cycle
+	claudeMode,
+	onCycleClaudeMode,
 }: TabBarProps) {
 	const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
 	const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
@@ -1998,6 +2061,8 @@ function TabBarInner({
 										onCloseTabsRight={onCloseTabsRight ? handleTabCloseRight : undefined}
 										totalTabs={allTabs.length}
 										tabIndex={originalIndex}
+										claudeMode={onCycleClaudeMode ? claudeMode : undefined}
+										onCycleClaudeMode={onCycleClaudeMode}
 									/>
 								</React.Fragment>
 							);
@@ -2121,6 +2186,8 @@ function TabBarInner({
 									onCloseTabsRight={onCloseTabsRight ? handleTabCloseRight : undefined}
 									totalTabs={tabs.length}
 									tabIndex={originalIndex}
+									claudeMode={onCycleClaudeMode ? claudeMode : undefined}
+									onCycleClaudeMode={onCycleClaudeMode}
 								/>
 							</React.Fragment>
 						);
