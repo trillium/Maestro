@@ -12,6 +12,66 @@ const MAX_SEARCH_QUERY_LENGTH = 200;
 // `components/FilePreview/search/types` directly.
 export type { SearchHit, FilePreviewSearchAdapter };
 
+// ─── DOM walk + CSS Highlight helpers (used by count/navigate effects) ───────
+//
+// Kept module-private and pure(-ish) so they can be exercised end-to-end via
+// hook tests without leaking to other components. Both Highlight registrations
+// use stable names (`search-results` / `search-current`) so prose CSS can style
+// them per-tier (see `markdownFast/proseStyles.ts`, `textFast/proseStyles.ts`).
+
+function walkContainerForRanges(container: HTMLElement, escapedQuery: string): Range[] {
+	if (!escapedQuery) return [];
+	const ranges: Range[] = [];
+	const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+	let textNode: Node | null;
+	while ((textNode = walker.nextNode())) {
+		const text = (textNode as Text).textContent || '';
+		if (!text) continue;
+		const re = new RegExp(escapedQuery, 'gi');
+		let match: RegExpExecArray | null;
+		while ((match = re.exec(text)) !== null) {
+			const range = document.createRange();
+			range.setStart(textNode, match.index);
+			range.setEnd(textNode, match.index + match[0].length);
+			ranges.push(range);
+			// Guard against zero-length matches infinite-looping.
+			if (match.index === re.lastIndex) re.lastIndex++;
+		}
+	}
+	return ranges;
+}
+
+function hasHighlightApi(): boolean {
+	// Guarded against CSS itself being undefined — happens in jsdom tests that
+	// tear down globals between cases and means the React cleanup pass can
+	// fire after teardown.
+	return typeof CSS !== 'undefined' && 'highlights' in CSS;
+}
+
+function applyAllHighlight(ranges: Range[]): void {
+	if (!hasHighlightApi()) return;
+	if (ranges.length > 0) {
+		(CSS as any).highlights.set('search-results', new (window as any).Highlight(...ranges));
+	} else {
+		(CSS as any).highlights.delete('search-results');
+	}
+}
+
+function applyCurrentHighlight(range: Range | null): void {
+	if (!hasHighlightApi()) return;
+	if (range) {
+		(CSS as any).highlights.set('search-current', new (window as any).Highlight(range));
+	} else {
+		(CSS as any).highlights.delete('search-current');
+	}
+}
+
+function clearTextHighlights(): void {
+	if (!hasHighlightApi()) return;
+	(CSS as any).highlights.delete('search-results');
+	(CSS as any).highlights.delete('search-current');
+}
+
 export interface UseFilePreviewSearchParams {
 	codeContainerRef: RefObject<HTMLDivElement | null>;
 	markdownContainerRef: RefObject<HTMLDivElement | null>;
@@ -228,10 +288,25 @@ export function useFilePreviewSearch({
 		searchAdapter,
 	]);
 
-	// Search matches in markdown preview mode - use CSS Custom Highlight API.
-	// Also runs for Fast tier non-markdown content when a search adapter is
-	// provided (the adapter supplies the authoritative match count; the
-	// effect still applies CSS Highlights to currently-mounted DOM text).
+	// Search matches in markdown / readable-text / Fast-tier preview.
+	//
+	// Why two effects (count + navigate):
+	//   The earlier single-effect implementation listed `currentMatchIndex` in
+	//   its deps. That made every prev/next button press re-run `findHits` AND
+	//   re-walk the DOM — under heavy virtualization the resulting hit count
+	//   could flicker between renders ("wobble"). Splitting into:
+	//     1. countEffect — runs ONCE per query/content/adapter/mode change.
+	//        Calls findHits, walks DOM, sets totalMatches, resets currentMatchIndex.
+	//     2. navigateEffect — runs ONLY when currentMatchIndex or totalMatches
+	//        changes. Reads precomputed hits / ranges from refs and dispatches
+	//        scroll + current-highlight swap. NEVER calls findHits.
+	//   …guarantees count stability across navigation while still updating
+	//   highlights as virtuoso mounts new blocks (the navigate effect re-walks
+	//   the DOM cheaply inside a rAF to refresh visible-range highlights).
+
+	const hitsRef = useRef<SearchHit[] | null>(null);
+	const rangesRef = useRef<Range[]>([]);
+
 	useEffect(() => {
 		const adapterActive = Boolean(searchAdapter);
 		const isTextLike = isMarkdown || isReadableText || adapterActive;
@@ -239,144 +314,146 @@ export function useFilePreviewSearch({
 			if (isTextLike && !markdownEditMode) {
 				setTotalMatches(0);
 				setCurrentMatchIndex(-1);
+				hitsRef.current = null;
+				rangesRef.current = [];
 				matchElementsRef.current = [];
-				// Clear any existing highlights
-				if ('highlights' in CSS) {
-					(CSS as any).highlights.delete('search-results');
-					(CSS as any).highlights.delete('search-current');
-				}
+				clearTextHighlights();
 			}
 			return;
 		}
 
 		const container = markdownContainerRef.current;
 		const escapedQuery = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		const searchRegex = new RegExp(escapedQuery, 'gi');
 
-		// Check if CSS Custom Highlight API is available
-		if ('highlights' in CSS) {
-			const allRanges: Range[] = [];
-			const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-
-			// Find all text nodes and create ranges for matches
-			let textNode;
-			while ((textNode = walker.nextNode())) {
-				const text = textNode.textContent || '';
-				let match;
-				const localRegex = new RegExp(escapedQuery, 'gi');
-				while ((match = localRegex.exec(text)) !== null) {
-					const range = document.createRange();
-					range.setStart(textNode, match.index);
-					range.setEnd(textNode, match.index + match[0].length);
-					allRanges.push(range);
-				}
-			}
-
-			// When a search adapter is supplied (Fast tier), its `findHits` is
-			// authoritative — the DOM walker only sees the small slice of
-			// currently-mounted blocks. We still apply CSS Highlights to the
-			// visible ranges so the user can see matches in view, but the
-			// match COUNT and scroll target come from the adapter.
-			const adapterHits = searchAdapter ? searchAdapter.findHits(searchQuery) : null;
-			const totalCount = adapterHits ? adapterHits.length : allRanges.length;
-			setTotalMatches(totalCount);
-
-			// Create highlights
-			if (totalCount > 0) {
-				const targetIndex = currentMatchIndex < 0 ? 0 : Math.min(currentMatchIndex, totalCount - 1);
-				if (targetIndex !== currentMatchIndex) {
-					setCurrentMatchIndex(targetIndex);
-				}
-
-				// Highlight whatever DOM-mounted matches exist. Even with the
-				// adapter, only on-screen text nodes can carry highlights — that's
-				// fine, scrolling brings new blocks into view which then receive
-				// highlight via the next effect run.
-				if (allRanges.length > 0) {
-					const allHighlight = new (window as any).Highlight(...allRanges);
-					(CSS as any).highlights.set('search-results', allHighlight);
-					const visibleIndex = Math.min(targetIndex, allRanges.length - 1);
-					const currentHighlight = new (window as any).Highlight(allRanges[visibleIndex]);
-					(CSS as any).highlights.set('search-current', currentHighlight);
-				} else {
-					(CSS as any).highlights.delete('search-results');
-					(CSS as any).highlights.delete('search-current');
-				}
-
-				// Scroll: prefer the adapter's scrollToMatch (Fast tier — moves
-				// the virtualizer); fall back to native scrollIntoView via Range.
-				if (adapterHits && adapterHits[targetIndex]) {
-					searchAdapter!.scrollToMatch(adapterHits[targetIndex]);
-				} else if (allRanges.length > 0) {
-					const currentRange = allRanges[Math.min(targetIndex, allRanges.length - 1)];
-					const rect = currentRange.getBoundingClientRect();
-					const scrollParent = contentRef.current;
-					if (scrollParent && rect) {
-						const scrollContainerRect = scrollParent.getBoundingClientRect();
-						const matchOffsetInScrollContainer =
-							rect.top - scrollContainerRect.top + scrollParent.scrollTop;
-						const scrollTop =
-							matchOffsetInScrollContainer - scrollParent.clientHeight / 2 + rect.height / 2;
-						scrollParent.scrollTo({ top: Math.max(0, scrollTop), behavior: 'smooth' });
-					}
-				}
-			} else {
-				setCurrentMatchIndex(-1);
-				(CSS as any).highlights.delete('search-results');
-				(CSS as any).highlights.delete('search-current');
-			}
-
-			// Cleanup function
-			return () => {
-				(CSS as any).highlights.delete('search-results');
-				(CSS as any).highlights.delete('search-current');
-			};
-		} else {
-			// Fallback: count matches and scroll to location (no highlighting)
-			const matches = fileContent?.match(searchRegex);
+		if (!hasHighlightApi()) {
+			// Old-browser fallback: source-string count only, no live highlights.
+			// Scroll to the first match by walking DOM in the navigate effect.
+			const matches = fileContent?.match(new RegExp(escapedQuery, 'gi'));
 			const count = matches ? matches.length : 0;
+			hitsRef.current = null;
+			rangesRef.current = [];
 			setTotalMatches(count);
-			if (count > 0 && currentMatchIndex < 0) {
-				setCurrentMatchIndex(0);
-			} else if (count === 0 && currentMatchIndex !== -1) {
-				setCurrentMatchIndex(-1);
-			}
-
-			if (count > 0) {
-				const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-				let matchCount = 0;
-				const targetIndex = Math.max(0, Math.min(currentMatchIndex, count - 1));
-
-				let textNode;
-				while ((textNode = walker.nextNode())) {
-					const text = textNode.textContent || '';
-					const nodeMatches = text.match(searchRegex);
-					if (nodeMatches) {
-						for (const _ of nodeMatches) {
-							if (matchCount === targetIndex) {
-								const parentElement = (textNode as Text).parentElement;
-								if (parentElement) {
-									parentElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-								}
-								return;
-							}
-							matchCount++;
-						}
-					}
-				}
-			}
+			setCurrentMatchIndex(count > 0 ? 0 : -1);
+			return;
 		}
 
-		matchElementsRef.current = [];
+		// Adapter is the authoritative source for Fast/Giant tiers. Called
+		// exactly once per query change (the whole point of splitting effects).
+		const adapterHits = searchAdapter ? searchAdapter.findHits(searchQuery) : null;
+		const ranges = walkContainerForRanges(container, escapedQuery);
+		hitsRef.current = adapterHits;
+		rangesRef.current = ranges;
+
+		const totalCount = adapterHits ? adapterHits.length : ranges.length;
+		setTotalMatches(totalCount);
+		// New count → always reset to first match (or -1 when empty). This is
+		// what the navigate effect will scroll to on its next run.
+		setCurrentMatchIndex(totalCount > 0 ? 0 : -1);
+
+		// Paint the all-matches highlight immediately. The current-match
+		// highlight is owned by the navigate effect.
+		applyAllHighlight(ranges);
+
+		return () => {
+			clearTextHighlights();
+		};
 	}, [
 		searchQuery,
 		fileContent,
 		isMarkdown,
 		isReadableText,
 		markdownEditMode,
-		currentMatchIndex,
-		accentColor,
 		searchAdapter,
+		markdownContainerRef,
+	]);
+
+	// Navigate effect: react to currentMatchIndex / totalMatches changes
+	// (count change clears + repaints; nav swaps the current highlight). Never
+	// re-runs findHits — that's the count effect's job.
+	useEffect(() => {
+		const adapterActive = Boolean(searchAdapter);
+		const isTextLike = isMarkdown || isReadableText || adapterActive;
+		if (
+			!isTextLike ||
+			markdownEditMode ||
+			!markdownContainerRef.current ||
+			currentMatchIndex < 0 ||
+			totalMatches === 0
+		) {
+			return;
+		}
+
+		const container = markdownContainerRef.current;
+		const hits = hitsRef.current;
+		const escapedQuery = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+		if (hits && searchAdapter) {
+			// Fast/Giant: tell the tier to scroll its virtualizer. After the
+			// next paint, re-walk the DOM (cheap — only mounted text nodes) and
+			// refresh both Highlight registrations so the user sees up-to-date
+			// highlights in the newly-mounted block.
+			searchAdapter.scrollToMatch(hits[currentMatchIndex]);
+			const raf = requestAnimationFrame(() => {
+				if (!markdownContainerRef.current) return;
+				const ranges = walkContainerForRanges(markdownContainerRef.current, escapedQuery);
+				rangesRef.current = ranges;
+				applyAllHighlight(ranges);
+				// First visible range after scrollToMatch is the most likely
+				// match-of-interest; precise word-level current highlighting is
+				// B2/B3's job (tier scroll-to-offset helpers).
+				applyCurrentHighlight(ranges[0] ?? null);
+			});
+			return () => cancelAnimationFrame(raf);
+		}
+
+		// Rich tier: ranges array has every DOM match (no virtualization). Swap
+		// the current-highlight to ranges[currentMatchIndex] and scroll.
+		const ranges = rangesRef.current;
+		const targetRange = ranges[Math.min(currentMatchIndex, ranges.length - 1)] ?? null;
+		applyCurrentHighlight(targetRange);
+		if (targetRange) {
+			const rect = targetRange.getBoundingClientRect();
+			const scrollParent = contentRef.current;
+			if (scrollParent && rect) {
+				const scrollContainerRect = scrollParent.getBoundingClientRect();
+				const matchOffsetInScrollContainer =
+					rect.top - scrollContainerRect.top + scrollParent.scrollTop;
+				const scrollTop =
+					matchOffsetInScrollContainer - scrollParent.clientHeight / 2 + rect.height / 2;
+				scrollParent.scrollTo({ top: Math.max(0, scrollTop), behavior: 'smooth' });
+			}
+		} else if (!hasHighlightApi() && ranges.length === 0) {
+			// Old-browser fallback path (count from raw string, no DOM ranges):
+			// walk the DOM for the Nth match and scroll its parent into view.
+			const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+			const searchRegex = new RegExp(escapedQuery, 'gi');
+			let matchCount = 0;
+			let textNode: Node | null;
+			while ((textNode = walker.nextNode())) {
+				const text = (textNode as Text).textContent || '';
+				const nodeMatches = text.match(searchRegex);
+				if (nodeMatches) {
+					for (let i = 0; i < nodeMatches.length; i++) {
+						if (matchCount === currentMatchIndex) {
+							const parentElement = (textNode as Text).parentElement;
+							parentElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+							return;
+						}
+						matchCount++;
+					}
+				}
+			}
+		}
+	}, [
+		currentMatchIndex,
+		totalMatches,
+		isMarkdown,
+		isReadableText,
+		markdownEditMode,
+		searchAdapter,
+		searchQuery,
+		markdownContainerRef,
+		contentRef,
 	]);
 
 	// Handle search in edit mode - count matches, paint highlights, and update state

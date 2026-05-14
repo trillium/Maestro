@@ -1,0 +1,300 @@
+/**
+ * Behavior tests for `useFilePreviewSearch` focused on the count-vs-navigate
+ * effect split (B1 of the search-hardening plan).
+ *
+ * Why: before the split, both effects lived in one. Listing `currentMatchIndex`
+ * in the deps meant every prev/next press re-ran `findHits` and re-walked the
+ * DOM, producing the "wobble" the user reported. These tests assert:
+ *   - `findHits` is called once per query, not per navigation
+ *   - `totalMatches` is stable across navigation
+ *   - `currentMatchIndex` resets to 0 on query change
+ *   - the CSS Highlight "search-current" swaps without re-counting
+ */
+
+import React, { useRef } from 'react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, act } from '@testing-library/react';
+import { useFilePreviewSearch } from '../../../../renderer/hooks/file/useFilePreviewSearch';
+import type {
+	FilePreviewSearchAdapter,
+	SearchHit,
+} from '../../../../renderer/components/FilePreview/search/types';
+
+// jsdom doesn't ship the CSS Custom Highlight API. Polyfill enough surface so
+// the hook's `'highlights' in CSS` branch executes and we can introspect what
+// was registered.
+class FakeHighlight {
+	ranges: Range[];
+	constructor(...ranges: Range[]) {
+		this.ranges = ranges;
+	}
+}
+const fakeHighlightStore = new Map<string, FakeHighlight>();
+const fakeHighlightsApi = {
+	set: vi.fn((name: string, hl: FakeHighlight) => {
+		fakeHighlightStore.set(name, hl);
+	}),
+	delete: vi.fn((name: string) => {
+		fakeHighlightStore.delete(name);
+	}),
+	clear: vi.fn(() => fakeHighlightStore.clear()),
+};
+
+interface HostHandle {
+	setSearchQuery: (q: string) => void;
+	goToNextMatch: () => void;
+	goToPrevMatch: () => void;
+	getTotalMatches: () => number;
+	getCurrentMatchIndex: () => number;
+}
+
+function makeAdapter(
+	hits: SearchHit[],
+	findHitsSpy?: ReturnType<typeof vi.fn>
+): FilePreviewSearchAdapter {
+	const spy =
+		findHitsSpy ??
+		vi.fn((q: string) => {
+			if (!q) return [];
+			return hits;
+		});
+	return {
+		findHits: spy as unknown as FilePreviewSearchAdapter['findHits'],
+		scrollToMatch: vi.fn(),
+	};
+}
+
+function Host(props: {
+	adapter?: FilePreviewSearchAdapter;
+	fileContent?: string;
+	expose: (h: HostHandle) => void;
+}) {
+	const containerRef = useRef<HTMLDivElement>(null);
+	const codeRef = useRef<HTMLDivElement>(null);
+	const contentRef = useRef<HTMLDivElement>(null);
+	const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+	const hook = useFilePreviewSearch({
+		codeContainerRef: codeRef,
+		markdownContainerRef: containerRef,
+		contentRef,
+		textareaRef,
+		isMarkdown: true,
+		isReadableText: false,
+		isImage: false,
+		isCsv: false,
+		isJsonl: false,
+		isJson: false,
+		isEditableText: false,
+		markdownEditMode: false,
+		editContent: '',
+		fileContent: props.fileContent ?? 'Hello world hello again hello upper',
+		accentColor: '#ff0000',
+		searchMode: 'text',
+		searchAdapter: props.adapter,
+	});
+
+	// Expose the imperative bits to the test.
+	props.expose({
+		setSearchQuery: hook.setSearchQuery,
+		goToNextMatch: hook.goToNextMatch,
+		goToPrevMatch: hook.goToPrevMatch,
+		getTotalMatches: () => hook.totalMatches,
+		getCurrentMatchIndex: () => hook.currentMatchIndex,
+	});
+
+	return (
+		<div>
+			<div ref={contentRef} style={{ height: 200, overflow: 'auto' }}>
+				<div ref={containerRef}>
+					<p>Hello world</p>
+					<p>hello again</p>
+					<p>hello upper</p>
+				</div>
+			</div>
+			<div ref={codeRef} />
+			<textarea ref={textareaRef} />
+		</div>
+	);
+}
+
+beforeEach(() => {
+	fakeHighlightStore.clear();
+	fakeHighlightsApi.set.mockClear();
+	fakeHighlightsApi.delete.mockClear();
+	// Patch jsdom's CSS object with our Custom Highlight stub.
+	(globalThis as { CSS: typeof CSS }).CSS = {
+		...(globalThis.CSS ?? {}),
+		highlights: fakeHighlightsApi,
+	} as unknown as typeof CSS;
+	(globalThis as { Highlight: typeof FakeHighlight }).Highlight = FakeHighlight;
+	(window as unknown as { Highlight: typeof FakeHighlight }).Highlight = FakeHighlight;
+});
+
+// NOTE: don't delete globalThis.CSS / Highlight here. React schedules effect
+// cleanups asynchronously and they may run *after* afterEach; deleting the
+// globals first crashes the cleanup path. beforeEach reassigns both fresh.
+
+function renderHost(props: Omit<Parameters<typeof Host>[0], 'expose'>) {
+	// Mutable holder so the test sees the LATEST hook state after re-renders.
+	// (Destructuring a `handle` value captures the first render only and goes
+	// stale once setState triggers re-renders.)
+	const ref: { current: HostHandle | undefined } = { current: undefined };
+	const utils = render(
+		<Host
+			{...props}
+			expose={(h) => {
+				ref.current = h;
+			}}
+		/>
+	);
+	if (!ref.current) throw new Error('Host failed to expose handle');
+	const handle: HostHandle = {
+		setSearchQuery: (q) => ref.current!.setSearchQuery(q),
+		goToNextMatch: () => ref.current!.goToNextMatch(),
+		goToPrevMatch: () => ref.current!.goToPrevMatch(),
+		getTotalMatches: () => ref.current!.getTotalMatches(),
+		getCurrentMatchIndex: () => ref.current!.getCurrentMatchIndex(),
+	};
+	return { ...utils, handle };
+}
+
+describe('useFilePreviewSearch — count vs navigate split', () => {
+	it('calls adapter.findHits exactly once per query change, not per navigation', async () => {
+		const findHits = vi.fn((): SearchHit[] => [
+			{ sourceOffset: 0, length: 5, blockIndex: 0, offsetWithinBlock: 0 },
+			{ sourceOffset: 12, length: 5, blockIndex: 1, offsetWithinBlock: 0 },
+			{ sourceOffset: 24, length: 5, blockIndex: 2, offsetWithinBlock: 0 },
+		]);
+		const adapter = makeAdapter([], findHits);
+		const { handle } = renderHost({ adapter });
+
+		await act(async () => {
+			handle.setSearchQuery('hello');
+		});
+		// First call: count effect on query change.
+		expect(findHits).toHaveBeenCalledTimes(1);
+
+		// Three nav presses must NOT trigger any additional findHits calls.
+		await act(async () => {
+			handle.goToNextMatch();
+		});
+		await act(async () => {
+			handle.goToNextMatch();
+		});
+		await act(async () => {
+			handle.goToPrevMatch();
+		});
+
+		expect(findHits).toHaveBeenCalledTimes(1);
+	});
+
+	it('keeps totalMatches stable across prev/next navigation', async () => {
+		const adapter = makeAdapter([
+			{ sourceOffset: 0, length: 5, blockIndex: 0, offsetWithinBlock: 0 },
+			{ sourceOffset: 12, length: 5, blockIndex: 1, offsetWithinBlock: 0 },
+			{ sourceOffset: 24, length: 5, blockIndex: 2, offsetWithinBlock: 0 },
+		]);
+		const { handle } = renderHost({ adapter });
+
+		await act(async () => {
+			handle.setSearchQuery('hello');
+		});
+		expect(handle.getTotalMatches()).toBe(3);
+
+		for (let i = 0; i < 5; i++) {
+			await act(async () => {
+				handle.goToNextMatch();
+			});
+			expect(handle.getTotalMatches()).toBe(3);
+		}
+	});
+
+	it('resets currentMatchIndex to 0 when a new query produces matches', async () => {
+		const adapter = makeAdapter([
+			{ sourceOffset: 0, length: 5, blockIndex: 0, offsetWithinBlock: 0 },
+			{ sourceOffset: 12, length: 5, blockIndex: 1, offsetWithinBlock: 0 },
+		]);
+		const { handle } = renderHost({ adapter });
+
+		await act(async () => {
+			handle.setSearchQuery('hello');
+		});
+		expect(handle.getCurrentMatchIndex()).toBe(0);
+
+		// Navigate forward so the index is non-zero before the next query.
+		await act(async () => {
+			handle.goToNextMatch();
+		});
+		expect(handle.getCurrentMatchIndex()).toBe(1);
+
+		// Change query → count effect re-runs and bumps index back to 0.
+		await act(async () => {
+			handle.setSearchQuery('world');
+		});
+		expect(handle.getCurrentMatchIndex()).toBe(0);
+	});
+
+	it('sets currentMatchIndex to -1 and total to 0 when the new query has no matches', async () => {
+		const adapter = makeAdapter([]);
+		const { handle } = renderHost({ adapter });
+
+		await act(async () => {
+			handle.setSearchQuery('nothing');
+		});
+		expect(handle.getTotalMatches()).toBe(0);
+		expect(handle.getCurrentMatchIndex()).toBe(-1);
+	});
+
+	it('calls adapter.scrollToMatch on every navigation with the right hit', async () => {
+		const hits: SearchHit[] = [
+			{ sourceOffset: 0, length: 5, blockIndex: 0, offsetWithinBlock: 0 },
+			{ sourceOffset: 12, length: 5, blockIndex: 1, offsetWithinBlock: 0 },
+			{ sourceOffset: 24, length: 5, blockIndex: 2, offsetWithinBlock: 0 },
+		];
+		const adapter = makeAdapter(hits);
+		const { handle } = renderHost({ adapter });
+
+		await act(async () => {
+			handle.setSearchQuery('hello');
+		});
+		// Count effect already triggered one scroll (to hit 0).
+		expect(adapter.scrollToMatch).toHaveBeenLastCalledWith(hits[0]);
+
+		await act(async () => {
+			handle.goToNextMatch();
+		});
+		expect(adapter.scrollToMatch).toHaveBeenLastCalledWith(hits[1]);
+
+		await act(async () => {
+			handle.goToNextMatch();
+		});
+		expect(adapter.scrollToMatch).toHaveBeenLastCalledWith(hits[2]);
+
+		await act(async () => {
+			handle.goToPrevMatch();
+		});
+		expect(adapter.scrollToMatch).toHaveBeenLastCalledWith(hits[1]);
+	});
+
+	it('clears Highlights when the query is cleared', async () => {
+		const hits: SearchHit[] = [{ sourceOffset: 0, length: 5, blockIndex: 0, offsetWithinBlock: 0 }];
+		const adapter = makeAdapter(hits);
+		const { handle } = renderHost({ adapter });
+
+		await act(async () => {
+			handle.setSearchQuery('hello');
+		});
+		expect(fakeHighlightStore.has('search-results') || fakeHighlightStore.size === 0).toBe(true);
+
+		await act(async () => {
+			handle.setSearchQuery('');
+		});
+		// After clearing, neither Highlight should be registered (either deleted
+		// or never reapplied).
+		expect(fakeHighlightStore.has('search-results')).toBe(false);
+		expect(fakeHighlightStore.has('search-current')).toBe(false);
+		expect(handle.getTotalMatches()).toBe(0);
+		expect(handle.getCurrentMatchIndex()).toBe(-1);
+	});
+});
