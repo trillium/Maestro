@@ -508,7 +508,7 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => {
 		autoHideMenuBar: false,
 		moderatorStandingInstructions: '',
 		spellCheck: false,
-		claudeCodeHeadlessMode: 'api',
+		claudeCodeHeadlessMode: 'auto',
 		claudeCodeAutoFallbackToApiOnLimit: true,
 
 		// ============================================================================

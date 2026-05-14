@@ -24,6 +24,7 @@ import {
 	getAgentSessionOriginsStore,
 	getSshRemoteById,
 } from './stores';
+import { runSettingsMigrations } from './stores/migrations';
 import {
 	registerGitHandlers,
 	registerAutorunHandlers,
@@ -175,6 +176,10 @@ if (!installationId) {
 	store.set('installationId', installationId);
 	logger.info('Generated new installation ID', 'Startup', { installationId });
 }
+
+// Apply one-time settings migrations. Each migration is idempotent and
+// short-circuits via a marker key persisted in the settings store.
+runSettingsMigrations(store);
 
 // Initialize WakaTime heartbeat manager
 const wakatimeManager = new WakaTimeManager(store);

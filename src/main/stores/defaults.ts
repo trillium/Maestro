@@ -73,11 +73,15 @@ export const SETTINGS_DEFAULTS: MaestroSettings = {
 	wakatimeDetailedTracking: false,
 	totalActiveTimeMs: 0,
 	spellCheck: false,
-	// Claude Code headless mode (phase 2 default: 'api' = parity with current behavior).
-	// Nested under `claudeCode` so electron-store dot-notation access works
-	// (e.g. settingsStore.get('claudeCode.headlessMode')).
+	// Claude Code headless mode. Phase 3 ships `'auto'` as the shipping default —
+	// `maestro-p` is the cheapest viable mode per turn, with auto-fallback to
+	// `claude --print` when the Max plan quota is hit. Users who explicitly chose
+	// `'api'` under the phase 2 default are preserved by the migration in
+	// `./migrations/claudeCodeHeadlessModeAuto.ts`. Nested under `claudeCode` so
+	// electron-store dot-notation access works (e.g.
+	// `settingsStore.get('claudeCode.headlessMode')`).
 	claudeCode: {
-		headlessMode: 'api',
+		headlessMode: 'auto',
 		autoFallbackToApiOnLimit: true,
 	},
 };

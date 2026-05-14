@@ -149,6 +149,13 @@ describe('stores/defaults', () => {
 		it('should have null installationId by default', () => {
 			expect(SETTINGS_DEFAULTS.installationId).toBeNull();
 		});
+
+		it("should default claudeCode.headlessMode to 'auto' (phase 3 shipping default)", () => {
+			expect(SETTINGS_DEFAULTS.claudeCode).toEqual({
+				headlessMode: 'auto',
+				autoFallbackToApiOnLimit: true,
+			});
+		});
 	});
 
 	describe('SESSIONS_DEFAULTS', () => {

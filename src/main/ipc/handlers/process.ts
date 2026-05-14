@@ -230,13 +230,13 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 						modeReason: 'auto' as const,
 					};
 
-					const headlessModeRaw = settingsStore.get('claudeCode.headlessMode', 'api');
+					const headlessModeRaw = settingsStore.get('claudeCode.headlessMode', 'auto');
 					const headlessMode: ClaudeHeadlessMode =
 						headlessModeRaw === 'interactive' ||
 						headlessModeRaw === 'api' ||
 						headlessModeRaw === 'auto'
 							? headlessModeRaw
-							: 'api';
+							: 'auto';
 					const autoFallbackOnLimit =
 						settingsStore.get('claudeCode.autoFallbackToApiOnLimit', true) !== false;
 

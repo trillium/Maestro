@@ -13,11 +13,11 @@
  * module only logs a one-liner per sampled key and a final summary; it never
  * blocks the rest of app startup.
  *
- * Phase 2 default for `claudeCode.headlessMode` is still `'api'`, so this
- * primarily benefits users who flip the setting (or the per-tab override) to
- * `interactive` / `auto`. Sampling on startup costs ~one `maestro-p --status`
- * roundtrip per Claude account in use (the wrapper's `STATUS_QUIESCENCE_MS`
- * is 1.5s; the outer 30s timeout caps the worst case).
+ * Phase 3 ships `'auto'` as the shipping default for `claudeCode.headlessMode`,
+ * so this primes the snapshot store for the very first turn of every recent
+ * account. Sampling on startup costs ~one `maestro-p --status` roundtrip per
+ * Claude account in use (the wrapper's `STATUS_QUIESCENCE_MS` is 1.5s; the
+ * outer 30s timeout caps the worst case).
  */
 
 import { app } from 'electron';
