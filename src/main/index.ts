@@ -361,7 +361,6 @@ const windowManager = createWindowManager({
 	windowStateStore,
 	isDevelopment,
 	preloadPath: path.join(__dirname, 'preload.js'),
-	rendererPath: path.join(__dirname, '../renderer/index.html'),
 	rendererProductionUrl: `${RENDERER_SCHEME}://app/index.html`,
 	devServerUrl: devServerUrl,
 	useNativeTitleBar,
@@ -459,7 +458,12 @@ app
 				const relative =
 					requestedPath === '/' || requestedPath === '' ? '/index.html' : requestedPath;
 				const resolved = path.normalize(path.join(rendererRoot, relative));
-				if (!resolved.startsWith(rendererRoot)) {
+				// path.relative() guards against prefix-traversal that startsWith()
+				// would miss (e.g. `/app/renderer-backup` passing a `/app/renderer`
+				// prefix check). A relative path that starts with `..` or is
+				// absolute means `resolved` escapes `rendererRoot`.
+				const rel = path.relative(rendererRoot, resolved);
+				if (rel.startsWith('..') || path.isAbsolute(rel)) {
 					return new Response('forbidden', { status: 403 });
 				}
 				try {
@@ -471,10 +475,16 @@ app
 						headers: { 'content-type': contentType },
 					});
 				} catch (err) {
-					logger.warn(`Renderer asset not found: ${resolved}`, 'Window', {
-						err: String(err),
-					});
-					return new Response('not found', { status: 404 });
+					// Only swallow "file not found" — surface every other fs error
+					// (EACCES, EISDIR, etc.) so Sentry / the renderer can react
+					// instead of silently 404ing on a broken install.
+					if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+						logger.warn(`Renderer asset not found: ${resolved}`, 'Window', {
+							err: String(err),
+						});
+						return new Response('not found', { status: 404 });
+					}
+					throw err;
 				}
 			});
 		}

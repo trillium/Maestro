@@ -139,8 +139,6 @@ export interface WindowManagerDependencies {
 	isDevelopment: boolean;
 	/** Path to the preload script */
 	preloadPath: string;
-	/** Path to the renderer HTML file (legacy; no longer used directly). */
-	rendererPath: string;
 	/** Custom-protocol URL used to load the production renderer. */
 	rendererProductionUrl: string;
 	/** Development server URL */
