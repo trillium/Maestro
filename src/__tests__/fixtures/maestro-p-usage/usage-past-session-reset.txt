@@ -1,0 +1,13 @@
+Claude Code Usage
+
+Current session
+[█████░░░░░░░░░░░░░░░░░░░░░░░] 5% used
+Resets 6pm (America/Chicago)
+
+Current week (all models)
+[██████████████░░░░░░░░░░░░░░] 60% used
+Resets May 16 at 6pm (America/Chicago)
+
+Current week (Sonnet only)
+[█░░░░░░░░░░░░░░░░░░░░░░░░░░░] 1% used
+Resets May 16 at 6pm (America/Chicago)
