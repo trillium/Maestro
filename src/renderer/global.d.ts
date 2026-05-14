@@ -299,6 +299,12 @@ interface MaestroAPI {
 				sshRemote: { id: string; name: string; host: string } | null
 			) => void
 		) => () => void;
+		onClaudeModeResolved: (
+			callback: (
+				sessionId: string,
+				resolution: { mode: 'interactive' | 'api'; reason: 'user' | 'auto' | 'limit' }
+			) => void
+		) => () => void;
 		onRemoteCommand: (
 			callback: (sessionId: string, command: string, inputMode?: 'ai' | 'terminal') => void
 		) => () => void;

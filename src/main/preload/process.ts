@@ -243,6 +243,30 @@ export function createProcessApi() {
 		},
 
 		/**
+		 * Subscribe to Claude headless-mode resolution events.
+		 *
+		 * Emitted by the desktop spawn handler after `selectMode()` decides which
+		 * backend (api vs interactive/maestro-p) to launch for a Claude Code turn.
+		 * The renderer mirrors the resolved {mode, reason} onto
+		 * `session.claudeInteractive` so the UI (badges in phase 3) reflects what
+		 * actually spawned.
+		 */
+		onClaudeModeResolved: (
+			callback: (
+				sessionId: string,
+				resolution: { mode: 'interactive' | 'api'; reason: 'user' | 'auto' | 'limit' }
+			) => void
+		): (() => void) => {
+			const handler = (
+				_: unknown,
+				sessionId: string,
+				resolution: { mode: 'interactive' | 'api'; reason: 'user' | 'auto' | 'limit' }
+			) => callback(sessionId, resolution);
+			ipcRenderer.on('process:claude-mode-resolved', handler);
+			return () => ipcRenderer.removeListener('process:claude-mode-resolved', handler);
+		},
+
+		/**
 		 * Subscribe to SSH remote execution status
 		 * Emitted when a process starts executing via SSH on a remote host
 		 */

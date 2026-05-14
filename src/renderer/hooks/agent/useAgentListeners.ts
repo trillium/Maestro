@@ -1586,6 +1586,39 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 		);
 
 		// ================================================================
+		// onClaudeModeResolved — mirror the main-process mode selection onto
+		// session.claudeInteractive so the badge UI (phase 3) sees what spawned.
+		// ================================================================
+		const unsubscribeClaudeModeResolved = window.maestro.process.onClaudeModeResolved?.(
+			(
+				sessionId: string,
+				resolution: { mode: 'interactive' | 'api'; reason: 'user' | 'auto' | 'limit' }
+			) => {
+				setSessions((prev) =>
+					prev.map((s) => {
+						if (s.id !== sessionId) return s;
+						const current = s.claudeInteractive;
+						if (
+							current &&
+							current.mode === resolution.mode &&
+							current.modeReason === resolution.reason
+						) {
+							return s;
+						}
+						return {
+							...s,
+							claudeInteractive: {
+								...(current ?? {}),
+								mode: resolution.mode,
+								modeReason: resolution.reason,
+							},
+						};
+					})
+				);
+			}
+		);
+
+		// ================================================================
 		// Cleanup — unsubscribe all listeners on unmount
 		// ================================================================
 		return () => {
@@ -1599,6 +1632,7 @@ export function useAgentListeners(deps: UseAgentListenersDeps): void {
 			unsubscribeAgentError();
 			unsubscribeThinkingChunk?.();
 			unsubscribeSshRemote?.();
+			unsubscribeClaudeModeResolved?.();
 			unsubscribeToolExecution?.();
 			// Cancel any pending thinking chunk RAF and clear buffer
 			if (thinkingChunkRafIdRef.current !== null) {
