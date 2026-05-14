@@ -33,7 +33,7 @@ import {
 	loadAllSettings,
 	selectIsLeaderboardRegistered,
 } from '../../stores/settingsStore';
-import type { DocumentGraphLayoutType } from '../../stores/settingsStore';
+import type { DocumentGraphLayoutType, ClaudeHeadlessMode } from '../../stores/settingsStore';
 
 export interface UseSettingsReturn {
 	// Loading state
@@ -325,6 +325,12 @@ export interface UseSettingsReturn {
 	// Spell check
 	spellCheck: boolean;
 	setSpellCheck: (value: boolean) => void;
+
+	// Claude Code headless mode (controls whether Claude spawns via api or interactive)
+	claudeCodeHeadlessMode: ClaudeHeadlessMode;
+	setClaudeCodeHeadlessMode: (value: ClaudeHeadlessMode) => void;
+	claudeCodeAutoFallbackToApiOnLimit: boolean;
+	setClaudeCodeAutoFallbackToApiOnLimit: (value: boolean) => void;
 }
 
 export function useSettings(): UseSettingsReturn {

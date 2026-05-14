@@ -43,6 +43,7 @@ import { getOpenInLabel, isLinuxPlatform } from '../../../utils/platformUtils';
 import { ToggleButtonGroup } from '../../ToggleButtonGroup';
 import { SettingCheckbox } from '../../SettingCheckbox';
 import { EnvVarsEditor } from '../EnvVarsEditor';
+import { ClaudeInteractiveModeSection } from '../ClaudeInteractiveModeSection';
 
 export interface GeneralTabProps {
 	theme: Theme;
@@ -112,6 +113,11 @@ export function GeneralTab({ theme, isOpen }: GeneralTabProps) {
 		setWakatimeApiKey,
 		wakatimeDetailedTracking,
 		setWakatimeDetailedTracking,
+		// Claude Code headless mode
+		claudeCodeHeadlessMode,
+		setClaudeCodeHeadlessMode,
+		claudeCodeAutoFallbackToApiOnLimit,
+		setClaudeCodeAutoFallbackToApiOnLimit,
 	} = useSettings();
 
 	// Shell state
@@ -741,6 +747,15 @@ export function GeneralTab({ theme, isOpen }: GeneralTabProps) {
 					/>
 				</div>
 			</div>
+
+			{/* Claude Interactive Mode (headless mode + quota snapshots) */}
+			<ClaudeInteractiveModeSection
+				theme={theme}
+				headlessMode={claudeCodeHeadlessMode}
+				onHeadlessModeChange={setClaudeCodeHeadlessMode}
+				autoFallbackToApiOnLimit={claudeCodeAutoFallbackToApiOnLimit}
+				onAutoFallbackToApiOnLimitChange={setClaudeCodeAutoFallbackToApiOnLimit}
+			/>
 
 			{/* Automatic Tab Naming */}
 			<SettingCheckbox

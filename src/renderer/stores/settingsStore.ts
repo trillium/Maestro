@@ -45,6 +45,12 @@ import { commitCommandPrompt } from '../../prompts';
 export type DocumentGraphLayoutType = 'mindmap' | 'radial' | 'force';
 const DOCUMENT_GRAPH_LAYOUT_TYPES: DocumentGraphLayoutType[] = ['mindmap', 'radial', 'force'];
 
+/**
+ * Claude Code headless mode (mirrors `ClaudeHeadlessMode` in the main-process
+ * mode selector). Local type alias so the renderer doesn't depend on main code.
+ */
+export type ClaudeHeadlessMode = 'interactive' | 'api' | 'auto';
+
 // ============================================================================
 // Default Constants
 // ============================================================================
@@ -260,6 +266,10 @@ export interface SettingsStoreState {
 	autoHideMenuBar: boolean;
 	moderatorStandingInstructions: string;
 	spellCheck: boolean;
+	// Claude Code headless mode — persisted as nested `claudeCode.*` keys on
+	// the electron-store side; flattened here for ergonomic selector access.
+	claudeCodeHeadlessMode: ClaudeHeadlessMode;
+	claudeCodeAutoFallbackToApiOnLimit: boolean;
 }
 
 export interface SettingsStoreActions {
@@ -338,6 +348,8 @@ export interface SettingsStoreActions {
 	setAutoHideMenuBar: (value: boolean) => void;
 	setModeratorStandingInstructions: (value: string) => void;
 	setSpellCheck: (value: boolean) => void;
+	setClaudeCodeHeadlessMode: (value: ClaudeHeadlessMode) => void;
+	setClaudeCodeAutoFallbackToApiOnLimit: (value: boolean) => void;
 
 	// Async setters
 	setLogLevel: (value: string) => Promise<void>;
@@ -496,6 +508,8 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => {
 		autoHideMenuBar: false,
 		moderatorStandingInstructions: '',
 		spellCheck: false,
+		claudeCodeHeadlessMode: 'api',
+		claudeCodeAutoFallbackToApiOnLimit: true,
 
 		// ============================================================================
 		// Simple Setters
@@ -941,6 +955,18 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => {
 		setSpellCheck: (value) => {
 			set({ spellCheck: value });
 			window.maestro.settings.set('spellCheck', value);
+		},
+
+		setClaudeCodeHeadlessMode: (value) => {
+			set({ claudeCodeHeadlessMode: value });
+			// electron-store dot-notation lands on the nested `claudeCode` block
+			// declared in `SETTINGS_DEFAULTS`. The selector reads the same key.
+			window.maestro.settings.set('claudeCode.headlessMode', value);
+		},
+
+		setClaudeCodeAutoFallbackToApiOnLimit: (value) => {
+			set({ claudeCodeAutoFallbackToApiOnLimit: value });
+			window.maestro.settings.set('claudeCode.autoFallbackToApiOnLimit', value);
 		},
 
 		// ============================================================================
@@ -1877,6 +1903,20 @@ export async function loadAllSettings(): Promise<void> {
 		if (allSettings['spellCheck'] !== undefined)
 			patch.spellCheck = allSettings['spellCheck'] as boolean;
 
+		// Claude Code headless mode lives under the nested `claudeCode` object.
+		const claudeCodeSettings = allSettings['claudeCode'] as
+			| { headlessMode?: unknown; autoFallbackToApiOnLimit?: unknown }
+			| undefined;
+		if (claudeCodeSettings && typeof claudeCodeSettings === 'object') {
+			const headlessRaw = claudeCodeSettings.headlessMode;
+			if (headlessRaw === 'interactive' || headlessRaw === 'api' || headlessRaw === 'auto') {
+				patch.claudeCodeHeadlessMode = headlessRaw;
+			}
+			if (typeof claudeCodeSettings.autoFallbackToApiOnLimit === 'boolean') {
+				patch.claudeCodeAutoFallbackToApiOnLimit = claudeCodeSettings.autoFallbackToApiOnLimit;
+			}
+		}
+
 		// Apply the entire patch in one setState call
 		patch.settingsLoaded = true;
 		useSettingsStore.setState(patch);
@@ -1998,5 +2038,7 @@ export function getSettingsActions() {
 		setAutoHideMenuBar: state.setAutoHideMenuBar,
 		setModeratorStandingInstructions: state.setModeratorStandingInstructions,
 		setSpellCheck: state.setSpellCheck,
+		setClaudeCodeHeadlessMode: state.setClaudeCodeHeadlessMode,
+		setClaudeCodeAutoFallbackToApiOnLimit: state.setClaudeCodeAutoFallbackToApiOnLimit,
 	};
 }
