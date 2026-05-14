@@ -73,6 +73,13 @@ export const SETTINGS_DEFAULTS: MaestroSettings = {
 	wakatimeDetailedTracking: false,
 	totalActiveTimeMs: 0,
 	spellCheck: false,
+	// Claude Code headless mode (phase 2 default: 'api' = parity with current behavior).
+	// Nested under `claudeCode` so electron-store dot-notation access works
+	// (e.g. settingsStore.get('claudeCode.headlessMode')).
+	claudeCode: {
+		headlessMode: 'api',
+		autoFallbackToApiOnLimit: true,
+	},
 };
 
 export const SESSIONS_DEFAULTS: SessionsData = {
