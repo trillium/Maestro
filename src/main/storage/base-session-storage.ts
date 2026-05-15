@@ -30,6 +30,7 @@ import type {
 	SessionReadOptions,
 	SessionMessage,
 } from '../agents/session-storage';
+import type { SessionFileMatcher } from './session-file-watcher';
 
 /**
  * A simplified message representation for search purposes.
@@ -38,6 +39,34 @@ import type {
 export interface SearchableMessage {
 	role: 'user' | 'assistant';
 	textContent: string;
+}
+
+/**
+ * Spec describing how to watch an agent's on-disk session storage for activity
+ * from sessions Maestro did NOT spawn (e.g., the same user invoking the agent
+ * CLI directly outside of Maestro).
+ *
+ * Consumed by {@link SessionFileWatcher} (see
+ * `src/main/storage/session-file-watcher.ts`) — `rootDir` is fed to chokidar
+ * and `fileMatcher` decides which filesystem events map to which session.
+ *
+ * Same-user / local-FS only. SSH remote watching is out of scope.
+ */
+export interface StorageWatchSpec {
+	/**
+	 * Absolute path to the directory the watcher should observe recursively.
+	 * Missing or unreadable directories are tolerated — it's normal for some
+	 * supported agents to be uninstalled on a given machine.
+	 */
+	rootDir: string;
+	/**
+	 * Pure, synchronous mapping from a path relative to `rootDir` (using the
+	 * platform's native separator) to a session match, or `null` for paths
+	 * that don't represent a tracked session file (sidecars, wrong depth,
+	 * unrelated junk). Called on every filesystem event, so it MUST NOT
+	 * perform I/O.
+	 */
+	fileMatcher: SessionFileMatcher;
 }
 
 /**
@@ -87,6 +116,26 @@ export abstract class BaseSessionStorage implements AgentSessionStorage {
 		projectPath: string,
 		sshConfig?: SshRemoteConfig
 	): Promise<SearchableMessage[]>;
+
+	/**
+	 * Return the spec needed to watch this agent's on-disk session storage for
+	 * activity from sessions Maestro did NOT spawn. Same-user / local-FS only —
+	 * SSH remote watching is out of scope (see {@link SessionFileWatcher}).
+	 *
+	 * Default returns `null`, meaning "this agent does not expose externally
+	 * observable session files." Subclasses whose CLIs write per-session JSONL
+	 * to a stable path should override and return a {@link StorageWatchSpec}.
+	 *
+	 * The returned `fileMatcher` is called on every chokidar event under
+	 * `rootDir`, so it MUST be synchronous, pure, and tolerant of unrelated
+	 * paths (return `null`).
+	 *
+	 * @returns Spec describing the storage root and a path-to-session matcher,
+	 *   or `null` if this agent does not support file-based activity watching.
+	 */
+	getStorageWatchSpec(): StorageWatchSpec | null {
+		return null;
+	}
 
 	/**
 	 * Cursor-based pagination over listSessions() results.
