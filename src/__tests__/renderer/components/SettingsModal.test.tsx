@@ -214,6 +214,9 @@ vi.mock('../../../renderer/hooks/settings/useSettings', () => ({
 		// Conductor profile settings
 		conductorProfile: '',
 		setConductorProfile: vi.fn(),
+		// Global show-Maestro hotkey
+		globalShowHotkey: [],
+		setGlobalShowHotkey: vi.fn(),
 		// Context management settings
 		contextManagementSettings: {
 			autoGroomContexts: true,
