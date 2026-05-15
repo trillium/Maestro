@@ -769,7 +769,8 @@ interface MaestroAPI {
 			mainRepoCwd: string,
 			worktreePath: string,
 			branchName: string,
-			sshRemoteId?: string
+			sshRemoteId?: string,
+			baseBranch?: string
 		) => Promise<GitWorktreeSetupResult>;
 		worktreeCheckout: (
 			worktreePath: string,

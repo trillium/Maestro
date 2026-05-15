@@ -473,12 +473,19 @@ export function useAppRemoteEventListeners(deps: UseAppRemoteEventListenersDeps)
 					// Build a WorktreeRunTarget from the mobile/web LaunchWorktreeConfig.
 					// Mobile currently only supports create-new; existing-open/closed are
 					// desktop-only flows.
+					//
+					// baseBranch resolution order: explicit `worktree.baseBranch` from the
+					// caller (CLI `--base-branch`, mobile picker) wins. Fall back to
+					// `prTargetBranch` only for older clients that conflated the two, then
+					// to "main" as a final default. This keeps payloads from pre-baseBranch
+					// CLIs working while letting newer callers pick a base independent of
+					// the PR target.
 					const spawnConfig: BatchRunConfig = {
 						...batchConfig,
 						worktreeTarget: {
 							mode: 'create-new',
 							newBranchName: config.worktree.branchName,
-							baseBranch: config.worktree.prTargetBranch || 'main',
+							baseBranch: config.worktree.baseBranch || config.worktree.prTargetBranch || 'main',
 							createPROnCompletion: Boolean(config.worktree.createPROnCompletion),
 						},
 					};
