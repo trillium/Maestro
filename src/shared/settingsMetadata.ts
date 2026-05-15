@@ -171,6 +171,13 @@ export const SETTINGS_METADATA: Record<string, SettingMetadata> = {
 		default: false,
 		category: 'appearance',
 	},
+	showLeftPanelLocationPills: {
+		description:
+			'Show the REMOTE / LOCAL / GIT location pills next to agents in the left side bar.',
+		type: 'boolean',
+		default: true,
+		category: 'appearance',
+	},
 	fileExplorerIconTheme: {
 		description: 'Icon theme for the file explorer sidebar. Options: default, material, or none.',
 		type: 'string',

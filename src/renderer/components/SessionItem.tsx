@@ -169,6 +169,7 @@ export const SessionItem = memo(function SessionItem({
 }: SessionItemProps) {
 	const showWorktreePill = useSettingsStore((s) => s.showWorktreePill);
 	const showWorktreeBranchName = useSettingsStore((s) => s.showWorktreeBranchName);
+	const showLeftPanelLocationPills = useSettingsStore((s) => s.showLeftPanelLocationPills);
 	const colorBlindMode = useSettingsStore((s) => s.colorBlindMode);
 
 	// Parent agents (sessions with worktreeConfig) get an inline chevron toggle.
@@ -180,7 +181,8 @@ export const SessionItem = memo(function SessionItem({
 	// Location pills: SSH indicator always shown (even in bookmarks) since it
 	// signals where prompts will run. GIT/LOCAL are suppressed in the bookmark
 	// variant to keep the row compact.
-	const showLocationPills = variant !== 'worktree' && session.toolType !== 'terminal';
+	const showLocationPills =
+		showLeftPanelLocationPills && variant !== 'worktree' && session.toolType !== 'terminal';
 	const showGitLocalBadge = showLocationPills && variant !== 'bookmark';
 
 	// Status indicator: enhanced color/animation/label, plus hollow signal for

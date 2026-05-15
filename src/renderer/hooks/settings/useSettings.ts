@@ -385,6 +385,8 @@ export interface UseSettingsReturn {
 	// Left side panel
 	showLeftPanelGroupMemberCount: boolean;
 	setShowLeftPanelGroupMemberCount: (value: boolean) => void;
+	showLeftPanelLocationPills: boolean;
+	setShowLeftPanelLocationPills: (value: boolean) => void;
 
 	// Group Chat settings
 	moderatorStandingInstructions: string;

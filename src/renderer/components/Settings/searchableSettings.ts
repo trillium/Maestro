@@ -520,7 +520,7 @@ export const DISPLAY_SETTINGS: SearchableSetting[] = [
 		tabLabel: 'Display',
 		label: 'Left Side Panel',
 		description:
-			'Configure how the left side bar displays groups, including member counts after group names',
+			'Configure the left side bar: group member counts and REMOTE / LOCAL / GIT location pills',
 		keywords: [
 			'left',
 			'side',
@@ -535,6 +535,14 @@ export const DISPLAY_SETTINGS: SearchableSetting[] = [
 			'members',
 			'ungrouped',
 			'agents',
+			'remote',
+			'local',
+			'git',
+			'pill',
+			'pills',
+			'badge',
+			'badges',
+			'location',
 		],
 	},
 	{
