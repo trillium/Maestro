@@ -67,6 +67,10 @@ export interface ManagedProcess {
 	jsonBufferCorrupted?: boolean;
 	lastCommand?: string;
 	sessionIdEmitted?: boolean;
+	/** Agent-reported session id once extracted from the output stream.
+	 *  Currently only populated for agents whose post-exit lifecycle we
+	 *  need to inspect on disk (Copilot CLI events.jsonl). */
+	agentSessionId?: string;
 	resultEmitted?: boolean;
 	errorEmitted?: boolean;
 	startTime: number;

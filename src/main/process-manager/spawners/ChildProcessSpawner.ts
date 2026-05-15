@@ -496,7 +496,12 @@ export class ChildProcessSpawner {
 			// emitted near the end of stdout (e.g., tab-naming, batch operations).
 			// The 'close' event guarantees all stdio streams are closed first.
 			childProcess.on('close', (code) => {
-				this.exitHandler.handleExit(sessionId, code || 0);
+				void this.exitHandler.handleExit(sessionId, code || 0).catch((err) => {
+					logger.error('[ProcessManager] handleExit threw', 'ProcessManager', {
+						sessionId,
+						error: String(err),
+					});
+				});
 			});
 
 			// Handle errors
