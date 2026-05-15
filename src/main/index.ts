@@ -65,8 +65,6 @@ import {
 	registerAttachmentsHandlers,
 	registerWebHandlers,
 	ensureCliServer,
-	startCliDiscoveryWatchdog,
-	stopCliDiscoveryWatchdog,
 	registerLeaderboardHandlers,
 	registerNotificationsHandlers,
 	registerSymphonyHandlers,
@@ -524,7 +522,6 @@ app
 			settingsStore: store,
 		};
 		await ensureCliServer(cliServerDeps);
-		startCliDiscoveryWatchdog(cliServerDeps);
 
 		// Initialize core prompts from disk (must happen before features that use them)
 		try {
@@ -1043,9 +1040,6 @@ quitHandler = createQuitHandler({
 	closeStatsDB,
 	stopCliWatcher: () => {
 		cliWatcher.stop();
-		// Tear down the discovery-file watchdog so it doesn't try to rewrite
-		// the file after the quit handler has just deleted it.
-		stopCliDiscoveryWatchdog();
 		// Stop Cue engine on app quit
 		if (cueEngine?.isEnabled()) {
 			cueEngine.stop();

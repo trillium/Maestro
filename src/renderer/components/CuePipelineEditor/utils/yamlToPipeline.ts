@@ -299,6 +299,8 @@ function triggerGroupKey(sub: CueSubscription): string {
 		repo: sub.repo ?? null,
 		poll_minutes: sub.poll_minutes ?? null,
 		gh_state: sub.gh_state ?? null,
+		retrigger_on_comments: sub.retrigger_on_comments ?? null,
+		max_notifications: sub.max_notifications ?? null,
 		label: sub.label ?? null,
 		filter,
 	});
@@ -326,6 +328,8 @@ function extractTriggerConfig(sub: CueSubscription): TriggerNodeData['config'] {
 		case 'github.issue':
 			if (sub.repo != null) config.repo = sub.repo;
 			if (sub.poll_minutes != null) config.poll_minutes = sub.poll_minutes;
+			if (sub.retrigger_on_comments === true) config.retrigger_on_comments = true;
+			if (sub.max_notifications != null) config.max_notifications = sub.max_notifications;
 			break;
 		case 'task.pending':
 			if (sub.watch != null) config.watch = sub.watch;

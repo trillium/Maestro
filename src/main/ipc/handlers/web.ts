@@ -69,8 +69,8 @@ function refreshCliDiscoveryFile(port: number, token: string): void {
 
 /**
  * Verify the discovery file on disk matches the running server. Used by
- * `ensureCliServer` and the watchdog to detect silent write failures or
- * external interference (deleted file, stale pid, etc.).
+ * `ensureCliServer` to detect silent write failures or external interference
+ * (deleted file, stale pid, etc.).
  */
 function discoveryFileMatches(port: number, token: string): boolean {
 	const info = readCliServerInfo();
@@ -154,59 +154,6 @@ export async function ensureCliServer(deps: WebHandlerDependencies): Promise<boo
 		'CliServer'
 	);
 	return false;
-}
-
-/** Active watchdog timer, if any. */
-let cliDiscoveryWatchdog: ReturnType<typeof setInterval> | null = null;
-
-/** Default interval between watchdog checks. */
-const CLI_WATCHDOG_INTERVAL_MS = 30_000;
-
-/**
- * Start a periodic watchdog that re-publishes the CLI discovery file whenever
- * it goes missing or drifts out of sync with the running server. Defense in
- * depth for cases the main-path retry can't catch (file deleted externally,
- * disk hiccup after a successful write, etc.).
- *
- * Safe to call multiple times — the previous timer is cleared first. Pass
- * `intervalMs` only for tests; production uses the default 30s interval.
- */
-export function startCliDiscoveryWatchdog(
-	deps: WebHandlerDependencies,
-	intervalMs: number = CLI_WATCHDOG_INTERVAL_MS
-): void {
-	stopCliDiscoveryWatchdog();
-	cliDiscoveryWatchdog = setInterval(() => {
-		const webServer = deps.getWebServer();
-		if (!webServer || !webServer.isActive()) {
-			return;
-		}
-		const port = webServer.getPort();
-		const token = webServer.getSecurityToken();
-		if (discoveryFileMatches(port, token)) {
-			return;
-		}
-		logger.warn('CLI discovery file is missing or stale — watchdog republishing', 'CliServer');
-		try {
-			refreshCliDiscoveryFile(port, token);
-		} catch (err: any) {
-			logger.error(
-				`Watchdog failed to refresh CLI discovery file: ${err?.message ?? err}`,
-				'CliServer'
-			);
-		}
-	}, intervalMs);
-	// Don't keep the event loop alive just for the watchdog — Electron's
-	// lifecycle owns process exit and we don't want this timer to delay quit.
-	cliDiscoveryWatchdog.unref?.();
-}
-
-/** Stop the discovery-file watchdog (called on app quit). */
-export function stopCliDiscoveryWatchdog(): void {
-	if (cliDiscoveryWatchdog) {
-		clearInterval(cliDiscoveryWatchdog);
-		cliDiscoveryWatchdog = null;
-	}
 }
 
 /**

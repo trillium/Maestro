@@ -182,12 +182,20 @@ if (typeof window !== 'undefined') {
 		},
 	});
 
-	// Mock IntersectionObserver
-	global.IntersectionObserver = vi.fn().mockImplementation(() => ({
-		observe: vi.fn(),
-		unobserve: vi.fn(),
-		disconnect: vi.fn(),
-	}));
+	// Mock IntersectionObserver as a proper class so `new IntersectionObserver(...)`
+	// works for components that construct one (e.g. JumpToMessageTopButton).
+	// vi.fn().mockImplementation(arrow) is not callable as a constructor here.
+	class MockIntersectionObserver {
+		constructor(_cb: IntersectionObserverCallback, _opts?: IntersectionObserverInit) {}
+		observe = vi.fn();
+		unobserve = vi.fn();
+		disconnect = vi.fn();
+		takeRecords = vi.fn(() => []);
+		root = null;
+		rootMargin = '';
+		thresholds: ReadonlyArray<number> = [];
+	}
+	global.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver;
 
 	// Mock Element.prototype.scrollTo - needed for components that use scrollTo
 	Element.prototype.scrollTo = vi.fn();

@@ -48,13 +48,7 @@ import { registerDocumentGraphHandlers, DocumentGraphHandlerDependencies } from 
 import { registerSshRemoteHandlers, SshRemoteHandlerDependencies } from './ssh-remote';
 import { registerFilesystemHandlers } from './filesystem';
 import { registerAttachmentsHandlers, AttachmentsHandlerDependencies } from './attachments';
-import {
-	registerWebHandlers,
-	ensureCliServer,
-	startCliDiscoveryWatchdog,
-	stopCliDiscoveryWatchdog,
-	WebHandlerDependencies,
-} from './web';
+import { registerWebHandlers, ensureCliServer, WebHandlerDependencies } from './web';
 import { registerLeaderboardHandlers, LeaderboardHandlerDependencies } from './leaderboard';
 import { registerNotificationsHandlers } from './notifications';
 import { registerSymphonyHandlers, SymphonyHandlerDependencies } from './symphony';
@@ -106,12 +100,7 @@ export { registerSshRemoteHandlers };
 export { registerFilesystemHandlers };
 export { registerAttachmentsHandlers };
 export type { AttachmentsHandlerDependencies };
-export {
-	registerWebHandlers,
-	ensureCliServer,
-	startCliDiscoveryWatchdog,
-	stopCliDiscoveryWatchdog,
-};
+export { registerWebHandlers, ensureCliServer };
 export type { WebHandlerDependencies };
 export { registerLeaderboardHandlers };
 export type { LeaderboardHandlerDependencies };

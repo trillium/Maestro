@@ -13,6 +13,27 @@ import { AutoRunnerHelpModal } from './AutoRunnerHelpModal';
 // Module-level constant — react-markdown re-parses the document if rehypePlugins
 // changes by reference, so the array must be hoisted out of render.
 const REHYPE_PLUGINS = [rehypeSlug];
+
+// Memoized ReactMarkdown wrapper. AutoRunInner re-renders on every keystroke in
+// the AI input (input state lives in App.tsx and cascades down), and ReactMarkdown
+// has no internal memo — re-parsing a 100KB+ doc on each keystroke cost ~170ms
+// per keystroke. Shallow-compare so the parse is skipped when content, plugins,
+// and components are reference-equal. The hook already memoizes the latter two.
+const MemoizedMarkdownPreview = memo(function MemoizedMarkdownPreview(props: {
+	content: string;
+	remarkPlugins: any[];
+	components: any;
+}) {
+	return (
+		<ReactMarkdown
+			remarkPlugins={props.remarkPlugins}
+			rehypePlugins={REHYPE_PLUGINS}
+			components={props.components}
+		>
+			{props.content}
+		</ReactMarkdown>
+	);
+});
 import { ResetTasksConfirmModal } from '../ResetTasksConfirmModal';
 import { AutoRunDocumentSelector } from './AutoRunDocumentSelector';
 import { AutoRunLightbox } from './AutoRunLightbox';
@@ -698,13 +719,11 @@ const AutoRunInner = forwardRef<AutoRunHandle, AutoRunProps>(function AutoRunInn
 							}}
 						>
 							<style>{proseStyles}</style>
-							<ReactMarkdown
+							<MemoizedMarkdownPreview
 								remarkPlugins={remarkPlugins}
-								rehypePlugins={REHYPE_PLUGINS}
 								components={markdownComponents}
-							>
-								{localContent || '*No content yet. Switch to Edit mode to start writing.*'}
-							</ReactMarkdown>
+								content={localContent || '*No content yet. Switch to Edit mode to start writing.*'}
+							/>
 						</div>
 					)}
 				</div>

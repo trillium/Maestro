@@ -252,6 +252,10 @@ program
 	)
 	.option('--branch <name>', 'Branch name for the worktree (created if it does not exist)')
 	.option(
+		'--base-branch <name>',
+		'Ref the new branch should be based on when it does not yet exist (e.g. "rc" or "main"). Defaults to the main repo HEAD.'
+	)
+	.option(
 		'--worktree-path <path>',
 		'Filesystem path for the worktree (must be a sibling of the repo)'
 	)

@@ -24,11 +24,19 @@ import type { TemplateContext } from '../../../shared/templateVariables';
 
 // --- Mocks ---
 
-// Mock fs
+// Mock fs — only `readFileSync` is overridden (the executor uses it for prompt
+// files). Other methods (e.g. `existsSync`) pass through to the real module
+// via `importOriginal`, because pulling in `cue-template-context-builder`
+// transitively imports `cue-github-poller`, which calls `getExpandedEnv()` at
+// module-load time and needs `fs.existsSync` for nvm/path detection.
 const mockReadFileSync = vi.fn();
-vi.mock('fs', () => ({
-	readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
-}));
+vi.mock('fs', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('fs')>();
+	return {
+		...actual,
+		readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
+	};
+});
 
 // Mock crypto
 vi.mock('crypto', () => ({

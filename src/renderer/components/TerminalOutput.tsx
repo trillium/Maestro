@@ -6,7 +6,6 @@ import {
 	Copy,
 	Check,
 	ArrowDown,
-	ArrowUp,
 	Eye,
 	FileText,
 	RotateCcw,
@@ -28,11 +27,8 @@ import {
 	filterTextByLinesHelper,
 	getCachedAnsiHtml,
 } from '../utils/textProcessing';
-import {
-	jumpToMessageEdge,
-	scrollMessageToTop,
-	isTextInputTarget,
-} from '../utils/messageScrollNavigation';
+import { jumpToMessageEdge, isTextInputTarget } from '../utils/messageScrollNavigation';
+import { JumpToMessageTopButton } from './JumpToMessageTopButton';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { QueuedItemsList } from './QueuedItemsList';
@@ -888,24 +884,11 @@ const LogItemComponent = memo(
 							</>
 						))}
 					{/* Jump to top of this message - bottom left corner */}
-					<button
-						onClick={() => {
-							const container = scrollContainerRef.current;
-							const messageEl = logItemRef.current;
-							if (container && messageEl) {
-								scrollMessageToTop(container, messageEl);
-							}
-						}}
-						className="absolute bottom-2 left-2 p-1.5 rounded opacity-0 group-hover:opacity-50 hover:!opacity-100"
-						style={{
-							color: theme.colors.textDim,
-							transition: 'opacity 0.15s ease-in-out',
-						}}
-						title={`Jump to top of this message (${formatShortcutKeys(['Shift', 'ArrowUp'])} for previous)`}
-						aria-label="Jump to top of this message"
-					>
-						<ArrowUp className="w-3.5 h-3.5" />
-					</button>
+					<JumpToMessageTopButton
+						scrollContainerRef={scrollContainerRef}
+						messageRef={logItemRef}
+						theme={theme}
+					/>
 					{/* Action buttons - bottom right corner */}
 					<div
 						className="absolute bottom-2 right-2 flex items-center gap-1"

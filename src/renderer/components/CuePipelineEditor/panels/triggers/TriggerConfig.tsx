@@ -8,9 +8,22 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Theme } from '../../../../types';
 import type { PipelineNode, TriggerNodeData } from '../../../../../shared/cue-pipeline-types';
+import { CUE_COLOR } from '../../../../../shared/cue-pipeline-types';
 import { useDebouncedCallback } from '../../../../hooks/utils';
 import { getInputStyle, getLabelStyle } from './triggerConfigStyles';
 import { CueSelect } from '../CueSelect';
+
+/** Sentinel value matching `cue-github-poller.UNLIMITED_NOTIFICATIONS`. */
+const UNLIMITED_NOTIFICATIONS = 0;
+const DEFAULT_MAX_NOTIFICATIONS = 10;
+
+/** Options shown in the per-item cap dropdown when re-trigger is enabled. */
+const MAX_NOTIFICATION_OPTIONS = [
+	{ value: '2', label: '2' },
+	{ value: '10', label: '10' },
+	{ value: '100', label: '100' },
+	{ value: String(UNLIMITED_NOTIFICATIONS), label: '∞ (unlimited)' },
+];
 
 interface TriggerConfigProps {
 	node: PipelineNode;
@@ -206,7 +219,15 @@ export function TriggerConfig({ node, theme, onUpdateNode }: TriggerConfigProps)
 				</div>
 			);
 		case 'github.pull_request':
-		case 'github.issue':
+		case 'github.issue': {
+			const retriggerEnabled = localConfig.retrigger_on_comments === true;
+			// Resolve the dropdown's selected value. An explicit value (including
+			// the `0` unlimited sentinel) takes precedence; only `undefined`
+			// falls back to the 10 default.
+			const maxValue =
+				localConfig.max_notifications === undefined
+					? DEFAULT_MAX_NOTIFICATIONS
+					: localConfig.max_notifications;
 			return (
 				<div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
 					{nameField}
@@ -231,8 +252,49 @@ export function TriggerConfig({ node, theme, onUpdateNode }: TriggerConfigProps)
 							style={themedInputStyle}
 						/>
 					</label>
+					<label
+						style={{
+							...themedLabelStyle,
+							display: 'flex',
+							flexDirection: 'row',
+							alignItems: 'center',
+							gap: 6,
+							cursor: 'pointer',
+						}}
+					>
+						<input
+							type="checkbox"
+							checked={retriggerEnabled}
+							onChange={(e) => {
+								const next = {
+									...localConfig,
+									retrigger_on_comments: e.target.checked,
+								};
+								// Drop max_notifications when the toggle goes off so the
+								// YAML stays clean — the cap is meaningless without it.
+								if (!e.target.checked) delete next.max_notifications;
+								setLocalConfig(next);
+								debouncedUpdate(next);
+							}}
+							style={{ accentColor: CUE_COLOR }}
+						/>
+						<span>Re-trigger on new activity (comments, edits, reviews)</span>
+					</label>
+					{retriggerEnabled && (
+						<label htmlFor="cue-max-notifications-select" style={themedLabelStyle}>
+							Max re-triggers per {data.eventType === 'github.pull_request' ? 'PR' : 'issue'}
+							<CueSelect
+								id="cue-max-notifications-select"
+								value={String(maxValue)}
+								options={MAX_NOTIFICATION_OPTIONS}
+								onChange={(v) => updateConfig('max_notifications', parseInt(v, 10))}
+								theme={theme}
+							/>
+						</label>
+					)}
 				</div>
 			);
+		}
 		case 'task.pending':
 			return (
 				<div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
