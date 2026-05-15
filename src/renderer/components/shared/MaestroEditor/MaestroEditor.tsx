@@ -9,11 +9,9 @@
  * changes don't remount the editor.
  *
  * Column-mode editing primitives — rectangular selection on Option+drag
- * via `rectangularSelection()` and the multi-cursor commands via the
- * caller-bound keymap — are wired here; the actual chord bindings for
- * add-cursor-above / add-cursor-below are filled in by a sibling hook
- * in a follow-up task (this file currently passes an empty array as the
- * column-mode keymap stub).
+ * via `rectangularSelection()` and add-cursor-above / add-cursor-below
+ * via `useColumnModeKeymap()` — are wired here automatically. The
+ * multi-cursor chords are user-rebindable through Settings → Shortcuts.
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
@@ -27,7 +25,6 @@ import {
 	keymap,
 	placeholder as placeholderExt,
 	rectangularSelection,
-	type KeyBinding,
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 
@@ -38,6 +35,7 @@ import {
 	hasLanguageSupport,
 	loadLanguageExtension,
 } from '../../FilePreview/giantPreview/languageLoader';
+import { useColumnModeKeymap } from './useColumnModeKeymap';
 
 export type MaestroEditorLanguage =
 	| 'markdown'
@@ -70,12 +68,6 @@ export interface MaestroEditorProps {
 	 * `true` to mark the event handled and stop CM6's default handling.
 	 */
 	onKeyDown?: (event: KeyboardEvent) => boolean;
-	/**
-	 * Caller-supplied keymap for column-mode multi-cursor commands. Phase 1
-	 * leaves this empty; the follow-up hook (`useColumnModeKeymap`) returns
-	 * the real bindings once the shortcut wiring lands.
-	 */
-	columnModeKeymap?: KeyBinding[];
 }
 
 /**
@@ -107,10 +99,10 @@ export const MaestroEditor = forwardRef<MaestroEditorHandle, MaestroEditorProps>
 			extensions,
 			onBlur,
 			onKeyDown,
-			columnModeKeymap,
 		},
 		ref
 	) {
+		const columnModeKeymap = useColumnModeKeymap();
 		const hostRef = useRef<HTMLDivElement | null>(null);
 		const viewRef = useRef<EditorView | null>(null);
 
@@ -164,11 +156,11 @@ export const MaestroEditor = forwardRef<MaestroEditorHandle, MaestroEditorProps>
 				drawSelection(),
 				dropCursor(),
 				highlightActiveLine(),
-				// Combined keymap: defaults + history + caller-supplied
-				// column-mode bindings. The column-mode slice is held in a
-				// compartment so it can be swapped without rebuilding.
+				// Combined keymap: defaults + history. The column-mode slice
+				// is held in its own compartment so the hook can swap its
+				// bindings without rebuilding the EditorView.
 				keymap.of([...defaultKeymap, ...historyKeymap]),
-				columnKeymapCompartment.current.of(keymap.of(columnModeKeymap ?? [])),
+				columnKeymapCompartment.current.of(keymap.of(columnModeKeymap)),
 				languageCompartment.current.of([]),
 				themeCompartment.current.of(buildEditorTheme(theme)),
 				readOnlyCompartment.current.of(EditorState.readOnly.of(readOnly)),
@@ -284,12 +276,12 @@ export const MaestroEditor = forwardRef<MaestroEditorHandle, MaestroEditorProps>
 			});
 		}, [extensions]);
 
-		// Reconfigure column-mode keymap.
+		// Reconfigure column-mode keymap when the user rebinds the chord.
 		useEffect(() => {
 			const view = viewRef.current;
 			if (!view) return;
 			view.dispatch({
-				effects: columnKeymapCompartment.current.reconfigure(keymap.of(columnModeKeymap ?? [])),
+				effects: columnKeymapCompartment.current.reconfigure(keymap.of(columnModeKeymap)),
 			});
 		}, [columnModeKeymap]);
 

@@ -119,6 +119,16 @@ export const DEFAULT_SHORTCUTS: Record<string, Shortcut> = {
 		label: 'Focus Active Tab',
 		keys: ['Alt', 'Meta', 'f'],
 	},
+	columnModeAddCursorAbove: {
+		id: 'columnModeAddCursorAbove',
+		label: 'Column Mode: Add Cursor Above',
+		keys: ['Alt', 'Meta', 'ArrowUp'],
+	},
+	columnModeAddCursorBelow: {
+		id: 'columnModeAddCursorBelow',
+		label: 'Column Mode: Add Cursor Below',
+		keys: ['Alt', 'Meta', 'ArrowDown'],
+	},
 };
 
 // Non-editable shortcuts (displayed in help but not configurable)
