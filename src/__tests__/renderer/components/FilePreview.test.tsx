@@ -1,9 +1,35 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
+import { EditorSelection, type EditorState } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 import { FilePreview } from '../../../renderer/components/FilePreview';
 import { formatShortcutKeys } from '../../../renderer/utils/shortcutFormatter';
 import { useSettingsStore } from '../../../renderer/stores/settingsStore';
+
+// Skip the dynamic CM6 language loader so the edit-mode editor stays
+// deterministic in tests — we never need the actual language pack here.
+vi.mock('../../../renderer/components/FilePreview/giantPreview/languageLoader', () => ({
+	loadLanguageExtension: vi.fn(async () => null),
+	hasLanguageSupport: () => false,
+}));
+
+/**
+ * Resolve the live CM6 EditorView mounted by MaestroEditor inside the
+ * rendered FilePreview. Returns `null` when the editor isn't on screen
+ * (e.g. preview mode rather than edit mode).
+ */
+function findEditorView(container: HTMLElement): EditorView | null {
+	const cmRoot = container.querySelector('.cm-editor');
+	if (!cmRoot) return null;
+	return EditorView.findFromDOM(cmRoot as HTMLElement);
+}
+
+function getEditorState(container: HTMLElement): EditorState {
+	const view = findEditorView(container);
+	if (!view) throw new Error('CodeMirror editor not mounted');
+	return view.state;
+}
 
 import { mockTheme } from '../../helpers/mockTheme';
 // Mock lucide-react icons
@@ -666,8 +692,8 @@ describe('FilePreview', () => {
 			expect(setMarkdownEditMode).toHaveBeenCalledWith(true);
 		});
 
-		it('shows textarea when in edit mode for non-markdown files', () => {
-			render(
+		it('mounts the MaestroEditor with file content in edit mode for non-markdown files', () => {
+			const { container } = render(
 				<FilePreview
 					{...defaultProps}
 					file={{ name: 'config.json', content: '{"key": "value"}', path: '/test/config.json' }}
@@ -675,17 +701,40 @@ describe('FilePreview', () => {
 				/>
 			);
 
-			const textarea = screen.getByRole('textbox');
-			expect(textarea).toBeInTheDocument();
-			expect(textarea).toHaveValue('{"key": "value"}');
+			const view = findEditorView(container);
+			expect(view).not.toBeNull();
+			expect(view!.state.doc.toString()).toBe('{"key": "value"}');
 		});
 	});
 
 	describe('edit mode keyboard navigation', () => {
+		// CM6's contentDOM is contentEditable and exposes no setSelectionRange.
+		// We seed the selection by dispatching a transaction directly on the
+		// EditorView, fire the keydown event into the editor's contentDOM, then
+		// assert against `view.state.selection.main`. This exercises the same
+		// path CM6 takes for a real user keystroke — through `runFor` →
+		// `keymap.of(...)` → command — and avoids the brittle textarea-shaped
+		// selection API from the pre-migration implementation.
 		const multiLineContent = 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5';
 
-		it('Cmd+Shift+Up selects from cursor to beginning of document', () => {
-			render(
+		// jsdom reports an empty `navigator.platform`, so CM6 resolves `Mod-` to
+		// Ctrl (the non-Mac branch). We fire `ctrlKey: true` to hit the same
+		// keymap entry the real Cmd-ArrowUp on macOS resolves through `Mod-`.
+		function seedAndFireArrow(
+			container: HTMLElement,
+			caret: number,
+			arrow: 'ArrowUp' | 'ArrowDown',
+			modifiers: { ctrlKey?: boolean; shiftKey?: boolean }
+		) {
+			const view = findEditorView(container);
+			expect(view).not.toBeNull();
+			view!.dispatch({ selection: EditorSelection.single(caret) });
+			fireEvent.keyDown(view!.contentDOM, { key: arrow, ...modifiers });
+			return view!;
+		}
+
+		it('Mod+Shift+Up selects from cursor to beginning of document', () => {
+			const { container } = render(
 				<FilePreview
 					{...defaultProps}
 					file={{ name: 'test.txt', content: multiLineContent, path: '/test/test.txt' }}
@@ -693,18 +742,17 @@ describe('FilePreview', () => {
 				/>
 			);
 
-			const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-			// Place cursor at position 14 (start of Line 3)
-			textarea.setSelectionRange(14, 14);
-
-			fireEvent.keyDown(textarea, { key: 'ArrowUp', metaKey: true, shiftKey: true });
-
-			expect(textarea.selectionStart).toBe(0);
-			expect(textarea.selectionEnd).toBe(14);
+			const view = seedAndFireArrow(container, 14, 'ArrowUp', {
+				ctrlKey: true,
+				shiftKey: true,
+			});
+			const sel = view.state.selection.main;
+			expect(sel.anchor).toBe(14);
+			expect(sel.head).toBe(0);
 		});
 
-		it('Cmd+Shift+Down selects from cursor to end of document', () => {
-			render(
+		it('Mod+Shift+Down selects from cursor to end of document', () => {
+			const { container } = render(
 				<FilePreview
 					{...defaultProps}
 					file={{ name: 'test.txt', content: multiLineContent, path: '/test/test.txt' }}
@@ -712,18 +760,17 @@ describe('FilePreview', () => {
 				/>
 			);
 
-			const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-			// Place cursor at position 14 (start of Line 3)
-			textarea.setSelectionRange(14, 14);
-
-			fireEvent.keyDown(textarea, { key: 'ArrowDown', metaKey: true, shiftKey: true });
-
-			expect(textarea.selectionStart).toBe(14);
-			expect(textarea.selectionEnd).toBe(multiLineContent.length);
+			const view = seedAndFireArrow(container, 14, 'ArrowDown', {
+				ctrlKey: true,
+				shiftKey: true,
+			});
+			const sel = view.state.selection.main;
+			expect(sel.anchor).toBe(14);
+			expect(sel.head).toBe(multiLineContent.length);
 		});
 
-		it('Cmd+Up moves cursor to beginning without selection', () => {
-			render(
+		it('Mod+Up moves cursor to beginning without selection', () => {
+			const { container } = render(
 				<FilePreview
 					{...defaultProps}
 					file={{ name: 'test.txt', content: multiLineContent, path: '/test/test.txt' }}
@@ -731,17 +778,14 @@ describe('FilePreview', () => {
 				/>
 			);
 
-			const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-			textarea.setSelectionRange(14, 14);
-
-			fireEvent.keyDown(textarea, { key: 'ArrowUp', metaKey: true });
-
-			expect(textarea.selectionStart).toBe(0);
-			expect(textarea.selectionEnd).toBe(0);
+			const view = seedAndFireArrow(container, 14, 'ArrowUp', { ctrlKey: true });
+			const sel = view.state.selection.main;
+			expect(sel.from).toBe(0);
+			expect(sel.to).toBe(0);
 		});
 
-		it('Cmd+Down moves cursor to end without selection', () => {
-			render(
+		it('Mod+Down moves cursor to end without selection', () => {
+			const { container } = render(
 				<FilePreview
 					{...defaultProps}
 					file={{ name: 'test.txt', content: multiLineContent, path: '/test/test.txt' }}
@@ -749,13 +793,10 @@ describe('FilePreview', () => {
 				/>
 			);
 
-			const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-			textarea.setSelectionRange(14, 14);
-
-			fireEvent.keyDown(textarea, { key: 'ArrowDown', metaKey: true });
-
-			expect(textarea.selectionStart).toBe(multiLineContent.length);
-			expect(textarea.selectionEnd).toBe(multiLineContent.length);
+			const view = seedAndFireArrow(container, 14, 'ArrowDown', { ctrlKey: true });
+			const sel = view.state.selection.main;
+			expect(sel.from).toBe(multiLineContent.length);
+			expect(sel.to).toBe(multiLineContent.length);
 		});
 	});
 
@@ -963,7 +1004,7 @@ describe('FilePreview', () => {
 	describe('edit content state persistence', () => {
 		it('calls onEditContentChange when editing content', () => {
 			const onEditContentChange = vi.fn();
-			render(
+			const { container } = render(
 				<FilePreview
 					{...defaultProps}
 					file={{ name: 'test.md', content: 'original content', path: '/test/test.md' }}
@@ -972,14 +1013,20 @@ describe('FilePreview', () => {
 				/>
 			);
 
-			const textarea = screen.getByRole('textbox');
-			fireEvent.change(textarea, { target: { value: 'modified content' } });
+			// Replace the whole doc via a CM6 transaction — this triggers the
+			// same updateListener path MaestroEditor uses for user keystrokes,
+			// which calls `onChange` (wired to setEditContent → onEditContentChange).
+			const view = findEditorView(container);
+			expect(view).not.toBeNull();
+			view!.dispatch({
+				changes: { from: 0, to: view!.state.doc.length, insert: 'modified content' },
+			});
 
 			expect(onEditContentChange).toHaveBeenCalledWith('modified content');
 		});
 
 		it('uses externalEditContent when provided', () => {
-			render(
+			const { container } = render(
 				<FilePreview
 					{...defaultProps}
 					file={{ name: 'test.md', content: 'original content', path: '/test/test.md' }}
@@ -988,12 +1035,11 @@ describe('FilePreview', () => {
 				/>
 			);
 
-			const textarea = screen.getByRole('textbox');
-			expect(textarea).toHaveValue('externally managed content');
+			expect(getEditorState(container).doc.toString()).toBe('externally managed content');
 		});
 
 		it('falls back to internal state when externalEditContent is not provided', () => {
-			render(
+			const { container } = render(
 				<FilePreview
 					{...defaultProps}
 					file={{ name: 'test.md', content: 'file content', path: '/test/test.md' }}
@@ -1001,12 +1047,11 @@ describe('FilePreview', () => {
 				/>
 			);
 
-			const textarea = screen.getByRole('textbox');
-			expect(textarea).toHaveValue('file content');
+			expect(getEditorState(container).doc.toString()).toBe('file content');
 		});
 
 		it('preserves external edit content across re-renders', () => {
-			const { rerender } = render(
+			const { container, rerender } = render(
 				<FilePreview
 					{...defaultProps}
 					file={{ name: 'test.md', content: 'original', path: '/test/test.md' }}
@@ -1025,8 +1070,7 @@ describe('FilePreview', () => {
 				/>
 			);
 
-			const textarea = screen.getByRole('textbox');
-			expect(textarea).toHaveValue('preserved content');
+			expect(getEditorState(container).doc.toString()).toBe('preserved content');
 		});
 	});
 
@@ -1533,8 +1577,8 @@ print("world")
 			expect(screen.getByTestId('edit-icon')).toBeInTheDocument();
 		});
 
-		it('shows textarea when in edit mode for CSV files', () => {
-			render(
+		it('mounts the MaestroEditor with CSV content in edit mode', () => {
+			const { container } = render(
 				<FilePreview
 					{...defaultProps}
 					file={{ name: 'data.csv', content: 'Name,Age\nAlice,30', path: '/test/data.csv' }}
@@ -1542,9 +1586,9 @@ print("world")
 				/>
 			);
 
-			const textarea = screen.getByRole('textbox');
-			expect(textarea).toBeInTheDocument();
-			expect(textarea).toHaveValue('Name,Age\nAlice,30');
+			const view = findEditorView(container);
+			expect(view).not.toBeNull();
+			expect(view!.state.doc.toString()).toBe('Name,Age\nAlice,30');
 		});
 
 		it('does not render CsvTableRenderer when in edit mode', () => {

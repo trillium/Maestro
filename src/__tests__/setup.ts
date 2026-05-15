@@ -182,12 +182,23 @@ if (typeof window !== 'undefined') {
 		},
 	});
 
-	// Mock IntersectionObserver
-	global.IntersectionObserver = vi.fn().mockImplementation(() => ({
-		observe: vi.fn(),
-		unobserve: vi.fn(),
-		disconnect: vi.fn(),
-	}));
+	// Mock IntersectionObserver — must be a proper class so consumers that
+	// call `new IntersectionObserver(...)` (e.g. CodeMirror 6's DOMObserver
+	// in MaestroEditor / GiantPreview) succeed in jsdom.
+	class MockIntersectionObserver {
+		callback: IntersectionObserverCallback;
+		constructor(callback: IntersectionObserverCallback) {
+			this.callback = callback;
+		}
+		observe = vi.fn();
+		unobserve = vi.fn();
+		disconnect = vi.fn();
+		takeRecords = vi.fn(() => []);
+		root = null;
+		rootMargin = '';
+		thresholds = [];
+	}
+	global.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver;
 
 	// Mock Element.prototype.scrollTo - needed for components that use scrollTo
 	Element.prototype.scrollTo = vi.fn();

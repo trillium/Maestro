@@ -15,7 +15,7 @@
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
-import { Compartment, EditorState, type Extension } from '@codemirror/state';
+import { Compartment, EditorState, type Extension, Prec } from '@codemirror/state';
 import {
 	EditorView,
 	crosshairCursor,
@@ -82,6 +82,25 @@ export interface MaestroEditorProps {
 	 * it via `EditorView.contentAttributes`.
 	 */
 	spellCheck?: boolean;
+}
+
+/**
+ * Bundle the read-only marker with a transaction filter that drops
+ * user-driven input transactions. `EditorState.readOnly` alone is just a
+ * marker that CM6's built-in input handlers consult — programmatic
+ * `view.dispatch({ changes, userEvent: 'input.type' })` calls (or any other
+ * user-input-tagged transaction) bypass it. The filter closes that gap so
+ * `readOnly` actually blocks edits coming from input events. Non-user
+ * dispatches (e.g. our own `value`-prop sync) pass through untouched.
+ */
+function readOnlyExtensions(readOnly: boolean): Extension {
+	if (!readOnly) {
+		return EditorState.readOnly.of(false);
+	}
+	return [
+		EditorState.readOnly.of(true),
+		EditorState.transactionFilter.of((tr) => (tr.docChanged && tr.isUserEvent('input') ? [] : tr)),
+	];
 }
 
 /**
@@ -156,12 +175,22 @@ export const MaestroEditor = forwardRef<MaestroEditorHandle, MaestroEditorProps>
 				}
 			});
 
-			const domEventHandlers = EditorView.domEventHandlers({
+			// Consumer's `onKeyDown` callback wrapped at the highest precedence
+			// so it runs BEFORE CM6's default keymap (`defaultKeymap` binds
+			// Enter, Mod-Enter, etc., which would otherwise consume keystrokes
+			// the caller wants to intercept — see PromptComposerModal's
+			// plain-Enter / Ctrl-Enter send shortcut). The blur handler stays
+			// at default precedence; there's no blur conflict to worry about.
+			const userKeyDownHandler = Prec.high(
+				EditorView.domEventHandlers({
+					keydown: (event) => onKeyDownRef.current?.(event) ?? false,
+				})
+			);
+			const blurHandler = EditorView.domEventHandlers({
 				blur: () => {
 					onBlurRef.current?.();
 					return false;
 				},
-				keydown: (event) => onKeyDownRef.current?.(event) ?? false,
 			});
 
 			const baseExtensions: Extension[] = [
@@ -172,6 +201,7 @@ export const MaestroEditor = forwardRef<MaestroEditorHandle, MaestroEditorProps>
 				drawSelection(),
 				dropCursor(),
 				highlightActiveLine(),
+				userKeyDownHandler,
 				// Combined keymap: defaults + history. The column-mode slice
 				// is held in its own compartment so the hook can swap its
 				// bindings without rebuilding the EditorView.
@@ -179,14 +209,14 @@ export const MaestroEditor = forwardRef<MaestroEditorHandle, MaestroEditorProps>
 				columnKeymapCompartment.current.of(keymap.of(columnModeKeymap)),
 				languageCompartment.current.of([]),
 				themeCompartment.current.of(buildEditorTheme(theme)),
-				readOnlyCompartment.current.of(EditorState.readOnly.of(readOnly)),
+				readOnlyCompartment.current.of(readOnlyExtensions(readOnly)),
 				placeholderCompartment.current.of(placeholder ? placeholderExt(placeholder) : []),
 				spellCheckCompartment.current.of(
 					spellCheck ? EditorView.contentAttributes.of({ spellcheck: 'true' }) : []
 				),
 				userExtensionsCompartment.current.of(extensions ?? []),
 				updateListener,
-				domEventHandlers,
+				blurHandler,
 			];
 
 			const view = new EditorView({
@@ -271,7 +301,7 @@ export const MaestroEditor = forwardRef<MaestroEditorHandle, MaestroEditorProps>
 			const view = viewRef.current;
 			if (!view) return;
 			view.dispatch({
-				effects: readOnlyCompartment.current.reconfigure(EditorState.readOnly.of(readOnly)),
+				effects: readOnlyCompartment.current.reconfigure(readOnlyExtensions(readOnly)),
 			});
 		}, [readOnly]);
 
