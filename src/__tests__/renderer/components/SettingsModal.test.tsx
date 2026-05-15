@@ -537,6 +537,79 @@ describe('SettingsModal', () => {
 
 			expect(screen.getByPlaceholderText('Filter shortcuts...')).toBeInTheDocument();
 		});
+
+		it('should remember and restore per-tab vertical scroll position', async () => {
+			const { container } = render(<SettingsModal {...createDefaultProps()} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			// The scrollable content panel is the one combining .p-6 + .overflow-y-auto
+			// (the sidebar nav uses overflow-y-auto but has no p-6).
+			const getContent = () => container.querySelector<HTMLDivElement>('.p-6.overflow-y-auto');
+			expect(getContent()).toBeTruthy();
+
+			// Scroll General down — simulates the user being deep in a long panel.
+			const general = getContent()!;
+			general.scrollTop = 420;
+			fireEvent.scroll(general);
+
+			// Switch to Shortcuts — never visited, should land at the top.
+			fireEvent.click(screen.getByTitle('Shortcuts'));
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+			expect(getContent()!.scrollTop).toBe(0);
+
+			// Scroll Shortcuts to a different position.
+			const shortcuts = getContent()!;
+			shortcuts.scrollTop = 180;
+			fireEvent.scroll(shortcuts);
+
+			// Back to General — restores 420.
+			fireEvent.click(screen.getByTitle('General'));
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+			expect(getContent()!.scrollTop).toBe(420);
+
+			// Back to Shortcuts — restores 180.
+			fireEvent.click(screen.getByTitle('Shortcuts'));
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+			expect(getContent()!.scrollTop).toBe(180);
+		});
+
+		it('should restore the saved scroll position when the modal is reopened', async () => {
+			const first = render(<SettingsModal {...createDefaultProps()} />);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			fireEvent.click(screen.getByTitle('Display'));
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			const getContent = (root: HTMLElement) =>
+				root.querySelector<HTMLDivElement>('.p-6.overflow-y-auto');
+			const display = getContent(first.container)!;
+			display.scrollTop = 300;
+			fireEvent.scroll(display);
+
+			first.unmount();
+
+			// Reopen — last tab AND last scroll position should be restored together.
+			const second = render(<SettingsModal {...createDefaultProps()} />);
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(50);
+			});
+
+			expect(getContent(second.container)?.scrollTop).toBe(300);
+		});
 	});
 
 	describe('keyboard tab navigation', () => {

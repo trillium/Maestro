@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, memo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo } from 'react';
 import {
 	X,
 	Key,
@@ -57,10 +57,17 @@ type SettingsTabId =
 // `initialTab` prop (e.g. when a caller deep-links into a specific tab).
 let lastOpenSettingsTab: SettingsTabId | null = null;
 
+// In-memory only — last vertical scroll position per tab. Pairs with
+// lastOpenSettingsTab so the user can reopen Settings (or flip between tabs)
+// and land exactly where they were, instead of having to re-find the control
+// they were tweaking. Resets on app restart.
+const lastTabScrollPositions = new Map<SettingsTabId, number>();
+
 // Test-only: reset the remembered tab so suites that assume a fresh open
 // (e.g. "modal opens to General") aren't polluted by prior tests in the file.
 export function __resetLastOpenSettingsTabForTests(): void {
 	lastOpenSettingsTab = null;
+	lastTabScrollPositions.clear();
 }
 
 interface SettingsModalProps {
@@ -243,6 +250,31 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 	useEffect(() => {
 		lastOpenSettingsTab = activeTab;
 	}, [activeTab]);
+
+	// Restore the per-tab scroll position whenever the active tab changes (or
+	// the modal reopens on a remembered tab). useLayoutEffect runs after the
+	// new tab's content has committed to the DOM but before paint, so the
+	// scroll lands without a visible flash at the top. `behavior: 'auto'` is
+	// intentional — smooth-scrolling on tab switch reads as sluggish.
+	useLayoutEffect(() => {
+		if (!isOpen) return;
+		const el = contentRef.current;
+		if (!el) return;
+		const saved = lastTabScrollPositions.get(activeTab) ?? 0;
+		el.scrollTop = saved;
+	}, [activeTab, isOpen]);
+
+	// Save scroll position for the currently active tab on every scroll event.
+	// Direct map write is cheap; no throttling needed. Pairs with the restore
+	// effect above so the user can tweak a setting low in a long panel, flip
+	// to another tab to verify the effect, and come back to exactly the same
+	// position.
+	const handleContentScroll = useCallback(
+		(e: React.UIEvent<HTMLDivElement>) => {
+			lastTabScrollPositions.set(activeTab, e.currentTarget.scrollTop);
+		},
+		[activeTab]
+	);
 
 	// Store onClose in a ref to avoid re-registering layer when onClose changes
 	const onCloseRef = useRef(onClose);
@@ -530,7 +562,11 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					</nav>
 
 					{/* Content Area */}
-					<div ref={contentRef} className="flex-1 p-6 overflow-y-auto scrollbar-thin">
+					<div
+						ref={contentRef}
+						onScroll={handleContentScroll}
+						className="flex-1 p-6 overflow-y-auto scrollbar-thin"
+					>
 						{activeTab === 'general' && <GeneralTab theme={theme} isOpen={isOpen} />}
 
 						{activeTab === 'display' && <DisplayTab theme={theme} />}
