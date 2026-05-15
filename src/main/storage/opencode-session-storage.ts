@@ -32,7 +32,11 @@ import type {
 	SessionReadOptions,
 	SessionMessage,
 } from '../agents';
-import { BaseSessionStorage, type SearchableMessage } from './base-session-storage';
+import {
+	BaseSessionStorage,
+	type SearchableMessage,
+	type StorageWatchSpec,
+} from './base-session-storage';
 import type { ToolType, SshRemoteConfig } from '../../shared/types';
 import { isWindows } from '../../shared/platformDetection';
 
@@ -390,6 +394,45 @@ export class OpenCodeSessionStorage extends BaseSessionStorage {
 	 */
 	private getPartDir(messageId: string): string {
 		return path.join(OPENCODE_STORAGE_DIR, 'part', messageId);
+	}
+
+	/**
+	 * Spec for watching OpenCode's on-disk session storage.
+	 *
+	 * OpenCode does NOT append to a single session file. It writes one
+	 * `.json` file per message under `<storage>/message/<sessionId>/`, so
+	 * the activity signal is `'create'` (a brand-new file appearing inside
+	 * a per-session directory), not `'append'` like the other four agents.
+	 * Phase 4's coordinator routes on {@link StorageWatchSpec.activityEvent}
+	 * to bind to the right {@link SessionFileWatcher} event.
+	 *
+	 * Layout: `<storage>/message/<sessionId>/<messageId>.json` — exactly
+	 * three segments under `rootDir`, with the first literally `message`.
+	 * Session and part directories are intentionally ignored: session
+	 * metadata writes don't represent "the agent is thinking," and part
+	 * writes are noisy children of message creation.
+	 *
+	 * OpenCode does not encode the project cwd in the message path — it
+	 * lives in the session metadata under `<storage>/session/`. The matcher
+	 * returns `projectPath: ''`; downstream consumers must tolerate an
+	 * empty project path for OpenCode.
+	 */
+	getStorageWatchSpec(): StorageWatchSpec {
+		return {
+			rootDir: OPENCODE_STORAGE_DIR,
+			activityEvent: 'create',
+			fileMatcher: (relPath) => {
+				if (!relPath) return null;
+				const segments = relPath.split(path.sep);
+				if (segments.length !== 3) return null;
+				const [category, sessionId, filename] = segments;
+				if (category !== 'message') return null;
+				if (!sessionId) return null;
+				if (!filename.endsWith('.json')) return null;
+				if (filename === '.json') return null;
+				return { sessionId, projectPath: '' };
+			},
+		};
 	}
 
 	/**

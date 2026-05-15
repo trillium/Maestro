@@ -353,6 +353,7 @@ export class CopilotSessionStorage extends BaseSessionStorage {
 	getStorageWatchSpec(): StorageWatchSpec {
 		return {
 			rootDir: getLocalCopilotSessionStateDir(),
+			activityEvent: 'append',
 			fileMatcher: (relPath) => {
 				const segments = relPath.split(path.sep);
 				if (segments.length !== 2) return null;

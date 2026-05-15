@@ -302,6 +302,7 @@ export class ClaudeSessionStorage extends BaseSessionStorage {
 	getStorageWatchSpec(): StorageWatchSpec {
 		return {
 			rootDir: this.getProjectsDir(),
+			activityEvent: 'append',
 			fileMatcher: (relPath) => {
 				const segments = relPath.split(path.sep);
 				if (segments.length !== 2) return null;

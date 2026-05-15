@@ -186,6 +186,7 @@ export class FactoryDroidSessionStorage extends BaseSessionStorage {
 	getStorageWatchSpec(): StorageWatchSpec {
 		return {
 			rootDir: getFactorySessionsDir(),
+			activityEvent: 'append',
 			fileMatcher: (relPath) => {
 				const segments = relPath.split(path.sep);
 				if (segments.length !== 2) return null;

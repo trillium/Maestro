@@ -496,6 +496,7 @@ export class CodexSessionStorage extends BaseSessionStorage {
 	getStorageWatchSpec(): StorageWatchSpec {
 		return {
 			rootDir: this.getSessionsDir(),
+			activityEvent: 'append',
 			fileMatcher: (relPath) => {
 				const segments = relPath.split(path.sep);
 				if (segments.length !== 4) return null;

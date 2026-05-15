@@ -67,6 +67,20 @@ export interface StorageWatchSpec {
 	 * perform I/O.
 	 */
 	fileMatcher: SessionFileMatcher;
+	/**
+	 * Which {@link SessionFileWatcher} event signals "this session did
+	 * something new":
+	 * - `'append'` (default) — the session is stored as a single growing
+	 *   file (JSONL-append shape); activity = the file grew. Used by
+	 *   Claude, Codex, Copilot, Factory Droid.
+	 * - `'create'` — the session is stored as one file per message in a
+	 *   per-session directory (file-per-message shape); activity = a new
+	 *   file appears under that directory. Used by OpenCode.
+	 *
+	 * Consumers route on this field so the coordinator binds to the right
+	 * event for each agent. Omitting it is equivalent to `'append'`.
+	 */
+	activityEvent?: 'append' | 'create';
 }
 
 /**
