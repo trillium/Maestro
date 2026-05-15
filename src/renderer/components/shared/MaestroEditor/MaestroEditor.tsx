@@ -75,6 +75,13 @@ export interface MaestroEditorProps {
 	 * `true` to mark the event handled and stop CM6's default handling.
 	 */
 	onKeyDown?: (event: KeyboardEvent) => boolean;
+	/**
+	 * When true, sets `spellcheck="true"` on the editor's contentEditable
+	 * host so the browser red-underlines misspellings. CM6 doesn't expose a
+	 * top-level prop for this (unlike `<textarea spellCheck>`), so we apply
+	 * it via `EditorView.contentAttributes`.
+	 */
+	spellCheck?: boolean;
 }
 
 /**
@@ -106,6 +113,7 @@ export const MaestroEditor = forwardRef<MaestroEditorHandle, MaestroEditorProps>
 			extensions,
 			onBlur,
 			onKeyDown,
+			spellCheck = false,
 		},
 		ref
 	) {
@@ -122,6 +130,7 @@ export const MaestroEditor = forwardRef<MaestroEditorHandle, MaestroEditorProps>
 		const placeholderCompartment = useRef(new Compartment());
 		const userExtensionsCompartment = useRef(new Compartment());
 		const columnKeymapCompartment = useRef(new Compartment());
+		const spellCheckCompartment = useRef(new Compartment());
 
 		// Latest callback refs — keeps the EditorView listeners stable while
 		// allowing parents to swap their handler implementations between
@@ -172,6 +181,9 @@ export const MaestroEditor = forwardRef<MaestroEditorHandle, MaestroEditorProps>
 				themeCompartment.current.of(buildEditorTheme(theme)),
 				readOnlyCompartment.current.of(EditorState.readOnly.of(readOnly)),
 				placeholderCompartment.current.of(placeholder ? placeholderExt(placeholder) : []),
+				spellCheckCompartment.current.of(
+					spellCheck ? EditorView.contentAttributes.of({ spellcheck: 'true' }) : []
+				),
 				userExtensionsCompartment.current.of(extensions ?? []),
 				updateListener,
 				domEventHandlers,
@@ -291,6 +303,17 @@ export const MaestroEditor = forwardRef<MaestroEditorHandle, MaestroEditorProps>
 				effects: columnKeymapCompartment.current.reconfigure(keymap.of(columnModeKeymap)),
 			});
 		}, [columnModeKeymap]);
+
+		// Reconfigure spell-check attribute when the prop flips.
+		useEffect(() => {
+			const view = viewRef.current;
+			if (!view) return;
+			view.dispatch({
+				effects: spellCheckCompartment.current.reconfigure(
+					spellCheck ? EditorView.contentAttributes.of({ spellcheck: 'true' }) : []
+				),
+			});
+		}, [spellCheck]);
 
 		useImperativeHandle(
 			ref,

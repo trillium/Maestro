@@ -68,7 +68,21 @@ import type { FilePreviewSearchAdapter } from './search/types';
 import { FilePreviewHeader } from './FilePreviewHeader';
 import { ImageViewer } from './ImageViewer';
 import { FilePreviewToc } from './FilePreviewToc';
-import { HighlightedCodeEditor } from './HighlightedCodeEditor';
+import {
+	MaestroEditor,
+	type MaestroEditorHandle,
+	type MaestroEditorLanguage,
+} from '../shared/MaestroEditor/MaestroEditor';
+import { keymap } from '@codemirror/view';
+import type { Extension } from '@codemirror/state';
+import {
+	cursorDocStart,
+	cursorDocEnd,
+	cursorPageDown,
+	cursorPageUp,
+	selectDocEnd,
+	selectDocStart,
+} from '@codemirror/commands';
 import { logger } from '../../utils/logger';
 
 // Lazy-loaded large-file markdown renderer. Keeping it out of the main bundle
@@ -158,7 +172,13 @@ export const FilePreview = React.memo(
 		const codeContainerRef = useRef<HTMLDivElement>(null);
 		const contentRef = useRef<HTMLDivElement>(null);
 		const containerRef = useRef<HTMLDivElement>(null);
+		// Retained for backwards compatibility with `useFilePreviewSearch`,
+		// which still expects a textarea ref. The CM6-based MaestroEditor never
+		// attaches to this ref, so the hook's edit-mode CSS-Highlight-API path
+		// becomes a no-op — in-edit-mode search is a known regression and will
+		// be re-wired on top of CM6's decoration system in a follow-up phase.
 		const textareaRef = useRef<HTMLTextAreaElement>(null);
+		const editorRef = useRef<MaestroEditorHandle>(null);
 		const markdownContainerRef = useRef<HTMLDivElement>(null);
 		const layerIdRef = useRef<string>();
 		const cancelButtonRef = useRef<HTMLButtonElement>(null);
@@ -234,6 +254,26 @@ export const FilePreview = React.memo(
 
 		// Compute derived values - must be before any early returns but after hooks
 		const language = file ? getLanguageFromFilename(file.name) : '';
+		// Map filePreviewUtils language ids → the narrower set MaestroEditor
+		// supports. typescript/tsx route through the javascript pack (CM6's
+		// JS pack handles TS well enough for syntax-highlighting). Anything
+		// else with no dedicated pack falls back to plain.
+		const editorLanguage: MaestroEditorLanguage = useMemo(() => {
+			switch (language) {
+				case 'markdown':
+				case 'yaml':
+				case 'json':
+				case 'javascript':
+				case 'python':
+					return language;
+				case 'typescript':
+				case 'tsx':
+				case 'jsx':
+					return 'javascript';
+				default:
+					return 'plain';
+			}
+		}, [language]);
 		const isMarkdown = language === 'markdown';
 		const isHtml = file ? /\.html?$/i.test(file.name) : false;
 		const isReadableText = file ? !isMarkdown && isReadableTextPreview(file.name) : false;
@@ -305,6 +345,29 @@ export const FilePreview = React.memo(
 		//   Fast markdown  → markdownFast handle (block-virtualized hit map)
 		//   Fast text/code → textFast handle (page-virtualized hit map)
 		//   Giant any kind → GiantPreview handle (CM6 owns the search panel)
+		// Extra keybindings for the edit-mode editor:
+		//   • Cmd/Ctrl-ArrowUp/Down → doc start / end (defaultKeymap already
+		//     binds these on macOS, but we add a `Mod-` binding so Linux /
+		//     Windows match the prior textarea behavior, which honored both
+		//     metaKey and ctrlKey).
+		//   • Opt-ArrowUp/Down → page up / down (the old textarea handler did
+		//     bespoke column-preserving page math; CM6's cursorPageUp /
+		//     cursorPageDown handle the same use case correctly, including
+		//     viewport-aware scrolling).
+		// Identity is stable across renders so MaestroEditor doesn't have to
+		// rebuild its userExtensions compartment.
+		const editModeExtensions = useMemo<Extension[]>(
+			() => [
+				keymap.of([
+					{ key: 'Mod-ArrowUp', run: cursorDocStart, shift: selectDocStart },
+					{ key: 'Mod-ArrowDown', run: cursorDocEnd, shift: selectDocEnd },
+					{ key: 'Alt-ArrowUp', run: cursorPageUp },
+					{ key: 'Alt-ArrowDown', run: cursorPageDown },
+				]),
+			],
+			[]
+		);
+
 		const searchAdapter = useMemo<FilePreviewSearchAdapter | undefined>(() => {
 			if (previewTier === 'fast' && isMarkdown) {
 				return {
@@ -608,40 +671,50 @@ export const FilePreview = React.memo(
 			}
 		}, [file?.content, file?.path, externalEditContent]);
 
-		// Focus appropriate element and sync scroll position when mode changes
+		// Focus appropriate element and sync scroll position when mode changes.
+		// The editor surface is CM6 (MaestroEditor) — its scrollable element is
+		// `view.scrollDOM`, accessed via the imperative handle's `getView()`.
+		// MaestroEditor's `autoFocus` already focuses the editor on mount, but
+		// we still call `.focus()` here to cover the toggle-without-remount
+		// path (e.g. focus restoration after a click elsewhere).
 		const prevMarkdownEditModeRef = useRef(markdownEditMode);
 		useEffect(() => {
 			const wasEditMode = prevMarkdownEditModeRef.current;
 			prevMarkdownEditModeRef.current = markdownEditMode;
 
-			if (markdownEditMode && textareaRef.current) {
-				// Entering edit mode - focus textarea and sync scroll from preview
+			const editorScrollEl = editorRef.current?.getView()?.scrollDOM ?? null;
+
+			if (markdownEditMode) {
+				// Entering edit mode — focus the editor and sync scroll from preview.
 				if (!wasEditMode && contentRef.current) {
-					// Calculate scroll percentage from preview mode
 					const { scrollTop, scrollHeight, clientHeight } = contentRef.current;
 					const maxScroll = scrollHeight - clientHeight;
 					const scrollPercent = maxScroll > 0 ? scrollTop / maxScroll : 0;
 
-					// Apply scroll percentage to textarea after it renders
+					// Apply scroll percentage to editor after it mounts. The view
+					// may not be fully laid out on the same tick the parent effect
+					// fires (CM6's measure phase happens shortly after mount), so
+					// defer to rAF for stable scrollHeight readings.
 					requestAnimationFrame(() => {
-						if (textareaRef.current) {
-							const { scrollHeight: textareaScrollHeight, clientHeight: textareaClientHeight } =
-								textareaRef.current;
-							const textareaMaxScroll = textareaScrollHeight - textareaClientHeight;
-							textareaRef.current.scrollTop = Math.round(scrollPercent * textareaMaxScroll);
-						}
+						const scrollEl = editorRef.current?.getView()?.scrollDOM;
+						if (!scrollEl) return;
+						const editorMaxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
+						scrollEl.scrollTop = Math.round(scrollPercent * editorMaxScroll);
 					});
 				}
-				textareaRef.current.focus();
+				editorRef.current?.focus();
 			} else if (!markdownEditMode && wasEditMode && containerRef.current) {
-				// Exiting edit mode - focus container and sync scroll from textarea
-				if (textareaRef.current && contentRef.current) {
-					// Calculate scroll percentage from edit mode
-					const { scrollTop, scrollHeight, clientHeight } = textareaRef.current;
+				// Exiting edit mode — focus container and sync scroll from editor.
+				// Reading scroll here works in practice because React commits the
+				// JSX swap, then runs cleanup effects (which clears the editor
+				// ref), THEN runs this effect — so by this point editorRef may be
+				// null. We capture `editorScrollEl` above before any cleanup and
+				// fall back gracefully when the view is already gone.
+				if (editorScrollEl && contentRef.current) {
+					const { scrollTop, scrollHeight, clientHeight } = editorScrollEl;
 					const maxScroll = scrollHeight - clientHeight;
 					const scrollPercent = maxScroll > 0 ? scrollTop / maxScroll : 0;
 
-					// Apply scroll percentage to preview after it renders
 					requestAnimationFrame(() => {
 						if (contentRef.current) {
 							const { scrollHeight: previewScrollHeight, clientHeight: previewClientHeight } =
@@ -1396,107 +1469,36 @@ export const FilePreview = React.memo(
 							</div>
 						</div>
 					) : isEditableText && markdownEditMode ? (
-						// Edit mode - syntax-highlighted editor for any text file
-						<HighlightedCodeEditor
-							ref={textareaRef}
+						// Edit mode — CM6-backed shared editor. Replaces the old
+						// HighlightedCodeEditor (transparent textarea + Prism overlay)
+						// with MaestroEditor, which adds column-mode editing
+						// (Option+drag rectangular selection, multi-cursor chords) on
+						// top of the existing syntax-highlight + edit experience.
+						// Cmd+S / Escape stay in this onKeyDown; doc-start/end and
+						// page nav are wired through `editModeExtensions` above.
+						<MaestroEditor
+							ref={editorRef}
 							value={editContent}
 							onChange={setEditContent}
-							language={language}
-							theme={theme}
+							language={editorLanguage}
 							spellCheck={spellCheckEnabled}
-							onKeyDown={(e) => {
-								// Handle Cmd+S for save
-								if (e.key === 's' && (e.metaKey || e.ctrlKey)) {
-									e.preventDefault();
-									e.stopPropagation();
+							autoFocus
+							className="w-full h-full"
+							extensions={editModeExtensions}
+							onKeyDown={(event) => {
+								if (event.key === 's' && (event.metaKey || event.ctrlKey)) {
+									event.preventDefault();
+									event.stopPropagation();
 									handleSave();
+									return true;
 								}
-								// Handle Escape to exit edit mode (without save)
-								else if (e.key === 'Escape') {
-									e.preventDefault();
-									e.stopPropagation();
+								if (event.key === 'Escape') {
+									event.preventDefault();
+									event.stopPropagation();
 									setMarkdownEditMode(false);
+									return true;
 								}
-								// Handle Cmd+Up: Move cursor to beginning (Shift: select to beginning)
-								else if (e.key === 'ArrowUp' && (e.metaKey || e.ctrlKey)) {
-									e.preventDefault();
-									const textarea = e.currentTarget;
-									if (e.shiftKey) {
-										const anchor =
-											textarea.selectionDirection === 'backward'
-												? textarea.selectionEnd
-												: textarea.selectionStart;
-										textarea.setSelectionRange(0, anchor, 'backward');
-									} else {
-										textarea.setSelectionRange(0, 0);
-									}
-									textarea.scrollTop = 0;
-								}
-								// Handle Cmd+Down: Move cursor to end (Shift: select to end)
-								else if (e.key === 'ArrowDown' && (e.metaKey || e.ctrlKey)) {
-									e.preventDefault();
-									const textarea = e.currentTarget;
-									const len = textarea.value.length;
-									if (e.shiftKey) {
-										const anchor =
-											textarea.selectionDirection === 'forward'
-												? textarea.selectionStart
-												: textarea.selectionEnd;
-										textarea.setSelectionRange(anchor, len, 'forward');
-									} else {
-										textarea.setSelectionRange(len, len);
-									}
-									textarea.scrollTop = textarea.scrollHeight;
-								}
-								// Handle Opt+Up: Page up (move cursor up by roughly a page)
-								else if (e.key === 'ArrowUp' && e.altKey) {
-									e.preventDefault();
-									const textarea = e.currentTarget;
-									const lineHeight = parseInt(getComputedStyle(textarea).lineHeight) || 24;
-									const linesPerPage = Math.floor(textarea.clientHeight / lineHeight);
-									const lines = textarea.value.substring(0, textarea.selectionStart).split('\n');
-									const currentLine = lines.length - 1;
-									const targetLine = Math.max(0, currentLine - linesPerPage);
-									// Calculate new cursor position
-									let newPos = 0;
-									for (let i = 0; i < targetLine; i++) {
-										newPos += lines[i].length + 1; // +1 for newline
-									}
-									// Preserve column position if possible
-									const currentCol =
-										lines[currentLine].length -
-										(lines[currentLine].length -
-											(textarea.selectionStart - (newPos - (currentLine > 0 ? 1 : 0))));
-									const targetLineText = textarea.value.split('\n')[targetLine] || '';
-									newPos =
-										textarea.value.split('\n').slice(0, targetLine).join('\n').length +
-										(targetLine > 0 ? 1 : 0);
-									newPos += Math.min(currentCol, targetLineText.length);
-									textarea.setSelectionRange(newPos, newPos);
-									// Scroll to show the cursor
-									textarea.scrollTop -= textarea.clientHeight;
-								}
-								// Handle Opt+Down: Page down (move cursor down by roughly a page)
-								else if (e.key === 'ArrowDown' && e.altKey) {
-									e.preventDefault();
-									const textarea = e.currentTarget;
-									const lineHeight = parseInt(getComputedStyle(textarea).lineHeight) || 24;
-									const linesPerPage = Math.floor(textarea.clientHeight / lineHeight);
-									const allLines = textarea.value.split('\n');
-									const textBeforeCursor = textarea.value.substring(0, textarea.selectionStart);
-									const currentLine = textBeforeCursor.split('\n').length - 1;
-									const targetLine = Math.min(allLines.length - 1, currentLine + linesPerPage);
-									// Calculate column position in current line
-									const linesBeforeCurrent = textBeforeCursor.split('\n');
-									const currentCol = linesBeforeCurrent[linesBeforeCurrent.length - 1].length;
-									// Calculate new cursor position
-									let newPos =
-										allLines.slice(0, targetLine).join('\n').length + (targetLine > 0 ? 1 : 0);
-									newPos += Math.min(currentCol, allLines[targetLine].length);
-									textarea.setSelectionRange(newPos, newPos);
-									// Scroll to show the cursor
-									textarea.scrollTop += textarea.clientHeight;
-								}
+								return false;
 							}}
 						/>
 					) : isHtml && htmlRenderMode && !markdownEditMode ? (
