@@ -35,7 +35,7 @@ import type {
 } from '../agents';
 import type { ToolType, SshRemoteConfig } from '../../shared/types';
 import { BaseSessionStorage } from './base-session-storage';
-import type { SearchableMessage } from './base-session-storage';
+import type { SearchableMessage, StorageWatchSpec } from './base-session-storage';
 
 const LOG_CONTEXT = '[CodexSessionStorage]';
 const MAX_SESSION_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
@@ -121,12 +121,18 @@ interface CodexToolUseEntry {
 }
 
 /**
+ * Codex rollout filename pattern: `rollout-<numeric/underscored timestamp>-<uuid>.jsonl`.
+ * Anchored on both ends so it can also be used by the storage watcher's
+ * matcher (`getStorageWatchSpec`) without false positives.
+ */
+const CODEX_ROLLOUT_FILENAME_REGEX = /^rollout-[\d_]+-([a-f0-9-]+)\.jsonl$/i;
+
+/**
  * Extract the session ID (UUID) from a Codex session filename
  * Format: rollout-TIMESTAMP-UUID.jsonl
  */
 function extractSessionIdFromFilename(filename: string): string | null {
-	// Match pattern: rollout-YYYYMMDD_HHMMSS_MMM-UUID.jsonl or similar
-	const match = filename.match(/rollout-[\d_]+-([a-f0-9-]+)\.jsonl$/i);
+	const match = filename.match(CODEX_ROLLOUT_FILENAME_REGEX);
 	if (match) {
 		return match[1];
 	}
@@ -471,6 +477,37 @@ export class CodexSessionStorage extends BaseSessionStorage {
 	 */
 	private getSessionsDir(): string {
 		return CODEX_SESSIONS_DIR;
+	}
+
+	/**
+	 * Spec for watching Codex's on-disk session storage.
+	 *
+	 * Layout: `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl` —
+	 * exactly four segments under `rootDir`, with strict numeric guards on
+	 * the date segments and a filename match against the shared rollout
+	 * regex.
+	 *
+	 * TODO: Codex does not encode the project cwd on disk — it lives inside
+	 * the JSONL as `session_meta.payload.cwd`. The matcher returns
+	 * `projectPath: ''` here; downstream consumers must tolerate an empty
+	 * project path for Codex and recover it from the file contents if
+	 * needed.
+	 */
+	getStorageWatchSpec(): StorageWatchSpec {
+		return {
+			rootDir: this.getSessionsDir(),
+			fileMatcher: (relPath) => {
+				const segments = relPath.split(path.sep);
+				if (segments.length !== 4) return null;
+				const [year, month, day, filename] = segments;
+				if (!/^\d{4}$/.test(year)) return null;
+				if (!/^\d{2}$/.test(month)) return null;
+				if (!/^\d{2}$/.test(day)) return null;
+				const match = filename.match(CODEX_ROLLOUT_FILENAME_REGEX);
+				if (!match) return null;
+				return { sessionId: match[1], projectPath: '' };
+			},
+		};
 	}
 
 	/**

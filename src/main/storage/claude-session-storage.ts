@@ -39,7 +39,7 @@ import type {
 	ClaudeSessionOriginsData,
 } from '../stores/types';
 import { BaseSessionStorage } from './base-session-storage';
-import type { SearchableMessage } from './base-session-storage';
+import type { SearchableMessage, StorageWatchSpec } from './base-session-storage';
 export type { ClaudeSessionOriginsData } from '../stores/types';
 
 /**
@@ -287,6 +287,31 @@ export class ClaudeSessionStorage extends BaseSessionStorage {
 	 */
 	private getProjectsDir(): string {
 		return path.join(os.homedir(), '.claude', 'projects');
+	}
+
+	/**
+	 * Spec for watching Claude Code's on-disk session storage.
+	 *
+	 * Layout: `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl` — exactly
+	 * two segments under `rootDir`. The encoded cwd uses Claude's lossy
+	 * `[^a-zA-Z0-9] → '-'` substitution (see `encodeClaudeProjectPath`), so
+	 * we pass the encoded segment through as `projectPath` rather than
+	 * guessing at a decode. Downstream consumers that need the real cwd
+	 * should read it from the session's JSONL contents.
+	 */
+	getStorageWatchSpec(): StorageWatchSpec {
+		return {
+			rootDir: this.getProjectsDir(),
+			fileMatcher: (relPath) => {
+				const segments = relPath.split(path.sep);
+				if (segments.length !== 2) return null;
+				const [encodedProject, filename] = segments;
+				if (!encodedProject || !filename.endsWith('.jsonl')) return null;
+				const sessionId = filename.slice(0, -'.jsonl'.length);
+				if (!sessionId) return null;
+				return { sessionId, projectPath: encodedProject };
+			},
+		};
 	}
 
 	/**
