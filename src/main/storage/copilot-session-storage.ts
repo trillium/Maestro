@@ -18,7 +18,7 @@ import type {
 } from '../agents';
 import type { ToolType, SshRemoteConfig } from '../../shared/types';
 import { BaseSessionStorage } from './base-session-storage';
-import type { SearchableMessage } from './base-session-storage';
+import type { SearchableMessage, StorageWatchSpec } from './base-session-storage';
 
 const LOG_CONTEXT = '[CopilotSessionStorage]';
 
@@ -335,6 +335,32 @@ export class CopilotSessionStorage extends BaseSessionStorage {
 	/** Remote session state directory path using POSIX tilde expansion. */
 	private getRemoteSessionStateDir(): string {
 		return '~/.copilot/session-state';
+	}
+
+	/**
+	 * Spec for watching Copilot CLI's on-disk session storage.
+	 *
+	 * Layout: `<COPILOT_CONFIG_DIR or ~/.copilot>/session-state/<sessionId>/events.jsonl`
+	 * — exactly two segments under `rootDir`, with the second segment being
+	 * literally `events.jsonl`. Anything else in a session directory
+	 * (`workspace.yaml`, other sidecars) is ignored.
+	 *
+	 * TODO: Copilot does not encode the project cwd on disk — it lives in
+	 * `workspace.yaml` alongside `events.jsonl`. The matcher returns
+	 * `projectPath: ''` here; downstream consumers must tolerate an empty
+	 * project path for Copilot and recover it from `workspace.yaml` if needed.
+	 */
+	getStorageWatchSpec(): StorageWatchSpec {
+		return {
+			rootDir: getLocalCopilotSessionStateDir(),
+			fileMatcher: (relPath) => {
+				const segments = relPath.split(path.sep);
+				if (segments.length !== 2) return null;
+				const [sessionId, filename] = segments;
+				if (!sessionId || filename !== 'events.jsonl') return null;
+				return { sessionId, projectPath: '' };
+			},
+		};
 	}
 
 	/** Resolve the session state base directory (local or remote). */

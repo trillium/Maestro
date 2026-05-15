@@ -31,7 +31,11 @@ import fs from 'fs/promises';
 import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
 import { readDirRemote, readFileRemote, statRemote } from '../utils/remote-fs';
-import { BaseSessionStorage, type SearchableMessage } from './base-session-storage';
+import {
+	BaseSessionStorage,
+	type SearchableMessage,
+	type StorageWatchSpec,
+} from './base-session-storage';
 import type {
 	AgentSessionInfo,
 	SessionMessagesResult,
@@ -164,6 +168,34 @@ export class FactoryDroidSessionStorage extends BaseSessionStorage {
 	 */
 	private getProjectSessionDir(projectPath: string): string {
 		return path.join(getFactorySessionsDir(), encodeProjectPath(projectPath));
+	}
+
+	/**
+	 * Spec for watching Factory Droid's on-disk session storage.
+	 *
+	 * Layout: `~/.factory/sessions/<encoded-project-path>/<uuid>.jsonl` —
+	 * exactly two segments under `rootDir`. The `.jsonl` suffix check rejects
+	 * the sibling `<uuid>.settings.json` sidecars.
+	 *
+	 * Factory's project-path encoding (`[\\/]` → `-`) is lossy when a real
+	 * directory name contains `-`, so we pass the encoded segment through as
+	 * `projectPath` rather than guessing at a decode (matching the Claude
+	 * precedent). Downstream consumers that need the real cwd should derive it
+	 * elsewhere (e.g., the session's settings sidecar).
+	 */
+	getStorageWatchSpec(): StorageWatchSpec {
+		return {
+			rootDir: getFactorySessionsDir(),
+			fileMatcher: (relPath) => {
+				const segments = relPath.split(path.sep);
+				if (segments.length !== 2) return null;
+				const [encodedProject, filename] = segments;
+				if (!encodedProject || !filename.endsWith('.jsonl')) return null;
+				const sessionId = filename.slice(0, -'.jsonl'.length);
+				if (!sessionId) return null;
+				return { sessionId, projectPath: encodedProject };
+			},
+		};
 	}
 
 	/**
