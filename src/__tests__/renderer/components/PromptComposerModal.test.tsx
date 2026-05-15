@@ -1,6 +1,82 @@
 import React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { EditorView } from '@codemirror/view';
+
+// CodeMirror 6 constructs IntersectionObserver inside its DOMObserver. The
+// global setup mocks IntersectionObserver as a non-constructable `vi.fn()`
+// which crashes CM6 on mount. Swap in a real class for the duration of this
+// file and restore the original global in teardown so the swap does not leak
+// into other test files that share the worker. Mirrors the setup in
+// MaestroEditor.test.tsx.
+class StubIntersectionObserver {
+	observe() {}
+	unobserve() {}
+	disconnect() {}
+	takeRecords() {
+		return [];
+	}
+}
+const ioGlobal = globalThis as typeof globalThis & {
+	IntersectionObserver: typeof IntersectionObserver;
+};
+const originalIntersectionObserver = ioGlobal.IntersectionObserver;
+ioGlobal.IntersectionObserver = StubIntersectionObserver as unknown as typeof IntersectionObserver;
+
+afterAll(() => {
+	ioGlobal.IntersectionObserver = originalIntersectionObserver;
+});
+
+// Skip the dynamic language loader so MaestroEditor stays deterministic and
+// does not try to resolve real language packs at test time.
+vi.mock('../../../renderer/components/FilePreview/giantPreview/languageLoader', () => ({
+	loadLanguageExtension: vi.fn(async () => null),
+	hasLanguageSupport: () => false,
+}));
+
+// Provide the minimum useSettings surface that MaestroEditor +
+// useColumnModeKeymap consume. Both files reach useSettings through the hooks
+// barrel, which re-exports from this leaf module — so mocking the leaf
+// catches both.
+vi.mock('../../../renderer/hooks/settings/useSettings', () => ({
+	useSettings: () => ({
+		activeThemeId: 'dracula',
+		customThemeColors: {
+			bgMain: '#282a36',
+			bgSidebar: '#21222c',
+			bgActivity: '#343746',
+			border: '#44475a',
+			textMain: '#f8f8f2',
+			textDim: '#6272a4',
+			accent: '#bd93f9',
+			accentDim: 'rgba(189, 147, 249, 0.2)',
+			accentText: '#ff79c6',
+			accentForeground: '#282a36',
+			success: '#50fa7b',
+			warning: '#ffb86c',
+			error: '#ff5555',
+		},
+		shortcuts: {
+			columnModeAddCursorAbove: {
+				id: 'columnModeAddCursorAbove',
+				label: 'Column Mode: Add Cursor Above',
+				keys: ['Alt', 'Meta', 'ArrowUp'],
+			},
+			columnModeAddCursorBelow: {
+				id: 'columnModeAddCursorBelow',
+				label: 'Column Mode: Add Cursor Below',
+				keys: ['Alt', 'Meta', 'ArrowDown'],
+			},
+		},
+	}),
+}));
+
+// Mock useAtMentionCompletion hook
+const mockGetSuggestions = vi.fn().mockReturnValue([]);
+vi.mock('../../../renderer/hooks/input/useAtMentionCompletion', () => ({
+	useAtMentionCompletion: () => ({ getSuggestions: mockGetSuggestions }),
+}));
+
 import { PromptComposerModal } from '../../../renderer/components/PromptComposerModal';
 import { formatEnterToSend } from '../../../renderer/utils/shortcutFormatter';
 import { LayerStackProvider } from '../../../renderer/contexts/LayerStackContext';
@@ -8,51 +84,6 @@ import type { Theme, Session, Group } from '../../../renderer/types';
 import { createMockSession as baseCreateMockSession } from '../../helpers/mockSession';
 
 import { mockTheme } from '../../helpers/mockTheme';
-// Mock useAtMentionCompletion hook
-const mockGetSuggestions = vi.fn().mockReturnValue([]);
-vi.mock('../../../renderer/hooks/input/useAtMentionCompletion', () => ({
-	useAtMentionCompletion: () => ({ getSuggestions: mockGetSuggestions }),
-}));
-
-// Mock Lucide icons
-vi.mock('lucide-react', () => ({
-	X: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
-		<svg data-testid="x-icon" className={className} style={style} />
-	),
-	PenLine: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
-		<svg data-testid="penline-icon" className={className} style={style} />
-	),
-	Send: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
-		<svg data-testid="send-icon" className={className} style={style} />
-	),
-	Keyboard: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
-		<svg data-testid="keyboard-icon" className={className} style={style} />
-	),
-	ImageIcon: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
-		<svg data-testid="image-icon" className={className} style={style} />
-	),
-	History: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
-		<svg data-testid="history-icon" className={className} style={style} />
-	),
-	Eye: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
-		<svg data-testid="eye-icon" className={className} style={style} />
-	),
-	Users: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
-		<svg data-testid="users-icon" className={className} style={style} />
-	),
-	Brain: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
-		<svg data-testid="brain-icon" className={className} style={style} />
-	),
-	Pin: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
-		<svg data-testid="pin-icon" className={className} style={style} />
-	),
-	File: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
-		<svg data-testid="file-icon" className={className} style={style} />
-	),
-	Folder: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
-		<svg data-testid="folder-icon" className={className} style={style} />
-	),
-}));
 
 // Mock theme
 
@@ -81,6 +112,58 @@ const lightTheme: Theme = {
 const renderWithProvider = (ui: React.ReactElement) => {
 	return render(<LayerStackProvider>{ui}</LayerStackProvider>);
 };
+
+// --- CodeMirror test helpers -------------------------------------------------
+// PromptComposerModal renders the live editing surface as a CM6 EditorView
+// (via MaestroEditor), not a `<textarea>`. These helpers replace the
+// textarea-era assertions: read the value through the EditorView document,
+// replace the value through a CM transaction, and find the focus/keydown
+// target through `.cm-content` (which carries `role="textbox"`).
+
+function getEditorView(container: HTMLElement): EditorView {
+	const editor = container.querySelector('.cm-editor');
+	if (!editor) {
+		throw new Error('CodeMirror editor (.cm-editor) is not mounted');
+	}
+	const view = EditorView.findFromDOM(editor as HTMLElement);
+	if (!view) {
+		throw new Error('EditorView.findFromDOM returned null');
+	}
+	return view;
+}
+
+function getEditorContent(container: HTMLElement): HTMLElement {
+	const content = container.querySelector('.cm-content');
+	if (!content) {
+		throw new Error('CodeMirror content (.cm-content) is not mounted');
+	}
+	return content as HTMLElement;
+}
+
+function getEditorValue(container: HTMLElement): string {
+	return getEditorView(container).state.doc.toString();
+}
+
+function getEditorPlaceholderText(container: HTMLElement): string | null {
+	const placeholder = container.querySelector('.cm-placeholder');
+	return placeholder?.textContent ?? null;
+}
+
+/**
+ * Replace the entire editor document with `value` and park the caret at the
+ * end. Equivalent to the textarea-era `fireEvent.change(textarea, { target:
+ * { value } })`: each call fires the editor's `updateListener` once, which
+ * propagates through `onChange` → `handleValueChange` → `onSubmit`.
+ */
+function typeInEditor(container: HTMLElement, value: string) {
+	act(() => {
+		const view = getEditorView(container);
+		view.dispatch({
+			changes: { from: 0, to: view.state.doc.length, insert: value },
+			selection: { anchor: value.length },
+		});
+	});
+}
 
 describe('PromptComposerModal', () => {
 	let onClose: ReturnType<typeof vi.fn>;
@@ -129,8 +212,8 @@ describe('PromptComposerModal', () => {
 			expect(screen.getByText('Prompt Composer')).toBeInTheDocument();
 		});
 
-		it('keeps the live textarea out of bionify reading mode', () => {
-			renderWithProvider(
+		it('keeps the live editor out of bionify reading mode', () => {
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -141,9 +224,7 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			expect(screen.getByRole('textbox')).toHaveValue(
-				'Reading-mode exclusions stay in the editor.'
-			);
+			expect(getEditorValue(container)).toBe('Reading-mode exclusions stay in the editor.');
 			expect(document.querySelector('.bionify-word')).not.toBeInTheDocument();
 		});
 
@@ -227,8 +308,8 @@ describe('PromptComposerModal', () => {
 			expect(screen.getByTestId('x-icon')).toBeInTheDocument();
 		});
 
-		it('should render textarea with placeholder', () => {
-			renderWithProvider(
+		it('should render editor placeholder', () => {
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -239,13 +320,13 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			expect(
-				screen.getByPlaceholderText('Write your prompt here... (@ to reference files)')
-			).toBeInTheDocument();
+			expect(getEditorPlaceholderText(container)).toBe(
+				'Write your prompt here... (@ to reference files)'
+			);
 		});
 
-		it('should render textarea with initial value', () => {
-			renderWithProvider(
+		it('should render editor with initial value', () => {
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -256,10 +337,7 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			) as HTMLTextAreaElement;
-			expect(textarea.value).toBe('Initial prompt text');
+			expect(getEditorValue(container)).toBe('Initial prompt text');
 		});
 
 		it('should render Send button with icon', () => {
@@ -441,7 +519,7 @@ describe('PromptComposerModal', () => {
 		});
 
 		it('should update counts when typing', () => {
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -452,10 +530,7 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			fireEvent.change(textarea, { target: { value: 'Hello' } });
+			typeInEditor(container, 'Hello');
 
 			expect(screen.getByText('5 characters')).toBeInTheDocument();
 			expect(screen.getByText('~2 tokens')).toBeInTheDocument();
@@ -463,8 +538,8 @@ describe('PromptComposerModal', () => {
 	});
 
 	describe('Focus management', () => {
-		it('should focus textarea when modal opens', () => {
-			renderWithProvider(
+		it('should focus editor when modal opens', () => {
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -475,14 +550,14 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			expect(document.activeElement).toBe(textarea);
+			// MaestroEditor's `autoFocus` prop calls `view.focus()` during the
+			// mount effect, which routes focus to the contenteditable
+			// `.cm-content` surface — the CM6 equivalent of the old textarea.
+			expect(document.activeElement).toBe(getEditorContent(container));
 		});
 
-		it('should position cursor at end of text', () => {
-			renderWithProvider(
+		it('should position cursor at end of text', async () => {
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -493,17 +568,21 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			) as HTMLTextAreaElement;
-			expect(textarea.selectionStart).toBe(11);
-			expect(textarea.selectionEnd).toBe(11);
+			// The composer parks the caret at end-of-doc inside a
+			// `requestAnimationFrame` callback so the editor has time to mount
+			// and apply the initial value. `waitFor` lets that rAF resolve in
+			// jsdom (where rAF is polyfilled with setTimeout).
+			await waitFor(() => {
+				const view = getEditorView(container);
+				expect(view.state.selection.main.head).toBe(11);
+				expect(view.state.selection.main.anchor).toBe(11);
+			});
 		});
 	});
 
 	describe('Value syncing', () => {
 		it('should sync value when modal opens with new initialValue', () => {
-			const { rerender } = renderWithProvider(
+			const { container, rerender } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={false}
 					onClose={onClose}
@@ -528,14 +607,11 @@ describe('PromptComposerModal', () => {
 				</LayerStackProvider>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			) as HTMLTextAreaElement;
-			expect(textarea.value).toBe('New value');
+			expect(getEditorValue(container)).toBe('New value');
 		});
 
 		it('should not overwrite user edits when initialValue changes while open', () => {
-			const { rerender } = renderWithProvider(
+			const { container, rerender } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -546,10 +622,7 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			) as HTMLTextAreaElement;
-			fireEvent.change(textarea, { target: { value: 'User typing' } });
+			typeInEditor(container, 'User typing');
 
 			rerender(
 				<LayerStackProvider>
@@ -564,7 +637,7 @@ describe('PromptComposerModal', () => {
 				</LayerStackProvider>
 			);
 
-			expect(textarea.value).toBe('User typing');
+			expect(getEditorValue(container)).toBe('User typing');
 		});
 	});
 
@@ -657,7 +730,7 @@ describe('PromptComposerModal', () => {
 
 	describe('Keyboard shortcuts', () => {
 		it('should send on Cmd + Enter (Mac)', () => {
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -668,17 +741,14 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
+			fireEvent.keyDown(getEditorContent(container), { key: 'Enter', metaKey: true });
 
 			expect(onSend).toHaveBeenCalledWith('Test message');
 			expect(onClose).toHaveBeenCalled();
 		});
 
 		it('should send on Ctrl + Enter (Windows/Linux)', () => {
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -689,17 +759,14 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+			fireEvent.keyDown(getEditorContent(container), { key: 'Enter', ctrlKey: true });
 
 			expect(onSend).toHaveBeenCalledWith('Test message');
 			expect(onClose).toHaveBeenCalled();
 		});
 
 		it('should not send on Enter without modifier', () => {
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -710,16 +777,13 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			fireEvent.keyDown(textarea, { key: 'Enter' });
+			fireEvent.keyDown(getEditorContent(container), { key: 'Enter' });
 
 			expect(onSend).not.toHaveBeenCalled();
 		});
 
 		it('should not send on Cmd + Enter with empty content', () => {
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -730,16 +794,13 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
+			fireEvent.keyDown(getEditorContent(container), { key: 'Enter', metaKey: true });
 
 			expect(onSend).not.toHaveBeenCalled();
 		});
 
 		it('should not send on Cmd + Enter with only whitespace', () => {
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -750,10 +811,7 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
+			fireEvent.keyDown(getEditorContent(container), { key: 'Enter', metaKey: true });
 
 			expect(onSend).not.toHaveBeenCalled();
 		});
@@ -762,7 +820,7 @@ describe('PromptComposerModal', () => {
 		// sends, Shift+Enter inserts a newline, Cmd/Ctrl+Enter falls through (no-op).
 		describe('when enterToSend is true', () => {
 			it('sends on plain Enter', () => {
-				renderWithProvider(
+				const { container } = renderWithProvider(
 					<PromptComposerModal
 						isOpen={true}
 						onClose={onClose}
@@ -774,17 +832,14 @@ describe('PromptComposerModal', () => {
 					/>
 				);
 
-				const textarea = screen.getByPlaceholderText(
-					'Write your prompt here... (@ to reference files)'
-				);
-				fireEvent.keyDown(textarea, { key: 'Enter' });
+				fireEvent.keyDown(getEditorContent(container), { key: 'Enter' });
 
 				expect(onSend).toHaveBeenCalledWith('Test message');
 				expect(onClose).toHaveBeenCalled();
 			});
 
 			it('does not send on Shift + Enter (allows newline)', () => {
-				renderWithProvider(
+				const { container } = renderWithProvider(
 					<PromptComposerModal
 						isOpen={true}
 						onClose={onClose}
@@ -796,10 +851,7 @@ describe('PromptComposerModal', () => {
 					/>
 				);
 
-				const textarea = screen.getByPlaceholderText(
-					'Write your prompt here... (@ to reference files)'
-				);
-				fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true });
+				fireEvent.keyDown(getEditorContent(container), { key: 'Enter', shiftKey: true });
 
 				expect(onSend).not.toHaveBeenCalled();
 			});
@@ -827,7 +879,7 @@ describe('PromptComposerModal', () => {
 		});
 
 		it('should preserve edited value on close', () => {
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -838,10 +890,7 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			fireEvent.change(textarea, { target: { value: 'Edited text' } });
+			typeInEditor(container, 'Edited text');
 
 			const closeButton = screen.getByTitle('Close (Escape)');
 			fireEvent.click(closeButton);
@@ -875,7 +924,7 @@ describe('PromptComposerModal', () => {
 		});
 
 		it('should not close when clicking inside modal content', () => {
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -886,10 +935,7 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			fireEvent.click(textarea);
+			fireEvent.click(getEditorContent(container));
 
 			expect(onClose).not.toHaveBeenCalled();
 		});
@@ -908,7 +954,8 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			// Simulate Escape key (handled by layer stack)
+			// LayerStackProvider listens on window in the capture phase, so a
+			// document-level keydown still reaches it.
 			fireEvent.keyDown(document, { key: 'Escape' });
 
 			await waitFor(() => {
@@ -918,7 +965,7 @@ describe('PromptComposerModal', () => {
 		});
 
 		it('should save edited value on Escape', async () => {
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -929,10 +976,7 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			fireEvent.change(textarea, { target: { value: 'Modified' } });
+			typeInEditor(container, 'Modified');
 
 			fireEvent.keyDown(document, { key: 'Escape' });
 
@@ -944,7 +988,7 @@ describe('PromptComposerModal', () => {
 
 	describe('Keystroke sync', () => {
 		it('should call onSubmit on every keystroke to sync with parent', () => {
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -955,25 +999,22 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			fireEvent.change(textarea, { target: { value: 'H' } });
+			typeInEditor(container, 'H');
 			expect(onSubmit).toHaveBeenCalledWith('H');
 
-			fireEvent.change(textarea, { target: { value: 'He' } });
+			typeInEditor(container, 'He');
 			expect(onSubmit).toHaveBeenCalledWith('He');
 
-			fireEvent.change(textarea, { target: { value: 'Hel' } });
+			typeInEditor(container, 'Hel');
 			expect(onSubmit).toHaveBeenCalledWith('Hel');
 
 			expect(onSubmit).toHaveBeenCalledTimes(3);
 		});
 	});
 
-	describe('Textarea behavior', () => {
+	describe('Editor behavior', () => {
 		it('should update value on change', () => {
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -984,16 +1025,13 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			fireEvent.change(textarea, { target: { value: 'New content' } });
+			typeInEditor(container, 'New content');
 
-			expect((textarea as HTMLTextAreaElement).value).toBe('New content');
+			expect(getEditorValue(container)).toBe('New content');
 		});
 
-		it('should apply theme text color to textarea', () => {
-			renderWithProvider(
+		it('mounts the CodeMirror surface with the contenteditable textbox', () => {
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -1004,10 +1042,15 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			expect(textarea).toHaveStyle({ color: mockTheme.colors.textMain });
+			// MaestroEditor renders CM6's `.cm-content` as the live editing
+			// surface. The textarea-era assertion checked
+			// `color: theme.colors.textMain` on a `<textarea>`; that styling
+			// now lives inside CM6's themed contenteditable (covered by
+			// MaestroEditor.test.tsx), so here we just verify the editor is
+			// mounted and exposed as a textbox.
+			const content = getEditorContent(container);
+			expect(content.getAttribute('role')).toBe('textbox');
+			expect(content.getAttribute('contenteditable')).toBe('true');
 		});
 	});
 
@@ -1046,7 +1089,7 @@ describe('PromptComposerModal', () => {
 		});
 
 		it('should handle unicode characters in text', () => {
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -1057,11 +1100,7 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			// Unicode chars are still counted as characters
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			) as HTMLTextAreaElement;
-			expect(textarea.value).toBe('Hello 世界 🌍');
+			expect(getEditorValue(container)).toBe('Hello 世界 🌍');
 		});
 
 		it('should handle special characters in session name', () => {
@@ -1170,8 +1209,8 @@ describe('PromptComposerModal', () => {
 	});
 
 	describe('Accessibility', () => {
-		it('should have accessible textarea', () => {
-			renderWithProvider(
+		it('should expose the editor as a contenteditable textbox', () => {
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -1182,10 +1221,9 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			expect(textarea.tagName).toBe('TEXTAREA');
+			const content = getEditorContent(container);
+			expect(content.getAttribute('role')).toBe('textbox');
+			expect(content.getAttribute('contenteditable')).toBe('true');
 		});
 
 		it('should have accessible close button with title', () => {
@@ -1238,7 +1276,7 @@ describe('PromptComposerModal', () => {
 
 		it('should show mention placeholder when sessions are provided', () => {
 			const sessions = [createMockSession('s1', 'Agent1')];
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -1250,14 +1288,14 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			expect(
-				screen.getByPlaceholderText('Write your prompt here... (@ to mention agents)')
-			).toBeInTheDocument();
+			expect(getEditorPlaceholderText(container)).toBe(
+				'Write your prompt here... (@ to mention agents)'
+			);
 		});
 
 		it('should show mention dropdown when typing @', () => {
 			const sessions = [createMockSession('s1', 'Agent1'), createMockSession('s2', 'Agent2')];
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -1269,10 +1307,7 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to mention agents)'
-			);
-			fireEvent.change(textarea, { target: { value: '@' } });
+			typeInEditor(container, '@');
 
 			expect(screen.getByText('@Agent1')).toBeInTheDocument();
 			expect(screen.getByText('@Agent2')).toBeInTheDocument();
@@ -1280,7 +1315,7 @@ describe('PromptComposerModal', () => {
 
 		it('should filter mentions as user types', () => {
 			const sessions = [createMockSession('s1', 'Agent1'), createMockSession('s2', 'Other')];
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -1292,10 +1327,7 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to mention agents)'
-			);
-			fireEvent.change(textarea, { target: { value: '@Age' } });
+			typeInEditor(container, '@Age');
 
 			expect(screen.getByText('@Agent1')).toBeInTheDocument();
 			expect(screen.queryByText('@Other')).not.toBeInTheDocument();
@@ -1303,7 +1335,7 @@ describe('PromptComposerModal', () => {
 
 		it('should insert mention on click', () => {
 			const sessions = [createMockSession('s1', 'Agent1')];
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -1315,18 +1347,15 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to mention agents)'
-			) as HTMLTextAreaElement;
-			fireEvent.change(textarea, { target: { value: '@' } });
+			typeInEditor(container, '@');
 			fireEvent.click(screen.getByText('@Agent1'));
 
-			expect(textarea.value).toBe('@Agent1 ');
+			expect(getEditorValue(container)).toBe('@Agent1 ');
 		});
 
 		it('should insert mention on Tab key', () => {
 			const sessions = [createMockSession('s1', 'Agent1')];
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -1338,18 +1367,15 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to mention agents)'
-			) as HTMLTextAreaElement;
-			fireEvent.change(textarea, { target: { value: '@' } });
-			fireEvent.keyDown(textarea, { key: 'Tab' });
+			typeInEditor(container, '@');
+			fireEvent.keyDown(getEditorContent(container), { key: 'Tab' });
 
-			expect(textarea.value).toBe('@Agent1 ');
+			expect(getEditorValue(container)).toBe('@Agent1 ');
 		});
 
 		it('should navigate mentions with arrow keys', () => {
 			const sessions = [createMockSession('s1', 'Agent1'), createMockSession('s2', 'Agent2')];
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -1361,19 +1387,16 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to mention agents)'
-			) as HTMLTextAreaElement;
-			fireEvent.change(textarea, { target: { value: '@' } });
-			fireEvent.keyDown(textarea, { key: 'ArrowDown' });
-			fireEvent.keyDown(textarea, { key: 'Tab' });
+			typeInEditor(container, '@');
+			fireEvent.keyDown(getEditorContent(container), { key: 'ArrowDown' });
+			fireEvent.keyDown(getEditorContent(container), { key: 'Tab' });
 
-			expect(textarea.value).toBe('@Agent2 ');
+			expect(getEditorValue(container)).toBe('@Agent2 ');
 		});
 
 		it('should close dropdown on Escape', () => {
 			const sessions = [createMockSession('s1', 'Agent1')];
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -1385,13 +1408,13 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to mention agents)'
-			);
-			fireEvent.change(textarea, { target: { value: '@' } });
+			typeInEditor(container, '@');
 			expect(screen.getByText('@Agent1')).toBeInTheDocument();
 
-			fireEvent.keyDown(textarea, { key: 'Escape' });
+			// Escape is owned by the LayerStack — the modal's escape handler
+			// closes the dropdown first (instead of the modal) when mentions
+			// are open.
+			fireEvent.keyDown(document, { key: 'Escape' });
 			expect(screen.queryByText('@Agent1')).not.toBeInTheDocument();
 		});
 
@@ -1400,7 +1423,7 @@ describe('PromptComposerModal', () => {
 				createMockSession('s1', 'Agent1', 'claude-code'),
 				createMockSession('s2', 'Terminal', 'terminal'),
 			];
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -1412,10 +1435,7 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to mention agents)'
-			);
-			fireEvent.change(textarea, { target: { value: '@' } });
+			typeInEditor(container, '@');
 
 			expect(screen.getByText('@Agent1')).toBeInTheDocument();
 			expect(screen.queryByText('@Terminal')).not.toBeInTheDocument();
@@ -1427,7 +1447,7 @@ describe('PromptComposerModal', () => {
 				{ ...createMockSession('s1', 'Agent1'), groupId: 'g1' },
 				{ ...createMockSession('s2', 'Agent2'), groupId: 'g1' },
 			];
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -1440,13 +1460,10 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to mention agents)'
-			) as HTMLTextAreaElement;
-			fireEvent.change(textarea, { target: { value: '@' } });
+			typeInEditor(container, '@');
 			fireEvent.click(screen.getByText('@TEAM'));
 
-			expect(textarea.value).toBe('@Agent1 @Agent2 ');
+			expect(getEditorValue(container)).toBe('@Agent1 @Agent2 ');
 		});
 
 		it('should show file suggestions from useAtMentionCompletion', () => {
@@ -1460,7 +1477,7 @@ describe('PromptComposerModal', () => {
 					source: 'project',
 				},
 			]);
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -1471,10 +1488,7 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			fireEvent.change(textarea, { target: { value: '@ind' } });
+			typeInEditor(container, '@ind');
 
 			expect(mockGetSuggestions).toHaveBeenCalledWith('ind');
 			expect(screen.getByText('src/index.ts')).toBeInTheDocument();
@@ -1491,7 +1505,7 @@ describe('PromptComposerModal', () => {
 					source: 'project',
 				},
 			]);
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -1502,17 +1516,14 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			) as HTMLTextAreaElement;
-			fireEvent.change(textarea, { target: { value: '@util' } });
+			typeInEditor(container, '@util');
 			fireEvent.click(screen.getByText('src/utils.ts'));
 
-			expect(textarea.value).toBe('@src/utils.ts ');
+			expect(getEditorValue(container)).toBe('@src/utils.ts ');
 		});
 
 		it('should not show agent mention dropdown without sessions prop', () => {
-			renderWithProvider(
+			const { container } = renderWithProvider(
 				<PromptComposerModal
 					isOpen={true}
 					onClose={onClose}
@@ -1523,10 +1534,7 @@ describe('PromptComposerModal', () => {
 				/>
 			);
 
-			const textarea = screen.getByPlaceholderText(
-				'Write your prompt here... (@ to reference files)'
-			);
-			fireEvent.change(textarea, { target: { value: '@' } });
+			typeInEditor(container, '@');
 
 			// No agent mention buttons should appear (file mentions may appear if mocked)
 			const buttons = screen.queryAllByRole('button');
