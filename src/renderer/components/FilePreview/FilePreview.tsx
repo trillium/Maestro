@@ -969,6 +969,18 @@ export const FilePreview = React.memo(
 				e.preventDefault();
 				e.stopPropagation();
 				setMarkdownEditMode(!markdownEditMode);
+			} else if (
+				isMarkdown &&
+				!markdownEditMode &&
+				tocEntries.length > 0 &&
+				isShortcut(e, 'toggleFilePreviewToc')
+			) {
+				// Cmd+\ to toggle the floating TOC overlay (markdown preview only,
+				// and only when there are headings to navigate).
+				e.preventDefault();
+				e.stopPropagation();
+				setShowTocOverlay((prev) => !prev);
+				onShortcutUsed?.('toggleFilePreviewToc');
 			} else if (e.key === 'ArrowUp') {
 				// In edit mode, let the textarea handle arrow keys for cursor movement
 				// Only intercept when NOT in edit mode (preview/code view)

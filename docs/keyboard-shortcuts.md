@@ -50,17 +50,17 @@ The command palette is your gateway to nearly every action in Maestro. Press `Cm
 
 ## Panel Shortcuts
 
-| Action                         | macOS             | Windows/Linux      |
-| ------------------------------ | ----------------- | ------------------ |
-| Go to Files Tab                | `Cmd+Shift+F`     | `Ctrl+Shift+F`     |
-| Go to History Tab              | `Cmd+Shift+H`     | `Ctrl+Shift+H`     |
-| Go to Auto Run Tab             | `Cmd+Shift+1`     | `Ctrl+Shift+1`     |
-| Toggle Edit/Preview (Markdown) | `Cmd+E`           | `Ctrl+E`           |
-| Auto Run Expanded Preview      | `` Cmd+Shift+` `` | `` Ctrl+Shift+` `` |
-| Insert Checkbox (Auto Run)     | `Cmd+L`           | `Ctrl+L`           |
-| View Git Diff                  | `Cmd+Shift+D`     | `Ctrl+Shift+D`     |
-| View Git Log                   | `Cmd+Shift+G`     | `Ctrl+Shift+G`     |
-| Fuzzy File Search              | `Cmd+G`           | `Ctrl+G`           |
+| Action                         | macOS         | Windows/Linux  |
+| ------------------------------ | ------------- | -------------- |
+| Go to Files Tab                | `Cmd+Shift+F` | `Ctrl+Shift+F` |
+| Go to History Tab              | `Cmd+Shift+H` | `Ctrl+Shift+H` |
+| Go to Auto Run Tab             | `Cmd+Shift+1` | `Ctrl+Shift+1` |
+| Toggle Edit/Preview (Markdown) | `Cmd+E`       | `Ctrl+E`       |
+| Auto Run Expanded Preview      | `Cmd+Shift+2` | `Ctrl+Shift+2` |
+| Insert Checkbox (Auto Run)     | `Cmd+L`       | `Ctrl+L`       |
+| View Git Diff                  | `Cmd+Shift+D` | `Ctrl+Shift+D` |
+| View Git Log                   | `Cmd+Shift+G` | `Ctrl+Shift+G` |
+| Fuzzy File Search              | `Cmd+G`       | `Ctrl+G`       |
 
 ## AI Tab Shortcuts
 
@@ -201,14 +201,15 @@ In AI mode, use `@` to reference files in your prompts:
 
 ## File Preview
 
-| Action         | macOS           | Windows/Linux   |
-| -------------- | --------------- | --------------- |
-| Copy File Path | `Cmd+P`         | `Ctrl+P`        |
-| Open Search    | `Cmd+F`         | `Ctrl+F`        |
-| Go Back        | `Cmd+Left`      | `Ctrl+Left`     |
-| Go Forward     | `Cmd+Right`     | `Ctrl+Right`    |
-| Scroll         | `Up/Down Arrow` | `Up/Down Arrow` |
-| Close          | `Esc`           | `Esc`           |
+| Action                              | macOS           | Windows/Linux   |
+| ----------------------------------- | --------------- | --------------- |
+| Copy File Path                      | `Cmd+P`         | `Ctrl+P`        |
+| Open Search                         | `Cmd+F`         | `Ctrl+F`        |
+| Toggle Table of Contents (Markdown) | `Cmd+\`         | `Ctrl+\`        |
+| Go Back                             | `Cmd+Left`      | `Ctrl+Left`     |
+| Go Forward                          | `Cmd+Right`     | `Ctrl+Right`    |
+| Scroll                              | `Up/Down Arrow` | `Up/Down Arrow` |
+| Close                               | `Esc`           | `Esc`           |
 
 ## Document Graph
 
