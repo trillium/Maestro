@@ -1517,7 +1517,7 @@ describe('SessionList', () => {
 			expect(handleDropOnGroup).toHaveBeenCalledWith('g1');
 		});
 
-		it('keeps Ungrouped Agents header as the drop target when dragging and all sessions are grouped', () => {
+		it('shows the compact ungroup drop-zone when dragging and all sessions are grouped', () => {
 			const handleDropOnUngrouped = vi.fn();
 			const group = createMockGroup({ id: 'g1', name: 'My Group', sessionIds: ['s1'] });
 			const sessions = [createMockSession({ id: 's1', name: 'Grouped Session', groupId: 'g1' })];
@@ -1535,12 +1535,13 @@ describe('SessionList', () => {
 			});
 			render(<SessionList {...props} />);
 
-			// The Ungrouped Agents folder itself acts as the drop target now —
-			// there's no separate "Drop here to ungroup" placeholder.
-			expect(screen.getByText('Ungrouped Agents')).toBeInTheDocument();
+			// With no ungrouped sessions the folder header is hidden; a compact
+			// "Drop here to ungroup" placeholder appears while a drag is active.
+			expect(screen.queryByText('Ungrouped Agents')).not.toBeInTheDocument();
+			expect(screen.getByText('Drop here to ungroup')).toBeInTheDocument();
 		});
 
-		it('calls handleDropOnUngrouped when dropping on the Ungrouped Agents header', () => {
+		it('calls handleDropOnUngrouped when dropping on the compact ungroup drop-zone', () => {
 			const handleDropOnUngrouped = vi.fn();
 			const group = createMockGroup({ id: 'g1', name: 'My Group', sessionIds: ['s1'] });
 			const sessions = [createMockSession({ id: 's1', name: 'Grouped Session', groupId: 'g1' })];
@@ -1558,12 +1559,13 @@ describe('SessionList', () => {
 			});
 			render(<SessionList {...props} />);
 
-			// The header row itself owns the drop handler. Walk up to the row
-			// wrapper (closest div with the cursor-pointer class) and fire drop there.
-			const header = screen.getByText('Ungrouped Agents');
-			const dropRow = header.closest('div.cursor-pointer') as HTMLElement | null;
-			expect(dropRow).not.toBeNull();
-			fireEvent.drop(dropRow!);
+			// The drop handler lives on the outer container that wraps both the
+			// placeholder and the New Group button. Walk up from the placeholder
+			// text to that container and fire drop there.
+			const placeholder = screen.getByText('Drop here to ungroup');
+			const dropContainer = placeholder.parentElement as HTMLElement | null;
+			expect(dropContainer).not.toBeNull();
+			fireEvent.drop(dropContainer!);
 
 			expect(handleDropOnUngrouped).toHaveBeenCalled();
 		});
