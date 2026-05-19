@@ -1223,7 +1223,10 @@ function FileExplorerPanelInner(props: FileExplorerPanelProps) {
 					draggable
 					onDragStart={(e) => {
 						e.dataTransfer.setData('application/x-maestro-file-path', fullPath);
-						e.dataTransfer.effectAllowed = 'copy';
+						// 'copyMove' so folder-row drop targets can choose 'move' (in-tree
+						// reorganisation) while drops on the AI input still default to copy
+						// (insert @mention without moving the source file).
+						e.dataTransfer.effectAllowed = 'copyMove';
 					}}
 					onMouseDown={(e) => {
 						// Prevent focus from leaving the filter input when filtering

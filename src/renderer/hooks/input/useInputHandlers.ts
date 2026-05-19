@@ -608,6 +608,11 @@ export function useInputHandlers(deps: UseInputHandlersDeps): UseInputHandlersRe
 	const appendMentionsToGroupChatDraft = useCallback((paths: string[]) => {
 		if (paths.length === 0) return;
 		const joined = paths.map((p) => `@${p}`).join(' ');
+		// Reading the store via getState() (instead of subscribing) is intentional:
+		// this callback only runs on user drop events, so we always want the latest
+		// chatId / setter at fire time and don't want stale-closure invalidation to
+		// re-create the callback (and bust handleDrop's useCallback deps) on every
+		// store update.
 		const { activeGroupChatId: chatId, setGroupChats } = useGroupChatStore.getState();
 		if (!chatId) return;
 		setGroupChats((prev) =>
