@@ -8,6 +8,7 @@
  * - formatTokens: Token counts with K/M/B suffixes (~prefix)
  * - formatTokensCompact: Token counts without ~prefix
  * - formatRelativeTime: Relative timestamps ("5m ago", "2h ago")
+ * - formatAgeShort: Compact age badge ("new", "5m", "3h", "5d", "3w", "6mo", "3.5y")
  * - formatActiveTime: Duration display (1D, 2H 30M, <1M)
  * - formatElapsedTime: Precise elapsed time (1h 10m, 30s, 500ms)
  * - formatElapsedTimeColon: Timer-style elapsed time (mm:ss or hh:mm:ss)
@@ -122,6 +123,55 @@ export function formatRelativeTime(
 	if (diffDays < 7) return `${diffDays}d ago`;
 	// Show compact date format (e.g., "Dec 3") for older dates
 	return new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/**
+ * Format an age (elapsed time since a creation timestamp) as the most compact
+ * human-readable string that still fits a small badge. Used by the dashboard
+ * agent cards where space is at a premium.
+ *
+ * Output ladder:
+ *   - < 1 minute     → "new"
+ *   - < 1 hour       → "5m"
+ *   - < 1 day        → "3h"
+ *   - < 7 days       → "5d"
+ *   - < 30 days      → "3w"
+ *   - < 365 days     → "6mo"
+ *   - < 10 years     → "3.5y" (one decimal, .0 suffix dropped → "3y" / "3.5y")
+ *   - >= 10 years    → "12y"
+ *
+ * Month = 30 days, year = 365 days — coarse enough that the badge stays stable
+ * across renders without overengineering calendar math.
+ */
+export function formatAgeShort(dateOrTimestamp: Date | number | string): string {
+	let timestamp: number;
+	if (typeof dateOrTimestamp === 'number') {
+		timestamp = dateOrTimestamp;
+	} else if (typeof dateOrTimestamp === 'string') {
+		timestamp = new Date(dateOrTimestamp).getTime();
+	} else {
+		timestamp = dateOrTimestamp.getTime();
+	}
+
+	const diffMs = Math.max(0, Date.now() - timestamp);
+	const minutes = Math.floor(diffMs / 60_000);
+	if (minutes < 1) return 'new';
+	if (minutes < 60) return `${minutes}m`;
+
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) return `${hours}h`;
+
+	const days = Math.floor(hours / 24);
+	if (days < 7) return `${days}d`;
+	if (days < 30) return `${Math.floor(days / 7)}w`;
+	if (days < 365) return `${Math.floor(days / 30)}mo`;
+
+	const years = days / 365;
+	if (years < 10) {
+		const rounded = Math.round(years * 10) / 10;
+		return Number.isInteger(rounded) ? `${rounded}y` : `${rounded.toFixed(1)}y`;
+	}
+	return `${Math.floor(years)}y`;
 }
 
 /**

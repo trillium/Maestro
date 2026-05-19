@@ -9,6 +9,7 @@ import {
 	formatTokens,
 	formatTokensCompact,
 	formatRelativeTime,
+	formatAgeShort,
 	formatActiveTime,
 	formatElapsedTime,
 	formatElapsedTimeColon,
@@ -190,6 +191,65 @@ describe('shared/formatters', () => {
 				expect(formatRelativeTime(now - 60 * 60000, { includeSeconds: true })).toBe('1h ago');
 				expect(formatRelativeTime(now - 24 * 60 * 60000, { includeSeconds: true })).toBe('1d ago');
 			});
+		});
+	});
+
+	// ==========================================================================
+	// formatAgeShort tests
+	// ==========================================================================
+	describe('formatAgeShort', () => {
+		const now = Date.now();
+		const MIN = 60_000;
+		const HOUR = 60 * MIN;
+		const DAY = 24 * HOUR;
+
+		it('returns "new" for < 1 minute', () => {
+			expect(formatAgeShort(now)).toBe('new');
+			expect(formatAgeShort(now - 30_000)).toBe('new');
+			expect(formatAgeShort(now + 10_000)).toBe('new'); // clamp future to 0
+		});
+
+		it('formats minutes (< 1 hour)', () => {
+			expect(formatAgeShort(now - 1 * MIN)).toBe('1m');
+			expect(formatAgeShort(now - 5 * MIN)).toBe('5m');
+			expect(formatAgeShort(now - 59 * MIN)).toBe('59m');
+		});
+
+		it('formats hours (< 1 day)', () => {
+			expect(formatAgeShort(now - 1 * HOUR)).toBe('1h');
+			expect(formatAgeShort(now - 5 * HOUR)).toBe('5h');
+			expect(formatAgeShort(now - 23 * HOUR)).toBe('23h');
+		});
+
+		it('formats days (< 1 week)', () => {
+			expect(formatAgeShort(now - 1 * DAY)).toBe('1d');
+			expect(formatAgeShort(now - 5 * DAY)).toBe('5d');
+			expect(formatAgeShort(now - 6 * DAY)).toBe('6d');
+		});
+
+		it('formats weeks (< 30 days)', () => {
+			expect(formatAgeShort(now - 7 * DAY)).toBe('1w');
+			expect(formatAgeShort(now - 21 * DAY)).toBe('3w');
+			expect(formatAgeShort(now - 29 * DAY)).toBe('4w');
+		});
+
+		it('formats months (< 365 days)', () => {
+			expect(formatAgeShort(now - 30 * DAY)).toBe('1mo');
+			expect(formatAgeShort(now - 6 * 30 * DAY)).toBe('6mo');
+			expect(formatAgeShort(now - 364 * DAY)).toBe('12mo');
+		});
+
+		it('formats years with one decimal under 10 years, integer otherwise', () => {
+			expect(formatAgeShort(now - 365 * DAY)).toBe('1y');
+			// ~3.5y → 3.5y (rounded to one decimal)
+			expect(formatAgeShort(now - Math.round(3.5 * 365) * DAY)).toBe('3.5y');
+			// >= 10y: floored integer
+			expect(formatAgeShort(now - 12 * 365 * DAY)).toBe('12y');
+		});
+
+		it('accepts Date objects and ISO strings', () => {
+			expect(formatAgeShort(new Date(now - 5 * MIN))).toBe('5m');
+			expect(formatAgeShort(new Date(now - 5 * MIN).toISOString())).toBe('5m');
 		});
 	});
 

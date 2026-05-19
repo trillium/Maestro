@@ -14,6 +14,7 @@ import { memo, useMemo, useState } from 'react';
 import type { Session, SessionState, Theme } from '../../types';
 import type { StatsAggregation } from '../../hooks/stats/useStats';
 import { compareNamesIgnoringEmojis } from '../../../shared/emojiUtils';
+import { formatAgeShort } from '../../../shared/formatters';
 import { Sparkline } from './Sparkline';
 
 const SPARKLINE_DAYS = 7;
@@ -188,9 +189,15 @@ const AgentCard = memo(function AgentCard({
 		: undefined;
 
 	const autoPctLabel = autoPercent === null ? 'no recorded queries' : `${autoPercent}% auto`;
+	const ageLabel = session.createdAt ? formatAgeShort(session.createdAt) : null;
+	const ageTitle = session.createdAt
+		? `Created ${new Date(session.createdAt).toLocaleString()}`
+		: undefined;
 	const baseAriaLabel = `${session.name}, ${session.state}, ${queryCount} ${
 		queryCount === 1 ? 'query' : 'queries'
-	}, ${tabCount} ${tabCount === 1 ? 'tab' : 'tabs'}, ${autoPctLabel}`;
+	}, ${tabCount} ${tabCount === 1 ? 'tab' : 'tabs'}, ${autoPctLabel}${
+		ageLabel ? `, age ${ageLabel}` : ''
+	}`;
 	const ariaLabel = isClickable ? `${baseAriaLabel}. View detailed stats.` : baseAriaLabel;
 
 	return (
@@ -243,6 +250,16 @@ const AgentCard = memo(function AgentCard({
 						data-testid="agent-card-wt-badge"
 					>
 						WT
+					</span>
+				)}
+				{ageLabel && (
+					<span
+						className="flex-shrink-0 text-[10px] tabular-nums"
+						style={{ color: theme.colors.textDim }}
+						title={ageTitle}
+						data-testid="agent-card-age"
+					>
+						{ageLabel}
 					</span>
 				)}
 			</div>
@@ -337,10 +354,11 @@ interface AgentOverviewCardsProps {
 	onShowAgentDetails?: (session: Session) => void;
 }
 
-type SortMode = 'name' | 'queries' | 'tabs' | 'auto';
+type SortMode = 'name' | 'created' | 'queries' | 'tabs' | 'auto';
 
 const SORT_OPTIONS: { value: SortMode; label: string }[] = [
 	{ value: 'name', label: 'Name' },
+	{ value: 'created', label: 'Created' },
 	{ value: 'queries', label: 'Queries' },
 	{ value: 'tabs', label: 'Tabs' },
 	{ value: 'auto', label: 'Auto %' },
@@ -370,6 +388,16 @@ export const AgentOverviewCards = memo(function AgentOverviewCards({
 
 		// Pre-sort alphabetically so equal counts fall back to a stable, scannable order.
 		const alphabetical = filtered.slice().sort(byName);
+
+		if (sortMode === 'created') {
+			// Most-recent-first. Sessions missing `createdAt` (legacy data) sink
+			// to the bottom rather than masquerading as the newest agent.
+			return alphabetical.slice().sort((a, b) => {
+				const aTs = a.createdAt ?? 0;
+				const bTs = b.createdAt ?? 0;
+				return bTs - aTs;
+			});
+		}
 
 		if (sortMode === 'queries') {
 			return alphabetical

@@ -18,6 +18,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { Theme } from '../../types';
 import { useModalLayer } from '../../hooks/ui/useModalLayer';
+import { useEventListener } from '../../hooks/utils/useEventListener';
 import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
 import { safeClipboardWriteImage } from '../../utils/clipboard';
 import { notifyToast } from '../../stores/notificationStore';
@@ -59,6 +60,31 @@ export function ImageAnnotator({ theme }: ImageAnnotatorProps) {
 		focusTrap: 'lenient',
 		enabled: isOpen,
 	});
+
+	// Left arrow opens the settings drawer, Right arrow closes it — but only
+	// when focus isn't on a form control (range sliders inside the drawer use
+	// Left/Right natively to adjust their value).
+	useEventListener(
+		'keydown',
+		(event) => {
+			const e = event as KeyboardEvent;
+			if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+			if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+			const target = e.target as HTMLElement | null;
+			const tag = target?.tagName;
+			if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) {
+				return;
+			}
+			if (e.key === 'ArrowLeft' && !drawerOpenRef.current) {
+				e.preventDefault();
+				setDrawerOpen(true);
+			} else if (e.key === 'ArrowRight' && drawerOpenRef.current) {
+				e.preventDefault();
+				setDrawerOpen(false);
+			}
+		},
+		{ target: typeof document !== 'undefined' ? document : null, enabled: isOpen }
+	);
 
 	if (!isOpen || !imageDataUrl) {
 		return null;
