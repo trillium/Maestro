@@ -3,17 +3,33 @@
  * Extracted from useBatchProcessor.ts for reusability.
  */
 
+import type { TaskSelectionMode } from '../../types';
+
 let cachedAutorunDefaultPrompt: string = '';
+let cachedAutorunPerTaskBlock: string = '';
+let cachedAutorunPerDocumentBlock: string = '';
 let batchUtilsPromptsLoaded = false;
 
 export async function loadBatchUtilsPrompts(force = false): Promise<void> {
 	if (batchUtilsPromptsLoaded && !force) return;
 
-	const result = await window.maestro.prompts.get('autorun-default');
-	if (!result.success) {
-		throw new Error(`Failed to load autorun-default prompt: ${result.error}`);
+	const [defaultResult, perTaskResult, perDocResult] = await Promise.all([
+		window.maestro.prompts.get('autorun-default'),
+		window.maestro.prompts.get('autorun-per-task'),
+		window.maestro.prompts.get('autorun-per-document'),
+	]);
+	if (!defaultResult.success) {
+		throw new Error(`Failed to load autorun-default prompt: ${defaultResult.error}`);
 	}
-	cachedAutorunDefaultPrompt = result.content!;
+	if (!perTaskResult.success) {
+		throw new Error(`Failed to load autorun-per-task prompt: ${perTaskResult.error}`);
+	}
+	if (!perDocResult.success) {
+		throw new Error(`Failed to load autorun-per-document prompt: ${perDocResult.error}`);
+	}
+	cachedAutorunDefaultPrompt = defaultResult.content!;
+	cachedAutorunPerTaskBlock = perTaskResult.content!;
+	cachedAutorunPerDocumentBlock = perDocResult.content!;
 	batchUtilsPromptsLoaded = true;
 	// Update the exported binding so consumers see the loaded value
 	DEFAULT_BATCH_PROMPT = cachedAutorunDefaultPrompt;
@@ -21,6 +37,17 @@ export async function loadBatchUtilsPrompts(force = false): Promise<void> {
 
 function getAutorunDefaultPrompt(): string {
 	return cachedAutorunDefaultPrompt;
+}
+
+/**
+ * Return the cached task-selection block content for the requested mode. Strips
+ * trailing newlines so substituting into the prompt doesn't introduce extra
+ * blank lines around the swapped block. Falls back to the per-task block if a
+ * caller passes an unrecognized value.
+ */
+export function getTaskSelectionBlock(mode: TaskSelectionMode | undefined): string {
+	const content = mode === 'document' ? cachedAutorunPerDocumentBlock : cachedAutorunPerTaskBlock;
+	return content.replace(/\s+$/, '');
 }
 
 // Default batch processing prompt (exported for use by BatchRunnerModal and playbook management)

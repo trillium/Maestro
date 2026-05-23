@@ -4,22 +4,27 @@ import type { Theme, UnifiedTab } from '../../types';
 export type TabKind = UnifiedTab['type'];
 
 /**
- * Signature color for each tab kind, derived from the active theme so the
- * palette tracks light/dark/vibe themes. Used to tint the leading kind icon
- * on every tab (active or inactive) so the eye can differentiate tab kinds
- * at a glance:
- * - ai      → accent  (the brand/primary hue)
- * - browser → ansiBlue (falls back to accent on themes without ANSI colors)
+ * Signature color for each tab kind. AI/file/terminal track the active theme
+ * via semantic tokens so the palette adapts to light/dark/vibe themes. Browser
+ * uses a fixed sky blue — there's no "info/blue" semantic token in the theme,
+ * and the obvious fallback (`ansiBlue`) lands on desaturated purples/grays in
+ * several vibe themes (pedurple, winamp, inquest), making the icon read as
+ * gray next to the other kinds. A stable browser-blue keeps the kind visually
+ * distinct from accent/warning/success on every theme.
+ * - ai      → accent  (brand hue)
+ * - browser → sky blue (fixed; universal "browser" color)
  * - file    → warning (yellow/orange)
- * - terminal→ success (green) — note terminal tabs additionally override the
- *             icon color with their run-state, so this is just the idle base.
+ * - terminal→ success (green) — terminal tabs additionally override with
+ *             their run-state, so this is the idle base.
  */
+const BROWSER_TAB_COLOR = '#3b82f6';
+
 export function getTabKindColor(kind: TabKind, theme: Theme): string {
 	switch (kind) {
 		case 'ai':
 			return theme.colors.accent;
 		case 'browser':
-			return theme.colors.ansiBlue ?? theme.colors.accent;
+			return BROWSER_TAB_COLOR;
 		case 'file':
 			return theme.colors.warning;
 		case 'terminal':

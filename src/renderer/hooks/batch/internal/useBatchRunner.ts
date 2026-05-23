@@ -178,7 +178,7 @@ export function useBatchRunner({
 				return;
 			}
 
-			const { documents, prompt, loopEnabled, maxLoops, worktree } = config;
+			const { documents, prompt, loopEnabled, maxLoops, taskSelectionMode, worktree } = config;
 
 			if (documents.length === 0) {
 				window.maestro.logger.log(
@@ -658,6 +658,7 @@ export function useBatchRunner({
 									loopIteration: loopIteration + 1, // 1-indexed
 									effectiveCwd,
 									customPrompt: prompt,
+									taskSelectionMode,
 									sshRemoteId,
 								},
 								effectiveFilename, // Use working copy path for reset-on-completion docs

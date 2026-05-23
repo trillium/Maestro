@@ -3170,9 +3170,9 @@ describe('NewInstanceModal', () => {
 				/>
 			);
 
-			// Dropdown is present and defaults to "No Group (Root)"
+			// Dropdown is present and defaults to "No Group (Ungrouped)"
 			const trigger = await screen.findByLabelText('Agent Group');
-			expect(trigger).toHaveTextContent('No Group (Root)');
+			expect(trigger).toHaveTextContent('No Group (Ungrouped)');
 
 			// Pick "Beta"
 			fireEvent.click(trigger);

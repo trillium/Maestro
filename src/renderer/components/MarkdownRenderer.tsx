@@ -3,9 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import remarkBreaks from 'remark-breaks';
 import DOMPurify from 'dompurify';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { getSyntaxStyle } from '../utils/syntaxTheme';
-import { Clipboard, ImageOff } from 'lucide-react';
+import { ImageOff } from 'lucide-react';
 import { Spinner } from './ui/Spinner';
 import type { Theme } from '../types';
 import type { FileNode } from '../types/fileTree';
@@ -23,7 +21,7 @@ import {
 } from '../utils/inlineCodeCopy';
 import { LinkContextMenu, type LinkContextMenuState } from './LinkContextMenu';
 import { FileContextMenu, type FileContextMenuState } from './FileContextMenu';
-import { SyntaxHighlightBoundary } from './SyntaxHighlightBoundary';
+import { CodeFence } from './CodeFence/CodeFence';
 import { getHomeDir, getHomeDirAsync } from '../utils/homeDir';
 import { openUrl } from '../utils/openUrl';
 import { openMaestroLink } from '../utils/openMaestroLink';
@@ -176,52 +174,6 @@ LocalImage.displayName = 'LocalImage';
 // ============================================================================
 // CodeBlockWithCopy - Code block with copy button overlay
 // ============================================================================
-
-interface CodeBlockWithCopyProps {
-	language: string;
-	codeContent: string;
-	theme: Theme;
-	onCopy: (text: string) => void;
-}
-
-const CodeBlockWithCopy = memo(
-	({ language, codeContent, theme, onCopy }: CodeBlockWithCopyProps) => {
-		return (
-			<div className="relative group/codeblock" translate="no">
-				<button
-					onClick={() => onCopy(codeContent)}
-					className="absolute bottom-2 right-2 p-1.5 rounded opacity-0 group-hover/codeblock:opacity-70 hover:!opacity-100 transition-opacity z-10"
-					style={{
-						backgroundColor: theme.colors.bgActivity,
-						color: theme.colors.textDim,
-						border: `1px solid ${theme.colors.border}`,
-					}}
-					title="Copy code"
-				>
-					<Clipboard className="w-3.5 h-3.5" />
-				</button>
-				<SyntaxHighlightBoundary code={codeContent} theme={theme}>
-					<SyntaxHighlighter
-						language={language}
-						style={getSyntaxStyle(theme.mode)}
-						customStyle={{
-							margin: '0.5em 0',
-							padding: '1em',
-							background: theme.colors.bgSidebar,
-							fontSize: '0.9em',
-							borderRadius: '6px',
-						}}
-						PreTag="div"
-					>
-						{codeContent}
-					</SyntaxHighlighter>
-				</SyntaxHighlightBoundary>
-			</div>
-		);
-	}
-);
-
-CodeBlockWithCopy.displayName = 'CodeBlockWithCopy';
 
 // ============================================================================
 // fixMarkdownLinkSpaces — pre-process markdown so CommonMark can parse links
@@ -520,17 +472,12 @@ export const MarkdownRenderer = memo(
 
 							if (codeElement?.props) {
 								const { className, children: codeChildren } = codeElement.props;
-								const match = (className || '').match(/language-(\w+)/);
-								const language = match ? match[1] : 'text';
+								const match = (className || '').match(/language-([\w+\-#]+)/);
+								const language = match ? match[1] : '';
 								const codeContent = String(codeChildren).replace(/\n$/, '');
 
 								return (
-									<CodeBlockWithCopy
-										language={language}
-										codeContent={codeContent}
-										theme={theme}
-										onCopy={onCopy}
-									/>
+									<CodeFence language={language} code={codeContent} theme={theme} onCopy={onCopy} />
 								);
 							}
 
@@ -709,6 +656,4 @@ export const MarkdownRenderer = memo(
 
 MarkdownRenderer.displayName = 'MarkdownRenderer';
 
-// Also export CodeBlockWithCopy for cases where only the code block is needed
-export { CodeBlockWithCopy };
-export type { CodeBlockWithCopyProps, MarkdownRendererProps };
+export type { MarkdownRendererProps };

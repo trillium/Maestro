@@ -62,7 +62,7 @@ export function NewInstanceModal({
 	// SSH connection error state - shown when we can't connect to the selected remote
 	const [sshConnectionError, setSshConnectionError] = useState<string | null>(null);
 
-	// Group placement: '' means "No Group (Root)". Initialized when the modal
+	// Group placement: '' means "No Group (Ungrouped)". Initialized when the modal
 	// opens from the source session (when duplicating) or the caller's preset.
 	const [selectedGroupId, setSelectedGroupId] = useState<string>('');
 	const groups = useSessionStore((s) => s.groups);
@@ -712,7 +712,7 @@ export function NewInstanceModal({
 							onChange={setSelectedGroupId}
 							aria-label="Agent Group"
 							options={[
-								{ value: '', label: 'No Group (Root)' },
+								{ value: '', label: 'No Group (Ungrouped)' },
 								...groups.map((g) => ({
 									value: g.id,
 									label: `${g.emoji} ${g.name}`.trim(),

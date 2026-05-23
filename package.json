@@ -301,6 +301,7 @@
 		"electron-store": "^8.2.0",
 		"electron-updater": "^6.8.3",
 		"fastify": "^4.25.2",
+		"highlight.js": "^11.11.1",
 		"js-tiktoken": "^1.0.21",
 		"js-yaml": "^4.1.1",
 		"markdown-it": "^14.1.1",

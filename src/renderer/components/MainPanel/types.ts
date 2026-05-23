@@ -214,6 +214,17 @@ export interface MainPanelProps {
 	// Replay a user message (AI mode)
 	onReplayMessage?: (text: string, images?: string[]) => void;
 	onForkConversation?: (logId: string) => void;
+	// In-place recovery from session_not_found errors. Triggered by the
+	// SessionRecoveryCard inside system log entries that carry a
+	// `recoveryAction` payload.
+	onSessionRecover?: (opts: {
+		sessionId: string;
+		tabId: string;
+		lastUserPrompt: string;
+		groomContext: boolean;
+	}) => void;
+	isRecoveringSession?: boolean;
+	sessionRecoveryError?: string | null;
 	// File tree for linking file references in AI responses
 	fileTree?: import('../../types/fileTree').FileNode[];
 	// Callback when a file link is clicked in AI response
