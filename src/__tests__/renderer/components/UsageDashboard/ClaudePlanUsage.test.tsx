@@ -66,6 +66,32 @@ describe('ClaudePlanUsage — empty state', () => {
 		expect(screen.getByTestId('claude-plan-empty')).toBeInTheDocument();
 		expect(screen.queryByTestId('claude-plan-row-default')).toBeNull();
 	});
+
+	it('does NOT surface an implicit `default` tab for sessions that omit CLAUDE_CONFIG_DIR', () => {
+		// Main-side `buildTarget()` in claude-usage-startup.ts refuses to sample
+		// the implicit `~/.claude` default (to avoid triggering an OAuth prompt
+		// against possibly-stale Keychain state). The renderer must agree —
+		// otherwise the "default" tab renders a Refresh CTA that can never
+		// produce a snapshot. This test guards against that regression.
+		useSessionStore.setState({
+			sessions: [
+				{
+					id: 'no-env',
+					name: 'no-env',
+					toolType: 'claude-code',
+					cwd: '/tmp',
+					customEnvVars: {},
+				},
+			],
+		} as any);
+
+		render(<ClaudePlanUsage theme={theme} />);
+
+		expect(screen.getByTestId('claude-plan-empty')).toBeInTheDocument();
+		expect(screen.queryByTestId('claude-plan-tab-default')).toBeNull();
+		expect(screen.queryByTestId('claude-plan-row-default')).toBeNull();
+		expect(screen.queryByTestId('claude-plan-row-default-pending')).toBeNull();
+	});
 });
 
 describe('ClaudePlanUsage — configured account without snapshot', () => {

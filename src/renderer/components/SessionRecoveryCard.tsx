@@ -70,7 +70,7 @@ export function SessionRecoveryCard({
 		>
 			<div className="space-y-1 text-xs">
 				<div className="flex justify-between">
-					<span style={{ color: theme.colors.textDim }}>Source: Session Not-Found Recovery</span>
+					<span style={{ color: theme.colors.textDim }}>Raw session size:</span>
 					<span style={{ color: theme.colors.textMain }}>
 						~{formatTokensCompact(sourceTokens)} tokens
 					</span>

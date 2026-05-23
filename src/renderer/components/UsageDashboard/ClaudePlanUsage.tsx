@@ -20,7 +20,6 @@ import type { Theme } from '../../types';
 import { useClaudeUsageStore, type ClaudeUsageSnapshot } from '../../stores/claudeUsageStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { formatFutureTime } from '../../../shared/formatters';
-import { getHomeDir, getHomeDirAsync } from '../../utils/homeDir';
 
 function deriveAccountShortName(configDirKey: string | undefined): string {
 	if (!configDirKey) return 'default';
@@ -238,28 +237,19 @@ export const ClaudePlanUsage = memo(function ClaudePlanUsage({ theme }: ClaudePl
 		};
 	}, []);
 
-	// Home dir for resolving the implicit default `~/.claude` account. The
-	// renderer doesn't have direct fs access; cached IPC fetch via homeDir.ts
-	// returns synchronously on subsequent renders.
-	const [homeDir, setHomeDir] = useState<string | undefined>(getHomeDir);
-	useEffect(() => {
-		if (!homeDir) {
-			getHomeDirAsync()?.then(setHomeDir);
-		}
-	}, [homeDir]);
-	const defaultConfigDirKey = homeDir ? normalizeConfigDirKey(`${homeDir}/.claude`) : null;
-
 	// Account list derived from configured agents/sessions, NOT from snapshot
 	// keys. This way the dashboard shows every account the user has explicitly
 	// wired up — including ones that haven't been sampled yet — and the
 	// per-tab UI can guide them to hit Refresh.
 	//
 	// Sourcing rule mirrors the main-side sampler (claude-usage-startup.ts):
-	// merge agent-level + session-level customEnvVars (session wins). Sessions
-	// without an explicit CLAUDE_CONFIG_DIR fall back to the implicit default
-	// (`~/.claude`) so the user can still see that account is in use even when
-	// it hasn't been sampled (sampling the default is a deliberate skip on the
-	// main side — see `buildTarget` in claude-usage-startup.ts).
+	// merge agent-level + session-level customEnvVars (session wins), and
+	// surface ONLY accounts whose CLAUDE_CONFIG_DIR is explicitly set. Sessions
+	// inheriting the implicit `~/.claude` default are intentionally hidden —
+	// `buildTarget` on the main side refuses to sample the implicit default
+	// (to avoid triggering an OAuth browser prompt against possibly-stale
+	// Keychain state), so a "default" tab would render a Refresh CTA that
+	// can never produce a snapshot.
 	const configuredAccountKeys = useMemo(() => {
 		const keys = new Set<string>();
 		for (const s of sessions) {
@@ -269,8 +259,6 @@ export const ClaudePlanUsage = memo(function ClaudePlanUsage({ theme }: ClaudePl
 			const dir = merged.CLAUDE_CONFIG_DIR;
 			if (typeof dir === 'string' && dir.length > 0) {
 				keys.add(normalizeConfigDirKey(dir));
-			} else if (defaultConfigDirKey) {
-				keys.add(defaultConfigDirKey);
 			}
 		}
 		// Also include any snapshot key that didn't surface in session config —
@@ -283,7 +271,7 @@ export const ClaudePlanUsage = memo(function ClaudePlanUsage({ theme }: ClaudePl
 		return Array.from(keys).sort((a, b) =>
 			deriveAccountShortName(a).localeCompare(deriveAccountShortName(b))
 		);
-	}, [sessions, agentLevelEnvVars, snapshots, defaultConfigDirKey]);
+	}, [sessions, agentLevelEnvVars, snapshots]);
 
 	// Sub-tab selection by configDirKey. Defaults to the first account on
 	// mount; clamps back to the first whenever the selected key disappears.
