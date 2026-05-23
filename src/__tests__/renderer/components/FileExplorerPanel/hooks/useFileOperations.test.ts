@@ -10,6 +10,10 @@ vi.mock('../../../../../renderer/utils/fileExplorer', () => ({
 	countNodesInTree: vi.fn(() => ({ fileCount: 0, folderCount: 0 })),
 }));
 
+vi.mock('../../../../../renderer/utils/sentry', () => ({
+	captureException: vi.fn(),
+}));
+
 const fileNode: FileNode = { name: 'App.tsx', type: 'file' };
 const folderNode: FileNode = {
 	name: 'components',
@@ -201,9 +205,9 @@ describe('useFileOperations', () => {
 		const { result } = renderHook(() => useFileOperations(defaultArgs));
 		act(() => {
 			result.current.openRenameModal(fileNode, 'App.tsx');
-			result.current.setRenameValue('foo/bar'); // triggers error
+			result.current.setRenameValue('foo/bar');
 		});
-		// Manually set an error by attempting rename
+		expect(result.current.renameError).not.toBeNull();
 		act(() => {
 			result.current.setRenameValue('valid.tsx');
 		});

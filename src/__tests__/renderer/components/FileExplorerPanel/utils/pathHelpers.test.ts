@@ -221,4 +221,8 @@ describe('formatBytes', () => {
 	it('rounds to one decimal place', () => {
 		expect(formatBytes(1536)).toBe('1.5 KB');
 	});
+
+	it('clamps the suffix for values larger than terabytes', () => {
+		expect(formatBytes(1024 ** 6)).toBe('1048576 TB');
+	});
 });

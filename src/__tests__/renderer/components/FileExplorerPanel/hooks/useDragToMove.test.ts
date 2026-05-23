@@ -2,9 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useDragToMove } from '../../../../../renderer/components/FileExplorerPanel/hooks/useDragToMove';
 import type { FileNode } from '../../../../../renderer/types/fileTree';
+import { captureException } from '../../../../../renderer/utils/sentry';
 
 vi.mock('../../../../../renderer/utils/logger', () => ({
 	logger: { warn: vi.fn() },
+}));
+
+vi.mock('../../../../../renderer/utils/sentry', () => ({
+	captureException: vi.fn(),
 }));
 
 const destFolder: FileNode = {
@@ -235,7 +240,8 @@ describe('useDragToMove', () => {
 	});
 
 	it('pre-overwrite delete failure is swallowed and rename still proceeds', async () => {
-		mockMaestro.fs.delete.mockRejectedValueOnce(new Error('not found'));
+		const deleteError = new Error('not found');
+		mockMaestro.fs.delete.mockRejectedValueOnce(deleteError);
 		const onShowFlash = vi.fn();
 		const { result } = renderHook(() => useDragToMove({ ...defaultArgs, onShowFlash }));
 		await act(async () => {
@@ -251,6 +257,16 @@ describe('useDragToMove', () => {
 				'dest'
 			);
 		});
+		expect(captureException).toHaveBeenCalledWith(
+			deleteError,
+			expect.objectContaining({
+				extra: expect.objectContaining({
+					sourceName: 'x.ts',
+					destAbsolutePath: '/project/dest/x.ts',
+					operation: 'move.preOverwriteDelete',
+				}),
+			})
+		);
 		expect(mockMaestro.fs.rename).toHaveBeenCalled();
 		expect(onShowFlash).toHaveBeenCalledWith('Moved "x.ts"');
 	});

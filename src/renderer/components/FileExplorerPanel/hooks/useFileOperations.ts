@@ -9,6 +9,7 @@ import {
 	findNodeInTree,
 	countNodesInTree,
 } from '../../../utils/fileExplorer';
+import { captureException } from '../../../utils/sentry';
 import type { RenameModalState, DeleteModalState, NewFileModalState } from '../types';
 
 interface UseFileOperationsArgs {
@@ -104,8 +105,6 @@ export function useFileOperations({
 			const newPath = `${parentDir}/${newName}`;
 			await window.maestro.fs.rename(renameModal.absolutePath, newPath, sshRemoteId);
 
-			const newTree = renameNodeInTree(session.fileTree || [], renameModal.path, newName);
-
 			const oldPath = renameModal.path;
 			const pathParts = oldPath.split('/');
 			pathParts[pathParts.length - 1] = newName;
@@ -114,6 +113,8 @@ export function useFileOperations({
 			setSessions((prev) =>
 				prev.map((s) => {
 					if (s.id !== session.id) return s;
+					const currentTree = s.fileTree || [];
+					const newTree = renameNodeInTree(currentTree, renameModal.path, newName);
 					return {
 						...s,
 						fileTree: newTree,
@@ -135,15 +136,7 @@ export function useFileOperations({
 		} catch (error) {
 			setRenameError(error instanceof Error ? error.message : 'Rename failed');
 		}
-	}, [
-		renameModal,
-		renameValue,
-		session.id,
-		session.fileTree,
-		onShowFlash,
-		sshRemoteId,
-		setSessions,
-	]);
+	}, [renameModal, renameValue, session.id, onShowFlash, sshRemoteId, setSessions]);
 
 	const openNewFileModal = useCallback(
 		(parentFolderPath: string, parentFolderAbsolutePath: string) => {
@@ -211,7 +204,17 @@ export function useFileOperations({
 				try {
 					const count = await window.maestro.fs.countItems(absolutePath, sshRemoteId);
 					modalData.itemCount = count;
-				} catch {
+				} catch (error) {
+					captureException(error, {
+						extra: {
+							absolutePath,
+							sshRemoteId,
+							operation: 'countItems',
+							nodeName: modalData.node.name,
+							nodeType: modalData.node.type,
+							path: modalData.path,
+						},
+					});
 					// If count fails, proceed without it
 				}
 			}
@@ -231,27 +234,30 @@ export function useFileOperations({
 		try {
 			await window.maestro.fs.delete(deleteModal.absolutePath, { sshRemoteId });
 
-			const deletedNode = findNodeInTree(session.fileTree || [], deleteModal.path);
-			let deletedFileCount = 0;
-			let deletedFolderCount = 0;
-
-			if (deletedNode) {
-				if (deletedNode.type === 'folder') {
-					deletedFolderCount = 1;
-					if (deletedNode.children) {
-						const childCounts = countNodesInTree(deletedNode.children);
-						deletedFileCount = childCounts.fileCount;
-						deletedFolderCount += childCounts.folderCount;
-					}
-				} else {
-					deletedFileCount = 1;
-				}
-			}
-
-			const newTree = removeNodeFromTree(session.fileTree || [], deleteModal.path);
 			setSessions((prev) =>
 				prev.map((s) => {
 					if (s.id !== session.id) return s;
+					const currentTree = s.fileTree || [];
+					const deletedNode = findNodeInTree(currentTree, deleteModal.path);
+					let deletedFileCount = 0;
+					let deletedFolderCount = 0;
+
+					if (deletedNode) {
+						if (deletedNode.type === 'folder') {
+							deletedFolderCount = 1;
+							if (deletedNode.children) {
+								const childCounts = countNodesInTree(deletedNode.children);
+								deletedFileCount = childCounts.fileCount;
+								deletedFolderCount += childCounts.folderCount;
+							}
+						} else {
+							deletedFileCount = 1;
+						}
+					}
+
+					const newTree = removeNodeFromTree(currentTree, deleteModal.path);
+					const isDeletedFolderPath = (p: string) =>
+						p === deleteModal.path || p.startsWith(`${deleteModal.path}/`);
 					return {
 						...s,
 						fileTree: newTree,
@@ -264,7 +270,7 @@ export function useFileOperations({
 							: undefined,
 						fileExplorerExpanded:
 							deleteModal.node.type === 'folder'
-								? (s.fileExplorerExpanded || []).filter((p) => !p.startsWith(deleteModal.path))
+								? (s.fileExplorerExpanded || []).filter((p) => !isDeletedFolderPath(p))
 								: s.fileExplorerExpanded,
 					};
 				})
@@ -277,7 +283,7 @@ export function useFileOperations({
 		} finally {
 			setIsDeleting(false);
 		}
-	}, [deleteModal, session.id, session.fileTree, onShowFlash, sshRemoteId, setSessions]);
+	}, [deleteModal, session.id, onShowFlash, sshRemoteId, setSessions]);
 
 	return {
 		renameModal,
@@ -293,7 +299,9 @@ export function useFileOperations({
 		closeRenameModal,
 		setRenameValue: (v: string) => {
 			setRenameValue(v);
-			setRenameError(null);
+			setRenameError(
+				v.trim().includes('/') || v.trim().includes('\\') ? 'Name cannot contain slashes' : null
+			);
 		},
 		handleRename,
 		openNewFileModal,

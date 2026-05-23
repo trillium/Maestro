@@ -91,6 +91,13 @@ describe('NewFileModal', () => {
 		expect((screen.getByTestId('confirm-btn') as HTMLButtonElement).disabled).toBe(true);
 	});
 
+	it('does not call onClose from Cancel while creating', () => {
+		const onClose = vi.fn();
+		render(<NewFileModal {...defaultProps} isCreating={true} onClose={onClose} />);
+		fireEvent.click(screen.getByText('Cancel'));
+		expect(onClose).not.toHaveBeenCalled();
+	});
+
 	it('shows inline error when error prop is set', () => {
 		render(<NewFileModal {...defaultProps} error='"file.ts" already exists in this folder' />);
 		expect(screen.getByTestId('error')).toBeTruthy();

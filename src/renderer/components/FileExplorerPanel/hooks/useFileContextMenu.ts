@@ -6,6 +6,7 @@ import { useContextMenuPosition } from '../../../hooks/ui/useContextMenuPosition
 import { useEventListener } from '../../../hooks/utils/useEventListener';
 import { useModalStore } from '../../../stores/modalStore';
 import { safeClipboardWrite } from '../../../utils/clipboard';
+import { captureException } from '../../../utils/sentry';
 import type { ContextMenuState } from '../types';
 import { PREVIEW_ALL_CONFIRM_THRESHOLD } from '../types';
 import { collectPreviewableFiles } from '../utils/pathHelpers';
@@ -37,8 +38,17 @@ interface UseFileContextMenuResult {
 	handleOpenRename: () => void;
 	handleOpenDelete: () => Promise<void>;
 	handleFocusInGraph: () => void;
-	handlePreviewFile: () => void;
+	handlePreviewFile: () => Promise<void>;
 	handlePreviewAllInFolder: () => void;
+}
+
+function isMissingFileError(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		'code' in error &&
+		(error as { code?: unknown }).code === 'ENOENT'
+	);
 }
 
 export function useFileContextMenu({
@@ -98,45 +108,84 @@ export function useFileContextMenu({
 		setContextMenu(null);
 	}, [contextMenu, onFocusFileInGraph]);
 
-	const handlePreviewFile = useCallback(() => {
-		if (contextMenu && contextMenu.node.type === 'file') {
-			handleFileClick(contextMenu.node, contextMenu.path, session);
+	const handlePreviewFile = useCallback(async () => {
+		const menu = contextMenu;
+		try {
+			if (menu && menu.node.type === 'file') {
+				await handleFileClick(menu.node, menu.path, session);
+			}
+		} catch (error) {
+			if (isMissingFileError(error)) {
+				onShowFlash?.(`File not found: "${menu?.node.name ?? 'Unknown file'}"`);
+				return;
+			}
+			captureException(error, {
+				extra: {
+					action: 'preview',
+					path: menu?.path,
+					nodeName: menu?.node.name,
+					nodeType: menu?.node.type,
+					sessionId: session.id,
+				},
+			});
+			throw error;
+		} finally {
+			setContextMenu(null);
 		}
-		setContextMenu(null);
-	}, [contextMenu, handleFileClick, session]);
+	}, [contextMenu, handleFileClick, session, onShowFlash]);
 
 	const handlePreviewAllInFolder = useCallback(() => {
-		if (!contextMenu || contextMenu.node.type !== 'folder') {
-			setContextMenu(null);
-			return;
-		}
-		const folderNode = contextMenu.node;
-		const folderPath = contextMenu.path;
-		setContextMenu(null);
-
-		const files = collectPreviewableFiles(folderNode, folderPath);
-		if (files.length === 0) {
-			onShowFlash?.(`No previewable files in "${folderNode.name}"`);
-			return;
-		}
-
-		const openAll = async () => {
-			for (const file of files) {
-				await handleFileClick(file.node, file.path, session);
+		const menu = contextMenu;
+		try {
+			if (!menu || menu.node.type !== 'folder') {
+				return;
 			}
-			onShowFlash?.(
-				`Opened ${files.length} file${files.length !== 1 ? 's' : ''} from "${folderNode.name}"`
-			);
-		};
+			const folderNode = menu.node;
+			const folderPath = menu.path;
 
-		if (files.length > PREVIEW_ALL_CONFIRM_THRESHOLD) {
-			useModalStore.getState().openModal('confirm', {
-				message: `Preview all ${files.length} files under "${folderNode.name}"? This opens a tab for each file.`,
-				onConfirm: () => void openAll(),
-			});
-			return;
+			const files = collectPreviewableFiles(folderNode, folderPath);
+			if (files.length === 0) {
+				onShowFlash?.(`No previewable files in "${folderNode.name}"`);
+				return;
+			}
+
+			const openAll = async () => {
+				try {
+					for (const file of files) {
+						await handleFileClick(file.node, file.path, session);
+					}
+					onShowFlash?.(
+						`Opened ${files.length} file${files.length !== 1 ? 's' : ''} from "${folderNode.name}"`
+					);
+				} catch (error) {
+					if (isMissingFileError(error)) {
+						onShowFlash?.(`A file in "${folderNode.name}" was no longer available`);
+						return;
+					}
+					captureException(error, {
+						extra: {
+							action: 'preview-all',
+							path: folderPath,
+							nodeName: folderNode.name,
+							nodeType: folderNode.type,
+							sessionId: session.id,
+						},
+					});
+					throw error;
+				}
+			};
+
+			if (files.length > PREVIEW_ALL_CONFIRM_THRESHOLD) {
+				useModalStore.getState().openModal('confirm', {
+					message: `Preview all ${files.length} files under "${folderNode.name}"? This opens a tab for each file.`,
+					onConfirm: () => void openAll(),
+				});
+				return;
+			}
+			void openAll();
+		} finally {
+			setContextMenu(null);
 		}
-		void openAll();
 	}, [contextMenu, handleFileClick, session, onShowFlash]);
 
 	const handleCopyPath = useCallback(() => {
@@ -158,11 +207,14 @@ export function useFileContextMenu({
 	const handleOpenInMaestroBrowser = useCallback(() => {
 		if (contextMenu && contextMenu.node.type === 'file' && onOpenBrowserTabAt) {
 			const absolutePath = `${session.fullPath}/${contextMenu.path}`;
-			const encodedPath = absolutePath
+			const normalizedPath = absolutePath.replace(/\\/g, '/');
+			const isWindowsDrivePath = /^[A-Za-z]:/.test(normalizedPath);
+			const pathForUrl = isWindowsDrivePath ? `/${normalizedPath}` : normalizedPath;
+			const encodedPath = pathForUrl
 				.split('/')
-				.map((seg) => encodeURIComponent(seg))
+				.map((seg, index) => (isWindowsDrivePath && index === 1 ? seg : encodeURIComponent(seg)))
 				.join('/');
-			const url = `file://${encodedPath}`;
+			const url = pathForUrl.startsWith('/') ? `file://${encodedPath}` : `file:///${encodedPath}`;
 			onOpenBrowserTabAt(url, { title: contextMenu.node.name });
 		}
 		setContextMenu(null);

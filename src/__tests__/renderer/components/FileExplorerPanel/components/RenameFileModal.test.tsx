@@ -83,6 +83,13 @@ describe('RenameFileModal', () => {
 		expect(onRename).toHaveBeenCalledTimes(1);
 	});
 
+	it('calls onRename when Enter is pressed', () => {
+		const onRename = vi.fn();
+		render(<RenameFileModal {...defaultProps} value="NewName.tsx" onRename={onRename} />);
+		fireEvent.keyDown(screen.getByPlaceholderText('Enter file name...'), { key: 'Enter' });
+		expect(onRename).toHaveBeenCalledTimes(1);
+	});
+
 	it('calls onClose when Cancel is clicked', () => {
 		const onClose = vi.fn();
 		render(<RenameFileModal {...defaultProps} onClose={onClose} />);
@@ -93,6 +100,11 @@ describe('RenameFileModal', () => {
 	it('disables confirm when value matches the original name', () => {
 		render(<RenameFileModal {...defaultProps} value="App.tsx" />);
 		expect((screen.getByTestId('confirm-btn') as HTMLButtonElement).disabled).toBe(true);
+	});
+
+	it('uses the folder placeholder for folder nodes', () => {
+		render(<RenameFileModal {...defaultProps} node={folderNode} value="components" />);
+		expect(screen.getByPlaceholderText('Enter folder name...')).toBeTruthy();
 	});
 
 	it('shows inline error when error prop is set', () => {

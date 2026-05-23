@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FileTreeContextMenu } from '../../../../../renderer/components/FileExplorerPanel/components/FileTreeContextMenu';
 import type { ContextMenuState } from '../../../../../renderer/components/FileExplorerPanel/types';
@@ -30,7 +30,7 @@ const contextMenuPos = { top: 100, left: 200, ready: true };
 const fileNode: FileNode = { name: 'App.tsx', type: 'file' };
 const folderNode: FileNode = { name: 'src', type: 'folder' };
 const htmlNode: FileNode = { name: 'index.html', type: 'file' };
-const mdNode: FileNode = { name: 'readme.md', type: 'file' };
+const mdNode: FileNode = { name: 'README.MD', type: 'file' };
 
 const makeContextMenu = (node: FileNode): ContextMenuState => ({
 	x: 100,
@@ -58,12 +58,16 @@ const defaultProps = {
 	onOpenDelete: vi.fn(),
 };
 
-// Maestro mock needed for getRevealLabel → window.maestro.platform
-(window as any).maestro = { platform: 'darwin' };
+const origMaestro = (window as any).maestro;
 
 describe('FileTreeContextMenu', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		(window as any).maestro = { platform: 'darwin' };
+	});
+
+	afterEach(() => {
+		(window as any).maestro = origMaestro;
 	});
 
 	it('shows Preview + Open in Default App + Copy Path + Reveal + Rename + Delete for a file', () => {
@@ -165,6 +169,12 @@ describe('FileTreeContextMenu', () => {
 		);
 		expect(screen.queryByText('Reveal in Finder')).toBeNull();
 		expect(screen.queryByText('Open in Default App')).toBeNull();
+	});
+
+	it('renders reveal action when the preload bridge is missing', () => {
+		(window as any).maestro = undefined;
+		render(<FileTreeContextMenu {...defaultProps} contextMenu={makeContextMenu(fileNode)} />);
+		expect(screen.getByText('Reveal in Finder')).toBeTruthy();
 	});
 
 	it('applies opacity 0 when contextMenuPos.ready is false', () => {

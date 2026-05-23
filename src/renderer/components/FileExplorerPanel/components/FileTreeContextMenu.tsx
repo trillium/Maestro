@@ -56,13 +56,10 @@ export function FileTreeContextMenu({
 }: FileTreeContextMenuProps) {
 	const isFolder = contextMenu.node.type === 'folder';
 	const isFile = contextMenu.node.type === 'file';
-	const isHtml =
-		isFile &&
-		(contextMenu.node.name.toLowerCase().endsWith('.html') ||
-			contextMenu.node.name.toLowerCase().endsWith('.htm'));
-	const isMarkdown =
-		isFile &&
-		(contextMenu.node.name.endsWith('.md') || contextMenu.node.name.endsWith('.markdown'));
+	const nodeName = contextMenu.node.name.toLowerCase();
+	const platform = window.maestro?.platform ?? 'unknown';
+	const isHtml = isFile && (nodeName.endsWith('.html') || nodeName.endsWith('.htm'));
+	const isMarkdown = isFile && (nodeName.endsWith('.md') || nodeName.endsWith('.markdown'));
 
 	return createPortal(
 		<div
@@ -170,7 +167,7 @@ export function FileTreeContextMenu({
 						style={{ color: theme.colors.textMain }}
 					>
 						<ExternalLink className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
-						<span>{getRevealLabel(window.maestro.platform)}</span>
+						<span>{getRevealLabel(platform)}</span>
 					</button>
 				)}
 

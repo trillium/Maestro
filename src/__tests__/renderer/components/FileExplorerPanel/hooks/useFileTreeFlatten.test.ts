@@ -81,8 +81,8 @@ describe('useFileTreeFlatten', () => {
 	it('skips duplicate sibling nodes by NFC-normalised name', () => {
 		// Create a tree with two nodes whose NFC names are identical
 		const treeWithDup: FileNode[] = [
-			{ name: 'file.ts', type: 'file' },
-			{ name: 'file.ts', type: 'file' }, // duplicate
+			{ name: 'caf\u00e9.ts', type: 'file' },
+			{ name: 'cafe\u0301.ts', type: 'file' }, // duplicate after NFC normalization
 		];
 		const { result } = renderHook(() =>
 			useFileTreeFlatten({ ...defaultArgs, filteredFileTree: treeWithDup })

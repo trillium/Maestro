@@ -101,4 +101,11 @@ describe('DeleteFileModal', () => {
 		expect(screen.getByText('Deleting...')).toBeTruthy();
 		expect((screen.getByTestId('confirm-btn') as HTMLButtonElement).disabled).toBe(true);
 	});
+
+	it('does not call onClose from Cancel while deleting', () => {
+		const onClose = vi.fn();
+		render(<DeleteFileModal {...defaultProps} isDeleting={true} onClose={onClose} />);
+		fireEvent.click(screen.getByText('Cancel'));
+		expect(onClose).not.toHaveBeenCalled();
+	});
 });

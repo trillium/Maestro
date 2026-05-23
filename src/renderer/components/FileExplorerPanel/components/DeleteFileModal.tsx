@@ -36,7 +36,7 @@ export function DeleteFileModal({
 			footer={
 				<ModalFooter
 					theme={theme}
-					onCancel={onClose}
+					onCancel={isDeleting ? () => {} : onClose}
 					onConfirm={onDelete}
 					confirmLabel={isDeleting ? 'Deleting...' : 'Delete'}
 					confirmDisabled={isDeleting}

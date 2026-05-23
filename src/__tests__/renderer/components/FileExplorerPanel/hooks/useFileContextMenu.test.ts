@@ -21,6 +21,10 @@ vi.mock('../../../../../renderer/utils/clipboard', () => ({
 	safeClipboardWrite: vi.fn(),
 }));
 
+vi.mock('../../../../../renderer/utils/sentry', () => ({
+	captureException: vi.fn(),
+}));
+
 vi.mock('../../../../../renderer/utils/flashCopiedToClipboard', () => ({
 	flashCopiedToClipboard: vi.fn(),
 }));
@@ -171,7 +175,7 @@ describe('useFileContextMenu', () => {
 		expect(mockMaestro.shell.showItemInFolder).toHaveBeenCalledWith('/project/src/App.tsx');
 	});
 
-	it('handlePreviewFile calls handleFileClick', () => {
+	it('handlePreviewFile calls handleFileClick', async () => {
 		const handleFileClick = vi.fn().mockResolvedValue(undefined);
 		const { result } = renderHook(() => useFileContextMenu({ ...defaultArgs, handleFileClick }));
 		const e = {
@@ -183,8 +187,8 @@ describe('useFileContextMenu', () => {
 		act(() => {
 			result.current.openContextMenu(e, fileNode, 'App.tsx', 0);
 		});
-		act(() => {
-			result.current.handlePreviewFile();
+		await act(async () => {
+			await result.current.handlePreviewFile();
 		});
 		expect(handleFileClick).toHaveBeenCalledWith(fileNode, 'App.tsx', session);
 	});
@@ -262,6 +266,31 @@ describe('useFileContextMenu', () => {
 		expect(onOpenBrowserTabAt).toHaveBeenCalledWith('file:///project/public/index.html', {
 			title: 'index.html',
 		});
+	});
+
+	it('handleOpenInMaestroBrowser preserves Windows drive-letter file:// URLs', () => {
+		const onOpenBrowserTabAt = vi.fn();
+		const windowsSession = { ...session, fullPath: 'C:\\Users\\Test Project' } as any;
+		const { result } = renderHook(() =>
+			useFileContextMenu({ ...defaultArgs, session: windowsSession, onOpenBrowserTabAt })
+		);
+		const htmlNode: FileNode = { name: 'index.html', type: 'file' };
+		const e = {
+			clientX: 10,
+			clientY: 10,
+			preventDefault: vi.fn(),
+			stopPropagation: vi.fn(),
+		} as unknown as React.MouseEvent;
+		act(() => {
+			result.current.openContextMenu(e, htmlNode, 'public/index.html', 0);
+		});
+		act(() => {
+			result.current.handleOpenInMaestroBrowser();
+		});
+		expect(onOpenBrowserTabAt).toHaveBeenCalledWith(
+			'file:///C:/Users/Test%20Project/public/index.html',
+			{ title: 'index.html' }
+		);
 	});
 
 	it('handlePreviewAllInFolder opens modal when files exceed threshold', () => {

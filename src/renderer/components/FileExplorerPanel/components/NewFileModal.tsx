@@ -37,7 +37,7 @@ export function NewFileModal({
 			footer={
 				<ModalFooter
 					theme={theme}
-					onCancel={onClose}
+					onCancel={isCreating ? () => {} : onClose}
 					onConfirm={onCreate}
 					confirmLabel={isCreating ? 'Creating...' : 'Create'}
 					confirmDisabled={isCreating || !value.trim()}

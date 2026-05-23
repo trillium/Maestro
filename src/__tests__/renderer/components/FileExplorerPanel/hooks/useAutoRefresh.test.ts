@@ -6,6 +6,10 @@ vi.mock('../../../../../renderer/utils/logger', () => ({
 	logger: { error: vi.fn() },
 }));
 
+vi.mock('../../../../../renderer/utils/sentry', () => ({
+	captureException: vi.fn(),
+}));
+
 const defaultArgs = {
 	sessionId: 'sess-1',
 	autoRefreshInterval: 0,

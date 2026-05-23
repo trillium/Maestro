@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { Session } from '../../../types';
 import type { FileTreeChanges } from '../../../utils/fileExplorer';
 import { logger } from '../../../utils/logger';
+import { captureException } from '../../../utils/sentry';
 
 interface UseAutoRefreshArgs {
 	sessionId: string;
@@ -100,6 +101,13 @@ export function useAutoRefresh({
 					await refreshFileTreeRef.current(sessionIdRef.current);
 				} catch (error) {
 					logger.error('[FileExplorer] Auto-refresh failed:', undefined, error);
+					captureException(error, {
+						extra: {
+							sessionId: sessionIdRef.current,
+							operation: 'fileExplorer.autoRefresh',
+						},
+					});
+					throw error;
 				} finally {
 					autoRefreshSpinTimeoutRef.current = setTimeout(() => {
 						setIsRefreshing(false);
