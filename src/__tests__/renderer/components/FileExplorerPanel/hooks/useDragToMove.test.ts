@@ -36,7 +36,6 @@ const defaultArgs = {
 	refreshFileTree: vi.fn().mockResolvedValue(undefined),
 	expandFolder: vi.fn(),
 	onShowFlash: vi.fn(),
-	selectedPathsRef: { current: new Set<string>() },
 	setSelectedPaths: vi.fn(),
 };
 

@@ -12,7 +12,6 @@ import {
 	Files,
 } from 'lucide-react';
 import { getRevealLabel } from '../../../utils/platformUtils';
-import { formatShortcutKeys } from '../../../utils/shortcutFormatter';
 import type { Theme } from '../../../types';
 import type { ContextMenuState } from '../types';
 
@@ -24,7 +23,6 @@ interface FileTreeContextMenuProps {
 	sshRemoteId: string | undefined;
 	onFocusFileInGraph?: (relativePath: string) => void;
 	onOpenBrowserTabAt?: (url: string, options?: { title?: string }) => void;
-	shortcuts: Record<string, any>;
 	onCopyPath: () => void;
 	onOpenInDefaultApp: () => void;
 	onOpenInMaestroBrowser: () => void;

@@ -23,7 +23,6 @@ interface UseDragToMoveArgs {
 	) => Promise<FileTreeChanges | undefined>;
 	expandFolder: (relativePath: string) => void;
 	onShowFlash?: (msg: string) => void;
-	selectedPathsRef: React.MutableRefObject<Set<string>>;
 	setSelectedPaths: Dispatch<SetStateAction<Set<string>>>;
 }
 
@@ -56,7 +55,6 @@ export function useDragToMove({
 	refreshFileTree,
 	expandFolder,
 	onShowFlash,
-	selectedPathsRef,
 	setSelectedPaths,
 }: UseDragToMoveArgs): UseDragToMoveResult {
 	const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);

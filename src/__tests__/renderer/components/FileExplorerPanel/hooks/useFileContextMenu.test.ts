@@ -44,7 +44,6 @@ const theme = {} as any;
 const defaultArgs = {
 	session,
 	theme,
-	sshRemoteId: undefined,
 	onShowFlash: vi.fn(),
 	onFocusFileInGraph: vi.fn(),
 	onOpenBrowserTabAt: vi.fn(),

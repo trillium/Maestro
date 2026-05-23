@@ -1,7 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import type { Session, Theme } from '../../../types';
 import type { FileNode } from '../../../types/fileTree';
-import type { FileTreeChanges } from '../../../utils/fileExplorer';
 import { useClickOutside } from '../../../hooks/ui/useClickOutside';
 import { useContextMenuPosition } from '../../../hooks/ui/useContextMenuPosition';
 import { useEventListener } from '../../../hooks/utils/useEventListener';
@@ -14,7 +13,6 @@ import { collectPreviewableFiles } from '../utils/pathHelpers';
 interface UseFileContextMenuArgs {
 	session: Session;
 	theme: Theme;
-	sshRemoteId: string | undefined;
 	onShowFlash?: (msg: string) => void;
 	onFocusFileInGraph?: (relativePath: string) => void;
 	onOpenBrowserTabAt?: (url: string, options?: { title?: string }) => void;
@@ -45,7 +43,6 @@ interface UseFileContextMenuResult {
 
 export function useFileContextMenu({
 	session,
-	sshRemoteId,
 	onShowFlash,
 	onFocusFileInGraph,
 	onOpenBrowserTabAt,

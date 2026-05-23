@@ -28,17 +28,14 @@ const makeFlattened = (paths: string[]): FlattenedNode[] =>
 	}));
 
 const defaultArgs = {
-	fileTreeFilter: '',
 	fileTreeFilterOpen: false,
 	setFileTreeFilterOpen: vi.fn(),
 	setFileTreeFilter: vi.fn(),
 	lastClickedUnderFilterRef: { current: null as string | null },
 	setActiveFocus: vi.fn(),
 	sessionId: 'sess-1',
-	fileExplorerExpanded: [] as string[],
 	setSessions: vi.fn(),
 	flattenedTree: makeFlattened(['src/index.ts', 'src/App.tsx']),
-	selectedFileIndex: 0,
 	setSelectedFileIndex: vi.fn(),
 	fileTreeContainerRef: { current: { focus: vi.fn() } } as any,
 	virtualizer: { scrollToIndex: vi.fn() },

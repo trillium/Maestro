@@ -1,5 +1,4 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
 	ChevronUp,
@@ -121,7 +120,7 @@ function FileExplorerPanelInner(props: FileExplorerPanelProps) {
 
 	// ── Flatten + Selection ────────────────────────────────────────────────────
 
-	const { displayTree, flattenedTree } = useFileTreeFlatten({
+	const { flattenedTree } = useFileTreeFlatten({
 		filteredFileTree,
 		fileTreeFilter,
 		fileExplorerExpanded: session.fileExplorerExpanded,
@@ -157,18 +156,15 @@ function FileExplorerPanelInner(props: FileExplorerPanelProps) {
 
 	// ── Filter ────────────────────────────────────────────────────────────────
 
-	const { handleFilterEscape } = useFileTreeFilter({
-		fileTreeFilter,
+	useFileTreeFilter({
 		fileTreeFilterOpen,
 		setFileTreeFilterOpen,
 		setFileTreeFilter,
 		lastClickedUnderFilterRef,
 		setActiveFocus,
 		sessionId: session.id,
-		fileExplorerExpanded: session.fileExplorerExpanded,
 		setSessions,
 		flattenedTree,
-		selectedFileIndex,
 		setSelectedFileIndex,
 		fileTreeContainerRef,
 		virtualizer,
@@ -265,7 +261,6 @@ function FileExplorerPanelInner(props: FileExplorerPanelProps) {
 		refreshFileTree,
 		expandFolder,
 		onShowFlash,
-		selectedPathsRef,
 		setSelectedPaths,
 	});
 
@@ -289,7 +284,6 @@ function FileExplorerPanelInner(props: FileExplorerPanelProps) {
 	} = useFileContextMenu({
 		session,
 		theme,
-		sshRemoteId,
 		onShowFlash,
 		onFocusFileInGraph,
 		onOpenBrowserTabAt,
@@ -733,7 +727,6 @@ function FileExplorerPanelInner(props: FileExplorerPanelProps) {
 					sshRemoteId={sshRemoteId}
 					onFocusFileInGraph={onFocusFileInGraph}
 					onOpenBrowserTabAt={onOpenBrowserTabAt}
-					shortcuts={shortcuts}
 					onCopyPath={handleCopyPath}
 					onOpenInDefaultApp={handleOpenInDefaultApp}
 					onOpenInMaestroBrowser={handleOpenInMaestroBrowser}

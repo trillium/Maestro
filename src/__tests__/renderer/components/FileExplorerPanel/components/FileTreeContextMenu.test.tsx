@@ -46,7 +46,6 @@ const defaultProps = {
 	sshRemoteId: undefined,
 	onFocusFileInGraph: vi.fn(),
 	onOpenBrowserTabAt: vi.fn(),
-	shortcuts: {},
 	onCopyPath: vi.fn(),
 	onOpenInDefaultApp: vi.fn(),
 	onOpenInMaestroBrowser: vi.fn(),

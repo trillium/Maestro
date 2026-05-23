@@ -3,21 +3,17 @@ import type { Dispatch, SetStateAction } from 'react';
 import { useLayerStack } from '../../../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../../../constants/modalPriorities';
 import type { Session, FocusArea } from '../../../types';
-import type { FileNode } from '../../../types/fileTree';
 import type { FlattenedNode } from '../types';
 
 interface UseFileTreeFilterArgs {
-	fileTreeFilter: string;
 	fileTreeFilterOpen: boolean;
 	setFileTreeFilterOpen: (open: boolean) => void;
 	setFileTreeFilter: (s: string) => void;
 	lastClickedUnderFilterRef: React.MutableRefObject<string | null>;
 	setActiveFocus: (focus: FocusArea) => void;
 	sessionId: string;
-	fileExplorerExpanded: string[] | undefined;
 	setSessions: Dispatch<SetStateAction<Session[]>>;
 	flattenedTree: FlattenedNode[];
-	selectedFileIndex: number;
 	setSelectedFileIndex: (n: number) => void;
 	fileTreeContainerRef?: React.RefObject<HTMLDivElement>;
 	virtualizer: {
@@ -31,17 +27,14 @@ interface UseFileTreeFilterResult {
 }
 
 export function useFileTreeFilter({
-	fileTreeFilter,
 	fileTreeFilterOpen,
 	setFileTreeFilterOpen,
 	setFileTreeFilter,
 	lastClickedUnderFilterRef,
 	setActiveFocus,
 	sessionId,
-	fileExplorerExpanded,
 	setSessions,
 	flattenedTree,
-	selectedFileIndex,
 	setSelectedFileIndex,
 	fileTreeContainerRef,
 	virtualizer,
