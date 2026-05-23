@@ -6,6 +6,7 @@ import {
 	type CueCommand,
 	type CueConfig,
 	type CueGitHubState,
+	type CueNotifyConfig,
 	type CueScheduleDay,
 	type CueSettings,
 	type CueSubscription,
@@ -138,6 +139,21 @@ function normalizeCommand(rawCommand: unknown): CueCommand | undefined {
 	return undefined;
 }
 
+function normalizeNotify(rawNotify: unknown): CueNotifyConfig | undefined {
+	if (!rawNotify || typeof rawNotify !== 'object' || Array.isArray(rawNotify)) {
+		return undefined;
+	}
+	const raw = rawNotify as Record<string, unknown>;
+	const result: CueNotifyConfig = {};
+	if (typeof raw.message === 'string') {
+		result.message = raw.message;
+	}
+	if (typeof raw.sticky === 'boolean') {
+		result.sticky = raw.sticky;
+	}
+	return result;
+}
+
 function normalizeSubscription(
 	sub: Record<string, unknown>,
 	projectRoot: string
@@ -156,8 +172,11 @@ function normalizeSubscription(
 			: undefined;
 
 	const action: CueAction | undefined =
-		sub.action === 'command' || sub.action === 'prompt' ? (sub.action as CueAction) : undefined;
+		sub.action === 'command' || sub.action === 'prompt' || sub.action === 'notify'
+			? (sub.action as CueAction)
+			: undefined;
 	const command = normalizeCommand(sub.command);
+	const notify = normalizeNotify(sub.notify);
 
 	const resolvedPrompt =
 		promptSpec.inline ??
@@ -264,6 +283,17 @@ function normalizeSubscription(
 				: undefined,
 		agent_id: typeof sub.agent_id === 'string' ? sub.agent_id : undefined,
 		label: typeof sub.label === 'string' ? sub.label : undefined,
+		fire_at: typeof sub.fire_at === 'string' ? sub.fire_at : undefined,
+		grace_minutes:
+			typeof sub.grace_minutes === 'number' &&
+			Number.isFinite(sub.grace_minutes) &&
+			Number.isInteger(sub.grace_minutes) &&
+			sub.grace_minutes >= 0
+				? sub.grace_minutes
+				: undefined,
+		self_destruct_on_failure:
+			typeof sub.self_destruct_on_failure === 'boolean' ? sub.self_destruct_on_failure : undefined,
+		notify,
 		// Defensive bounds: `loadCueConfig` skips validation, and a `0` here
 		// expires every fan-in instantly. Non-positive / non-integer values
 		// fall back to undefined → tracker uses settings.timeout_minutes default.
