@@ -239,6 +239,11 @@ export function createCueSessionRuntimeService(
 					state.lastTriggered = event.timestamp;
 					deps.dispatchSubscription(session.id, sub, event, session.name);
 				},
+				// Stub: Phase 02 wires the YAML rewrite. The trigger source only
+				// asks; the runtime decides how to physically remove the sub.
+				requestSelfDestruct: (subscriptionName, reason) => {
+					console.log(`[CUE] requestSelfDestruct ${subscriptionName} (${reason})`);
+				},
 			});
 
 			if (source) {

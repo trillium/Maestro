@@ -62,6 +62,16 @@ export interface CueSessionRegistry {
 	 * re-enabling Cue re-fires startup subscriptions for the new engine cycle. */
 	clearAllStartupKeys(): void;
 
+	// ── time.once dedup ──────────────────────────────────────────────────
+	/**
+	 * Atomically check-and-set the fired flag for a `(session, sub)` time.once tuple.
+	 * Returns `true` if this is the first time the subscription has fired within
+	 * this process lifetime, `false` if it was already fired. Used by the
+	 * `time.once` trigger source to ensure a single fire even when poll ticks
+	 * overlap with hot-reload re-creation of the source.
+	 */
+	markOnceFired(sessionId: string, subName: string): boolean;
+
 	/**
 	 * Drop all sessions and clear `time.scheduled` dedup state.
 	 * `app.startup` keys are cleared separately via `clearAllStartupKeys()` when
@@ -81,12 +91,17 @@ export function createCueSessionRegistry(): CueSessionRegistry {
 	const sessions = new Map<string, SessionState>();
 	const scheduledFiredKeys = new Set<string>();
 	const startupFiredKeys = new Set<string>();
+	const onceFiredKeys = new Set<string>();
 
 	function scheduledKey(sessionId: string, subName: string, time: string): string {
 		return `${sessionId}:${subName}:${time}`;
 	}
 
 	function startupKey(sessionId: string, subName: string): string {
+		return `${sessionId}:${subName}`;
+	}
+
+	function onceKey(sessionId: string, subName: string): string {
 		return `${sessionId}:${subName}`;
 	}
 
@@ -159,6 +174,13 @@ export function createCueSessionRegistry(): CueSessionRegistry {
 
 		clearAllStartupKeys() {
 			startupFiredKeys.clear();
+		},
+
+		markOnceFired(sessionId, subName) {
+			const key = onceKey(sessionId, subName);
+			if (onceFiredKeys.has(key)) return false;
+			onceFiredKeys.add(key);
+			return true;
 		},
 
 		clear() {

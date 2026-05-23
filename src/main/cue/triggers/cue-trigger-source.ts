@@ -79,4 +79,19 @@ export interface CueTriggerSourceContext {
 	 * touch session state directly.
 	 */
 	emit: (event: CueEvent) => void;
+	/**
+	 * Optional: request that the subscription self-destruct from cue.yaml.
+	 * Used by `time.once` to consume one-shot tasks after they fire (or after
+	 * they miss their grace window). The runtime is responsible for the actual
+	 * YAML rewrite — sources never touch the file directly. Reasons:
+	 *  - `missed-grace`: `fire_at` was already past the grace window on first
+	 *    poll, so the sub self-destructs without firing.
+	 *  - `completed`: the run finished successfully (terminal status).
+	 *  - `failed`: the run failed or timed out and `self_destruct_on_failure`
+	 *    is `true`.
+	 */
+	requestSelfDestruct?(
+		subscriptionName: string,
+		reason: 'missed-grace' | 'completed' | 'failed'
+	): void;
 }
