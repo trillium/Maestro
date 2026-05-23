@@ -31,6 +31,7 @@ import {
 	type AgentCompletionData,
 	type CueCommand,
 	type CueConfig,
+	type CueNotifyConfig,
 	type CueEventType,
 	type CueRunResult,
 	type CueRunStatus,
@@ -126,6 +127,7 @@ export interface CueEngineDeps {
 		timeoutMs: number;
 		action?: CueSubscription['action'];
 		command?: CueCommand;
+		notify?: CueNotifyConfig;
 	}) => Promise<CueRunResult>;
 	onStopCueRun?: (runId: string) => boolean;
 	onLog: (level: MainLogLevel, message: string, data?: unknown) => void;
@@ -324,7 +326,8 @@ export class CueEngine {
 				action,
 				command,
 				chainRootId,
-				parentEventId
+				parentEventId,
+				notify
 			) => {
 				this.runManager.execute(
 					sessionId,
@@ -339,7 +342,8 @@ export class CueEngine {
 					undefined, // queuedAtOverride — fresh dispatch, not a restore
 					pipelineName,
 					chainRootId,
-					parentEventId
+					parentEventId,
+					notify
 				);
 			},
 			onLog: meteredOnLog,

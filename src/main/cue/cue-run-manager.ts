@@ -13,7 +13,14 @@
 import * as crypto from 'crypto';
 import type { MainLogLevel } from '../../shared/logger-types';
 import type { CueLogPayload } from '../../shared/cue-log-types';
-import type { CueCommand, CueEvent, CueRunResult, CueSettings, CueSubscription } from './cue-types';
+import type {
+	CueCommand,
+	CueEvent,
+	CueNotifyConfig,
+	CueRunResult,
+	CueSettings,
+	CueSubscription,
+} from './cue-types';
 import { updateCueEventStatus, safeRecordCueEvent, safeUpdateCueEventStatus } from './cue-db';
 import type { CueQueuePersistence } from './cue-queue-persistence';
 import { SOURCE_OUTPUT_MAX_CHARS } from './cue-fan-in-tracker';
@@ -57,6 +64,12 @@ export interface QueuedEvent {
 	cliOutput?: { target: string };
 	action?: CueSubscription['action'];
 	command?: CueCommand;
+	/** Resolved notify config for `action: notify` runs. The dispatcher
+	 *  collapses `subscription.notify` + the message fallback chain into
+	 *  `{ message, sticky? }` before enqueueing so the executor doesn't
+	 *  need to re-derive anything. Optional — non-notify actions leave
+	 *  this undefined. */
+	notify?: CueNotifyConfig;
 	/** Phase 12A — DB row id for the persisted copy, when persistence is enabled. */
 	persistId?: string;
 	/** Phase 01 — chain lineage propagated from the dispatching parent. When
@@ -78,6 +91,7 @@ export interface CueRunManagerDeps {
 		timeoutMs: number;
 		action?: CueSubscription['action'];
 		command?: CueCommand;
+		notify?: CueNotifyConfig;
 	}) => Promise<CueRunResult>;
 	onStopCueRun?: (runId: string) => boolean;
 	onLog: (level: MainLogLevel, message: string, data?: unknown) => void;
@@ -165,7 +179,14 @@ export interface CueRunManager {
 		 * `QueuedEvent` so they survive concurrency-gated buffering.
 		 */
 		chainRootId?: string,
-		parentEventId?: string
+		parentEventId?: string,
+		/**
+		 * Resolved notify config for `action: notify` runs (message already
+		 * collapsed by the dispatch service). Threaded through the queue so
+		 * concurrency-gated notify runs still surface the right toast body
+		 * and sticky flag when they drain.
+		 */
+		notify?: CueNotifyConfig
 	): void;
 	stopRun(runId: string): boolean;
 	stopAll(): void;
@@ -285,7 +306,8 @@ export function createCueRunManager(deps: CueRunManagerDeps): CueRunManager {
 				entry.action,
 				entry.command,
 				entry.chainRootId,
-				entry.parentEventId
+				entry.parentEventId,
+				entry.notify
 			);
 		}
 
@@ -334,7 +356,8 @@ export function createCueRunManager(deps: CueRunManagerDeps): CueRunManager {
 		action?: CueSubscription['action'],
 		command?: CueCommand,
 		incomingChainRootId?: string,
-		parentEventId?: string
+		parentEventId?: string,
+		notify?: CueNotifyConfig
 	): Promise<void> {
 		const sessionName = getSessionName(sessionId);
 		const settings = deps.getSessionSettings(sessionId);
@@ -403,6 +426,7 @@ export function createCueRunManager(deps: CueRunManagerDeps): CueRunManager {
 				timeoutMs,
 				action,
 				command,
+				notify,
 			});
 			if (!activeRuns.has(runId)) {
 				// Engine was stopped (or run was cleared) while onCueRun was in
@@ -682,7 +706,8 @@ export function createCueRunManager(deps: CueRunManagerDeps): CueRunManager {
 			queuedAtOverride?: number,
 			pipelineName?: string,
 			chainRootId?: string,
-			parentEventId?: string
+			parentEventId?: string,
+			notify?: CueNotifyConfig
 		): void {
 			const settings = deps.getSessionSettings(sessionId);
 			const maxConcurrent = settings?.max_concurrent ?? 1;
@@ -751,6 +776,7 @@ export function createCueRunManager(deps: CueRunManagerDeps): CueRunManager {
 					cliOutput,
 					action,
 					command,
+					notify,
 					persistId,
 					chainRootId,
 					parentEventId,
@@ -797,7 +823,8 @@ export function createCueRunManager(deps: CueRunManagerDeps): CueRunManager {
 				action,
 				command,
 				chainRootId,
-				parentEventId
+				parentEventId,
+				notify
 			);
 		},
 
