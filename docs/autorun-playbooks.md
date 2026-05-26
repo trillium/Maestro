@@ -70,6 +70,25 @@ Auto Run supports running multiple documents in sequence:
 5. Enable **Loop Mode** to cycle back to the first document after completing the last
 6. Click **Go** to start running documents
 
+## Fresh Context: Task vs Document
+
+The run configuration modal has a **Fresh context per** toggle that controls how context is scoped as the runner works through a document. This is distinct from [task granularity](#task-granularity-two-approaches) above — granularity is how you _structure_ a document, while this is how Maestro _executes_ it.
+
+**Task** — A new agent is spawned for each unchecked task, with a clean context every time.
+
+- Maximum isolation; the agent never drifts across tasks.
+- Each task must be fully self-contained, since the agent sees nothing from previous tasks except what's written in the document.
+- The right choice for most agents.
+
+**Document** — A single agent walks every unchecked task in the document in one continuous session, carrying context forward between tasks.
+
+- Best for agents with very large context windows, and for work where later tasks build on earlier ones.
+- Requires enough context window to hold a whole document's worth of work in one session.
+
+**Auto-selection:** Maestro picks the mode from the running agent's context window — **Document** at 1M tokens or more (e.g. Claude's 1M window), **Task** below that. You can override it per run, and a loaded Playbook's saved mode always takes precedence.
+
+> **Tip:** Author tasks to be self-contained regardless of mode. Document mode is an optimization, not a license to write tasks that depend on chat memory.
+
 ## Playbooks
 
 Save your Auto Run configurations as Playbooks for reuse:
