@@ -249,7 +249,7 @@ describe('openspec IPC handlers', () => {
 
 		it('should handle network errors', async () => {
 			vi.mocked(openspecManager.refreshOpenSpecPrompts).mockRejectedValue(
-				new Error('Failed to fetch AGENTS.md: Not Found')
+				new Error('Failed to fetch any OpenSpec workflow prompts from v1.3.1')
 			);
 
 			const handler = handlers.get('openspec:refresh');

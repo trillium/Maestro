@@ -1,37 +1,72 @@
-### Stage 1: Creating Changes
+Start a new change using the experimental artifact-driven approach.
 
-Create proposal when you need to:
+**Input**: The user's request should include a change name (kebab-case) OR a description of what they want to build.
 
-- Add features or functionality
-- Make breaking changes (API, schema)
-- Change architecture or patterns
-- Optimize performance (changes behavior)
-- Update security patterns
+**Steps**
 
-Triggers (examples):
+1. **If no clear input provided, ask what they want to build**
 
-- "Help me create a change proposal"
-- "Help me plan a change"
-- "Help me create a proposal"
-- "I want to create a spec proposal"
-- "I want to create a spec"
+   Use the **AskUserQuestion tool** (open-ended, no preset options) to ask:
 
-Loose matching guidance:
+   > "What change do you want to work on? Describe what you want to build or fix."
 
-- Contains one of: `proposal`, `change`, `spec`
-- With one of: `create`, `plan`, `make`, `start`, `help`
+   From their description, derive a kebab-case name (e.g., "add user authentication" → `add-user-auth`).
 
-Skip proposal for:
+   **IMPORTANT**: Do NOT proceed without understanding what the user wants to build.
 
-- Bug fixes (restore intended behavior)
-- Typos, formatting, comments
-- Dependency updates (non-breaking)
-- Configuration changes
-- Tests for existing behavior
+2. **Determine the workflow schema**
 
-**Workflow**
+   Use the default schema (omit `--schema`) unless the user explicitly requests a different workflow.
 
-1. Review `openspec/project.md`, `openspec list`, and `openspec list --specs` to understand current context.
-2. Choose a unique verb-led `change-id` and scaffold `proposal.md`, `tasks.md`, optional `design.md`, and spec deltas under `openspec/changes/<id>/`.
-3. Draft spec deltas using `## ADDED|MODIFIED|REMOVED Requirements` with at least one `#### Scenario:` per requirement.
-4. Run `openspec validate <id> --strict` and resolve any issues before sharing the proposal.
+   **Use a different schema only if the user mentions:**
+   - A specific schema name → use `--schema <name>`
+   - "show workflows" or "what workflows" → run `openspec schemas --json` and let them choose
+
+   **Otherwise**: Omit `--schema` to use the default.
+
+3. **Create the change directory**
+
+   ```bash
+   openspec new change "<name>"
+   ```
+
+   Add `--schema <name>` only if the user requested a specific workflow.
+   This creates a scaffolded change at `openspec/changes/<name>/` with the selected schema.
+
+4. **Show the artifact status**
+
+   ```bash
+   openspec status --change "<name>"
+   ```
+
+   This shows which artifacts need to be created and which are ready (dependencies satisfied).
+
+5. **Get instructions for the first artifact**
+   The first artifact depends on the schema (e.g., `proposal` for spec-driven).
+   Check the status output to find the first artifact with status "ready".
+
+   ```bash
+   openspec instructions <first-artifact-id> --change "<name>"
+   ```
+
+   This outputs the template and context for creating the first artifact.
+
+6. **STOP and wait for user direction**
+
+**Output**
+
+After completing the steps, summarize:
+
+- Change name and location
+- Schema/workflow being used and its artifact sequence
+- Current status (0/N artifacts complete)
+- The template for the first artifact
+- Prompt: "Ready to create the first artifact? Just describe what this change is about and I'll draft it, or ask me to continue."
+
+**Guardrails**
+
+- Do NOT create any artifacts yet - just show the instructions
+- Do NOT advance beyond showing the first artifact template
+- If the name is invalid (not kebab-case), ask for a valid name
+- If a change with that name already exists, suggest continuing that change instead
+- Pass --schema if using a non-default workflow

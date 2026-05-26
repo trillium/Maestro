@@ -309,72 +309,41 @@ export async function resetOpenSpecPrompt(id: string): Promise<string> {
 }
 
 /**
- * Upstream commands to fetch (we skip custom commands like 'help' and 'implement')
+ * Mapping of our command IDs to the upstream OpenSpec workflow template files.
+ *
+ * As of OpenSpec v1.x, workflow prompts moved from a monolithic `openspec/AGENTS.md`
+ * (parsed by Stage 1/2/3 headers) into per-workflow TypeScript modules under
+ * `src/core/templates/workflows/*.ts`, each exposing an `instructions` template
+ * literal. We fetch those files and extract that literal.
+ *
+ * Custom commands ('help', 'implement') are Maestro-only and are not fetched.
  */
-const UPSTREAM_COMMANDS = ['proposal', 'apply', 'archive'];
-
-/**
- * Section markers in AGENTS.md for extracting workflow prompts
- */
-const SECTION_MARKERS: Record<string, { start: RegExp; end: RegExp }> = {
-	proposal: {
-		start: /^#+\s*Stage\s*1[:\s]+Creating\s+Changes/i,
-		end: /^#+\s*Stage\s*2[:\s]+/i,
-	},
-	apply: {
-		start: /^#+\s*Stage\s*2[:\s]+Implementing\s+Changes/i,
-		end: /^#+\s*Stage\s*3[:\s]+/i,
-	},
-	archive: {
-		start: /^#+\s*Stage\s*3[:\s]+Archiving\s+Changes/i,
-		end: /^$/, // End of file or next major section
-	},
+const UPSTREAM_WORKFLOWS: Record<string, string> = {
+	proposal: 'new-change.ts',
+	apply: 'apply-change.ts',
+	archive: 'archive-change.ts',
 };
 
 /**
- * Parse AGENTS.md and extract workflow sections as prompts
+ * Extract the body of an `instructions: \`...\`` template literal from a workflow
+ * module. Handles backslash-escaped backticks (e.g. \`openspec list\`) by
+ * unescaping any `\X` sequence to `X`, matching JS template literal semantics
+ * for the escapes upstream actually emits.
  */
-function parseAgentsMd(content: string): Record<string, string> {
-	const result: Record<string, string> = {};
-	const lines = content.split('\n');
-
-	for (const [sectionId, markers] of Object.entries(SECTION_MARKERS)) {
-		let inSection = false;
-		const sectionLines: string[] = [];
-
-		for (const line of lines) {
-			if (!inSection && markers.start.test(line)) {
-				inSection = true;
-				sectionLines.push(line);
-				continue;
-			}
-
-			if (inSection) {
-				// Check if we've hit the end marker (next stage or end of content)
-				if (markers.end.test(line) && line.trim() !== '') {
-					// Don't include the end marker line, it belongs to the next section
-					break;
-				}
-				sectionLines.push(line);
-			}
-		}
-
-		if (sectionLines.length > 0) {
-			result[sectionId] = sectionLines.join('\n').trim();
-		}
-	}
-
-	return result;
+function extractInstructions(tsContent: string): string | null {
+	const match = tsContent.match(/instructions:\s*`((?:\\[\s\S]|[^`\\])*)`/);
+	if (!match) return null;
+	return match[1].replace(/\\([\s\S])/g, '$1');
 }
 
 /**
- * Fetch latest prompts from GitHub OpenSpec repository
- * Updates all upstream commands by parsing AGENTS.md
+ * Fetch latest prompts from the upstream OpenSpec repository and write them to
+ * the user prompts directory so they shadow the bundled defaults.
  */
 export async function refreshOpenSpecPrompts(): Promise<OpenSpecMetadata> {
 	logger.info('Refreshing OpenSpec prompts from GitHub...', LOG_CONTEXT);
 
-	// First, get the latest release info to get the version
+	// Resolve the version to fetch. Fall back to `main` if the API call fails.
 	let version = 'main';
 	try {
 		const releaseResponse = await fetch(
@@ -392,39 +361,39 @@ export async function refreshOpenSpecPrompts(): Promise<OpenSpecMetadata> {
 		logger.warn('Could not fetch release info, using main branch', LOG_CONTEXT);
 	}
 
-	// Fetch AGENTS.md from the release tag (or main if no release found)
-	const agentsMdUrl = `https://raw.githubusercontent.com/Fission-AI/OpenSpec/${version}/openspec/AGENTS.md`;
-	const agentsResponse = await fetch(agentsMdUrl);
-	if (!agentsResponse.ok) {
-		throw new Error(`Failed to fetch AGENTS.md: ${agentsResponse.statusText}`);
-	}
-	const agentsMdContent = await agentsResponse.text();
-	logger.info(`Downloaded AGENTS.md from ${version}`, LOG_CONTEXT);
-
-	// Parse the AGENTS.md content to extract sections
-	const extractedPrompts = parseAgentsMd(agentsMdContent);
-	logger.info(
-		`Extracted ${Object.keys(extractedPrompts).length} sections from AGENTS.md`,
-		LOG_CONTEXT
-	);
-
-	// Create user prompts directory
 	const userPromptsDir = getUserPromptsPath();
 	await fs.mkdir(userPromptsDir, { recursive: true });
 
-	// Save extracted prompts
-	for (const cmdId of UPSTREAM_COMMANDS) {
-		const promptContent = extractedPrompts[cmdId];
-		if (promptContent) {
-			const destPath = path.join(userPromptsDir, `openspec.${cmdId}.md`);
-			await fs.writeFile(destPath, promptContent, 'utf8');
-			logger.info(`Updated: openspec.${cmdId}.md`, LOG_CONTEXT);
-		} else {
-			logger.warn(`Could not extract ${cmdId} section from AGENTS.md`, LOG_CONTEXT);
+	let updatedCount = 0;
+	const failures: string[] = [];
+
+	for (const [cmdId, filename] of Object.entries(UPSTREAM_WORKFLOWS)) {
+		const url = `https://raw.githubusercontent.com/Fission-AI/OpenSpec/${version}/src/core/templates/workflows/${filename}`;
+		const response = await fetch(url);
+		if (!response.ok) {
+			failures.push(`${filename} (${response.status})`);
+			logger.warn(`Failed to fetch ${filename}: ${response.statusText}`, LOG_CONTEXT);
+			continue;
 		}
+		const tsContent = await response.text();
+		const instructions = extractInstructions(tsContent);
+		if (!instructions) {
+			failures.push(`${filename} (no instructions block)`);
+			logger.warn(`Could not extract instructions from ${filename}`, LOG_CONTEXT);
+			continue;
+		}
+		const destPath = path.join(userPromptsDir, `openspec.${cmdId}.md`);
+		await fs.writeFile(destPath, instructions, 'utf8');
+		updatedCount += 1;
+		logger.info(`Updated: openspec.${cmdId}.md`, LOG_CONTEXT);
 	}
 
-	// Update metadata with new version info
+	if (updatedCount === 0) {
+		throw new Error(
+			`Failed to fetch any OpenSpec workflow prompts from ${version}: ${failures.join(', ')}`
+		);
+	}
+
 	const newMetadata: OpenSpecMetadata = {
 		lastRefreshed: new Date().toISOString(),
 		commitSha: version,
@@ -432,14 +401,12 @@ export async function refreshOpenSpecPrompts(): Promise<OpenSpecMetadata> {
 		sourceUrl: 'https://github.com/Fission-AI/OpenSpec',
 	};
 
-	// Save metadata to user prompts directory
 	await fs.writeFile(
 		path.join(userPromptsDir, 'metadata.json'),
 		JSON.stringify(newMetadata, null, 2),
 		'utf8'
 	);
 
-	// Also save to customizations file for compatibility
 	const customizations = (await loadUserCustomizations()) ?? {
 		metadata: newMetadata,
 		prompts: {},

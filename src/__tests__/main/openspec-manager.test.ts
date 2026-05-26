@@ -5,7 +5,7 @@
  * - Loading bundled prompts from disk
  * - User customization persistence
  * - Resetting to defaults
- * - Parsing AGENTS.md for upstream command extraction
+ * - Fetching workflow prompts from upstream OpenSpec
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -576,17 +576,25 @@ describe('openspec-manager', () => {
 	});
 
 	describe('refreshOpenSpecPrompts', () => {
-		const agentsMd = [
-			'# Stage 1: Creating Changes',
-			'Write the proposal.',
-			'',
-			'# Stage 2: Implementing Changes',
-			'Implement the approved tasks.',
-			'',
-			'# Stage 3: Archiving Changes',
-			'Archive the completed change.',
-			'',
-		].join('\n');
+		/**
+		 * Build a minimal upstream workflow TS file. Body is embedded as the
+		 * `instructions` template literal; the only escape we emulate is the
+		 * backslash-escaped backtick that the real upstream files use for inline
+		 * code spans.
+		 */
+		function buildWorkflowTs(instructions: string): string {
+			const escaped = instructions.replace(/`/g, '\\`');
+			return [
+				'export function getSkillTemplate() {',
+				'  return {',
+				'    name: "openspec-workflow",',
+				'    description: "test",',
+				`    instructions: \`${escaped}\`,`,
+				'  };',
+				'}',
+				'',
+			].join('\n');
+		}
 
 		function stubFetch(...responses: unknown[]) {
 			const fetchMock = vi.fn();
@@ -602,14 +610,24 @@ describe('openspec-manager', () => {
 		}
 
 		it('should fetch latest release prompts, preserve existing customizations, and write metadata', async () => {
-			stubFetch(
+			const fetchMock = stubFetch(
 				{
 					ok: true,
 					json: vi.fn().mockResolvedValue({ tag_name: 'v1.2.3' }),
 				},
 				{
 					ok: true,
-					text: vi.fn().mockResolvedValue(agentsMd),
+					text: vi
+						.fn()
+						.mockResolvedValue(buildWorkflowTs('Write the proposal. Use `openspec list`.')),
+				},
+				{
+					ok: true,
+					text: vi.fn().mockResolvedValue(buildWorkflowTs('Implement the approved tasks.')),
+				},
+				{
+					ok: true,
+					text: vi.fn().mockResolvedValue(buildWorkflowTs('Archive the completed change.')),
 				}
 			);
 			vi.mocked(fs.readFile).mockImplementation(async (filePath) => {
@@ -637,12 +655,28 @@ describe('openspec-manager', () => {
 				sourceVersion: '1.2.3',
 				sourceUrl: 'https://github.com/Fission-AI/OpenSpec',
 			});
+
+			const fetchedUrls = fetchMock.mock.calls.map((args) => String(args[0]));
+			expect(fetchedUrls).toEqual(
+				expect.arrayContaining([
+					expect.stringContaining(
+						'/Fission-AI/OpenSpec/v1.2.3/src/core/templates/workflows/new-change.ts'
+					),
+					expect.stringContaining(
+						'/Fission-AI/OpenSpec/v1.2.3/src/core/templates/workflows/apply-change.ts'
+					),
+					expect.stringContaining(
+						'/Fission-AI/OpenSpec/v1.2.3/src/core/templates/workflows/archive-change.ts'
+					),
+				])
+			);
+
 			expect(fs.mkdir).toHaveBeenCalledWith('/mock/userData/openspec-prompts', {
 				recursive: true,
 			});
 			expect(fs.writeFile).toHaveBeenCalledWith(
 				expect.stringContaining('openspec.proposal.md'),
-				expect.stringContaining('Write the proposal.'),
+				expect.stringContaining('Write the proposal. Use `openspec list`.'),
 				'utf8'
 			);
 			expect(fs.writeFile).toHaveBeenCalledWith(
@@ -667,14 +701,17 @@ describe('openspec-manager', () => {
 			expect(writtenCustomizations.prompts.help.content).toBe('# Custom Help');
 		});
 
-		it('should warn and throw when release lookup fails and AGENTS.md cannot be fetched', async () => {
-			stubFetch(new Error('network down'), {
-				ok: false,
-				statusText: 'Not Found',
-			});
+		it('should warn and throw when release lookup fails and all workflow fetches fail', async () => {
+			stubFetch(
+				new Error('network down'),
+				{ ok: false, status: 404, statusText: 'Not Found' },
+				{ ok: false, status: 404, statusText: 'Not Found' },
+				{ ok: false, status: 404, statusText: 'Not Found' }
+			);
+			vi.mocked(fs.mkdir).mockResolvedValue(undefined);
 
 			await expect(refreshOpenSpecPrompts()).rejects.toThrow(
-				'Failed to fetch AGENTS.md: Not Found'
+				/Failed to fetch any OpenSpec workflow prompts from main/
 			);
 			expect(logger.warn).toHaveBeenCalledWith(
 				'Could not fetch release info, using main branch',
@@ -682,13 +719,15 @@ describe('openspec-manager', () => {
 			);
 		});
 
-		it('should use main when no latest release is available and warn for missing sections', async () => {
+		it('should use main when no latest release is available and warn for missing workflows', async () => {
 			stubFetch(
 				{ ok: false },
 				{
 					ok: true,
-					text: vi.fn().mockResolvedValue('# Stage 1: Creating Changes\nOnly proposal.'),
-				}
+					text: vi.fn().mockResolvedValue(buildWorkflowTs('Only proposal.')),
+				},
+				{ ok: false, status: 404, statusText: 'Not Found' },
+				{ ok: false, status: 404, statusText: 'Not Found' }
 			);
 			vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
 			vi.mocked(fs.mkdir).mockResolvedValue(undefined);
@@ -709,11 +748,11 @@ describe('openspec-manager', () => {
 				'utf8'
 			);
 			expect(logger.warn).toHaveBeenCalledWith(
-				'Could not extract apply section from AGENTS.md',
+				'Failed to fetch apply-change.ts: Not Found',
 				'[OpenSpec]'
 			);
 			expect(logger.warn).toHaveBeenCalledWith(
-				'Could not extract archive section from AGENTS.md',
+				'Failed to fetch archive-change.ts: Not Found',
 				'[OpenSpec]'
 			);
 		});

@@ -13,7 +13,7 @@
  * Version: 0.1.0
  */
 
-// Bundled OpenSpec prompts (extracted from upstream AGENTS.md)
+// Bundled OpenSpec prompts (extracted from upstream workflow modules)
 import proposalPrompt from './openspec.proposal.md?raw';
 import applyPrompt from './openspec.apply.md?raw';
 import archivePrompt from './openspec.archive.md?raw';
