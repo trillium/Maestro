@@ -18,6 +18,7 @@ import { NudgeMessageField } from './NudgeMessageField';
 import { RemotePathStatus } from './RemotePathStatus';
 import { AgentPickerGrid } from './AgentPickerGrid';
 import { logger } from '../../utils/logger';
+import { gitService } from '../../services/git';
 
 export function NewInstanceModal({
 	isOpen,
@@ -55,6 +56,11 @@ export function NewInstanceModal({
 	);
 	const [loadingDynamicOptions, setLoadingDynamicOptions] = useState<Record<string, boolean>>({});
 	const [directoryWarningAcknowledged, setDirectoryWarningAcknowledged] = useState(false);
+	// Git repo status of the selected working directory.
+	// 'unknown' = haven't checked yet, 'is-repo' / 'not-repo' = checked.
+	const [gitRepoStatus, setGitRepoStatus] = useState<'unknown' | 'is-repo' | 'not-repo'>('unknown');
+	const [isInitializingRepo, setIsInitializingRepo] = useState(false);
+	const [initRepoError, setInitRepoError] = useState<string | null>(null);
 	// SSH Remote configuration
 	const [sshRemotes, setSshRemotes] = useState<SshRemoteConfig[]>([]);
 	const [agentSshRemoteConfigs, setAgentSshRemoteConfigs] = useState<
@@ -310,6 +316,67 @@ export function NewInstanceModal({
 			handleWorkingDirChange(folder);
 		}
 	}, [handleWorkingDirChange]);
+
+	// Resolve the SSH remote ID currently selected (pending or per-agent).
+	const effectiveSshRemoteId = useMemo(() => {
+		if (!isSshEnabled) return undefined;
+		const config = selectedAgent
+			? agentSshRemoteConfigs[selectedAgent]
+			: agentSshRemoteConfigs['_pending_'];
+		return config?.remoteId || undefined;
+	}, [isSshEnabled, selectedAgent, agentSshRemoteConfigs]);
+
+	// Debounced git repo detection — checks if the selected working dir is
+	// already a git repo so we can offer to `git init` it if not.
+	useEffect(() => {
+		const trimmed = workingDir.trim();
+		// Reset stale state from a previous directory before the async check
+		// resolves — otherwise the previous "not-repo" panel keeps rendering
+		// (with a clickable Init button) against the new, unvalidated path
+		// during the 500ms debounce window.
+		setGitRepoStatus('unknown');
+		setInitRepoError(null);
+		if (!trimmed) {
+			return;
+		}
+
+		// For SSH, wait until the remote path validates as a directory.
+		if (isSshEnabled && !remotePathValidation.valid) {
+			return;
+		}
+
+		let cancelled = false;
+		const timeoutId = setTimeout(async () => {
+			const expanded = expandTilde(trimmed);
+			const isRepo = await gitService.isRepo(expanded, effectiveSshRemoteId);
+			if (!cancelled) {
+				setGitRepoStatus(isRepo ? 'is-repo' : 'not-repo');
+			}
+		}, 500);
+
+		return () => {
+			cancelled = true;
+			clearTimeout(timeoutId);
+		};
+	}, [workingDir, isSshEnabled, remotePathValidation.valid, effectiveSshRemoteId, expandTilde]);
+
+	const handleInitRepo = React.useCallback(async () => {
+		const trimmed = workingDir.trim();
+		if (!trimmed || isInitializingRepo) return;
+		setIsInitializingRepo(true);
+		setInitRepoError(null);
+		try {
+			const expanded = expandTilde(trimmed);
+			const result = await gitService.init(expanded, effectiveSshRemoteId);
+			if (!result.success) {
+				setInitRepoError(result.error || 'Failed to initialize git repository');
+				return;
+			}
+			setGitRepoStatus('is-repo');
+		} finally {
+			setIsInitializingRepo(false);
+		}
+	}, [workingDir, isInitializingRepo, expandTilde, effectiveSshRemoteId]);
 
 	const handleRefreshAgent = React.useCallback(async (agentId: string) => {
 		setRefreshingAgent(agentId);
@@ -902,6 +969,45 @@ export function NewInstanceModal({
 						validation={remotePathValidation}
 						remoteHost={sshRemoteHost}
 					/>
+				)}
+
+				{/* Git repo hint — offer to `git init` when the selected dir isn't a repo */}
+				{workingDir.trim() && gitRepoStatus === 'not-repo' && (
+					<div
+						className="flex items-center gap-3 p-3 rounded border"
+						style={{
+							backgroundColor: theme.colors.bgSidebar,
+							borderColor: theme.colors.border,
+						}}
+					>
+						<div className="flex-1">
+							<p className="text-sm" style={{ color: theme.colors.textMain }}>
+								Not a Git repository
+							</p>
+							{initRepoError && (
+								<p className="text-xs mt-1" style={{ color: theme.colors.error }}>
+									{initRepoError}
+								</p>
+							)}
+						</div>
+						<button
+							type="button"
+							onClick={handleInitRepo}
+							disabled={isInitializingRepo}
+							className="text-xs px-3 py-1.5 rounded border transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2"
+							style={{
+								backgroundColor: 'transparent',
+								borderColor: theme.colors.accent,
+								color: theme.colors.accent,
+								opacity: isInitializingRepo ? 0.6 : 1,
+								cursor: isInitializingRepo ? 'wait' : 'pointer',
+								['--tw-ring-color' as any]: theme.colors.accent,
+								['--tw-ring-offset-color' as any]: theme.colors.bgMain,
+							}}
+						>
+							{isInitializingRepo ? 'Initializing…' : 'Initialize as Git Repository'}
+						</button>
+					</div>
 				)}
 
 				{/* Directory Warning with Acknowledgment */}
