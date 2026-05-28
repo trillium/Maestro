@@ -276,6 +276,7 @@ export type ModalId =
 	| 'debugWizard'
 	| 'debugPackage'
 	| 'debugApplicationStats'
+	| 'debugAgentProbe'
 	| 'playground'
 	| 'logViewer'
 	| 'processMonitor'
@@ -687,6 +688,10 @@ export function getModalActions() {
 		setDebugApplicationStatsOpen: (open: boolean) =>
 			open ? openModal('debugApplicationStats') : closeModal('debugApplicationStats'),
 
+		// Debug Agent Probe Modal
+		setDebugAgentProbeOpen: (open: boolean) =>
+			open ? openModal('debugAgentProbe') : closeModal('debugAgentProbe'),
+
 		// Confirmation Modal
 		setConfirmModalOpen: (open: boolean) => (open ? openModal('confirm') : closeModal('confirm')),
 		setConfirmModalMessage: (message: string) => updateModalData('confirm', { message }),
@@ -961,6 +966,7 @@ export function useModalActions() {
 	const debugWizardModalOpen = useModalStore(selectModalOpen('debugWizard'));
 	const debugPackageModalOpen = useModalStore(selectModalOpen('debugPackage'));
 	const debugApplicationStatsOpen = useModalStore(selectModalOpen('debugApplicationStats'));
+	const debugAgentProbeOpen = useModalStore(selectModalOpen('debugAgentProbe'));
 	const confirmModalOpen = useModalStore(selectModalOpen('confirm'));
 	const confirmData = useModalStore(selectModalData('confirm'));
 	const quitConfirmModalOpen = useModalStore(selectModalOpen('quitConfirm'));
@@ -1084,6 +1090,9 @@ export function useModalActions() {
 
 		// Debug Application Stats Modal
 		debugApplicationStatsOpen,
+
+		// Debug Agent Probe Modal
+		debugAgentProbeOpen,
 
 		// Confirmation Modal
 		confirmModalOpen,

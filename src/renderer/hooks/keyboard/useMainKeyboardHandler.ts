@@ -3,6 +3,7 @@ import type { Session, AITab, ThinkingMode } from '../../types';
 import { getInitialRenameValue } from '../../utils/tabHelpers';
 import { useModalStore } from '../../stores/modalStore';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { editClipboardImage } from '../../components/ImageAnnotator/editClipboardImage';
 
 // Font size keyboard shortcut constants
 const FONT_SIZE_STEP = 2;
@@ -287,6 +288,18 @@ export function useMainKeyboardHandler(): UseMainKeyboardHandlerReturn {
 					!e.shiftKey &&
 					(e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
 					!!ctx.activeSession?.activeBrowserTabId;
+				// Allow Cmd+F to fall through and re-focus the file-tree filter input
+				// when the filter is already open and the files panel is focused. The
+				// open filter registers an overlay layer, so without this exception the
+				// overlay-guard below returns early and the re-focus branch never runs.
+				const isFileFilterRefocusShortcut =
+					(e.metaKey || e.ctrlKey) &&
+					!e.altKey &&
+					!e.shiftKey &&
+					keyLower === 'f' &&
+					ctx.activeFocus === 'right' &&
+					ctx.activeRightTab === 'files' &&
+					ctx.fileTreeFilterOpen;
 				// Allow font size shortcuts (Cmd+=/+, Cmd+-, Cmd+0) even when modals/overlays are open
 				const isFontSizeShortcut =
 					(e.metaKey || e.ctrlKey) &&
@@ -332,6 +345,7 @@ export function useMainKeyboardHandler(): UseMainKeyboardHandlerReturn {
 						!isBrowserAddressShortcut &&
 						!isBrowserFindShortcut &&
 						!isBrowserNavShortcut &&
+						!isFileFilterRefocusShortcut &&
 						!isFontSizeShortcut
 					) {
 						return;
@@ -524,6 +538,10 @@ export function useMainKeyboardHandler(): UseMainKeyboardHandlerReturn {
 					ctx.handleSetLightboxImage(images[0], images, 'staged');
 					trackShortcut('openImageCarousel');
 				}
+			} else if (ctx.isShortcut(e, 'editClipboardImage')) {
+				e.preventDefault();
+				void editClipboardImage();
+				trackShortcut('editClipboardImage');
 			} else if (ctx.isShortcut(e, 'toggleTabStar')) {
 				e.preventDefault();
 				ctx.toggleTabStar();

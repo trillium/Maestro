@@ -42,7 +42,7 @@ export function CueHelpContent({ theme, cueShortcutKeys }: CueHelpContentProps) 
 					<p>
 						Maestro Cue is an event-driven automation system. Define triggers in a YAML file, and
 						Maestro automatically executes prompts against your AI agents when events occur. The
-						conductor gives the cue — the agents respond.
+						conductor gives the cue - the agents respond.
 					</p>
 				</div>
 			</section>
@@ -566,144 +566,144 @@ export function CueHelpContent({ theme, cueShortcutKeys }: CueHelpContentProps) 
 						}}
 					>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_EVENT_TYPE}}'}</code> — Event
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_EVENT_TYPE}}'}</code> - Event
 							type (app.startup, time.heartbeat, time.scheduled, file.changed, agent.completed,
 							github.pull_request, github.issue, task.pending, cli.trigger)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_EVENT_TIMESTAMP}}'}</code> —
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_EVENT_TIMESTAMP}}'}</code> -
 							Event timestamp
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_TRIGGER_NAME}}'}</code> —
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_TRIGGER_NAME}}'}</code> -
 							Trigger/subscription name
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_RUN_ID}}'}</code> — Run UUID
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_RUN_ID}}'}</code> - Run UUID
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_FILE_PATH}}'}</code> — Changed
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_FILE_PATH}}'}</code> - Changed
 							file path (file.changed)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_FILE_NAME}}'}</code> — Changed
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_FILE_NAME}}'}</code> - Changed
 							file name
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_FILE_DIR}}'}</code> — Changed
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_FILE_DIR}}'}</code> - Changed
 							file directory
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_FILE_EXT}}'}</code> — Changed
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_FILE_EXT}}'}</code> - Changed
 							file extension
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_FILE_CHANGE_TYPE}}'}</code> —
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_FILE_CHANGE_TYPE}}'}</code> -
 							Change type: add, change, unlink (file.changed)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_SOURCE_SESSION}}'}</code> —
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_SOURCE_SESSION}}'}</code> -
 							Source session name (agent.completed)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_SOURCE_OUTPUT}}'}</code> — Source
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_SOURCE_OUTPUT}}'}</code> - Source
 							session output (agent.completed)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_SOURCE_STATUS}}'}</code> — Source
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_SOURCE_STATUS}}'}</code> - Source
 							run status: completed, failed, timeout (agent.completed)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_SOURCE_EXIT_CODE}}'}</code> —
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_SOURCE_EXIT_CODE}}'}</code> -
 							Source process exit code (agent.completed)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_SOURCE_DURATION}}'}</code> —
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_SOURCE_DURATION}}'}</code> -
 							Source run duration in ms (agent.completed)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_SOURCE_TRIGGERED_BY}}'}</code> —
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_SOURCE_TRIGGERED_BY}}'}</code> -
 							Subscription that triggered the source (agent.completed)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_FROM_AGENT}}'}</code> —
-							Triggering upstream agent ID — sourceSessionId (agent.completed) or sourceAgentId
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_FROM_AGENT}}'}</code> -
+							Triggering upstream agent ID - sourceSessionId (agent.completed) or sourceAgentId
 							(cli.trigger)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_TASK_FILE}}'}</code> — File path
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_TASK_FILE}}'}</code> - File path
 							with pending tasks (task.pending)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_TASK_FILE_NAME}}'}</code> — File
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_TASK_FILE_NAME}}'}</code> - File
 							name with pending tasks (task.pending)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_TASK_FILE_DIR}}'}</code> —
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_TASK_FILE_DIR}}'}</code> -
 							Directory of file with pending tasks (task.pending)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_TASK_COUNT}}'}</code> — Number of
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_TASK_COUNT}}'}</code> - Number of
 							pending tasks (task.pending)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_TASK_LIST}}'}</code> — Formatted
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_TASK_LIST}}'}</code> - Formatted
 							task list with line numbers (task.pending)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_TASK_CONTENT}}'}</code> — Full
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_TASK_CONTENT}}'}</code> - Full
 							file content, truncated (task.pending)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_TYPE}}'}</code> — GitHub item
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_TYPE}}'}</code> - GitHub item
 							type: "pull_request" or "issue" (github.*)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_NUMBER}}'}</code> — PR/issue
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_NUMBER}}'}</code> - PR/issue
 							number (github.*)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_TITLE}}'}</code> — PR/issue
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_TITLE}}'}</code> - PR/issue
 							title (github.*)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_AUTHOR}}'}</code> — Author
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_AUTHOR}}'}</code> - Author
 							login (github.*)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_URL}}'}</code> — HTML URL
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_URL}}'}</code> - HTML URL
 							(github.*)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_BODY}}'}</code> — PR/issue
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_BODY}}'}</code> - PR/issue
 							body, truncated (github.*)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_LABELS}}'}</code> — Labels,
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_LABELS}}'}</code> - Labels,
 							comma-separated (github.*)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_STATE}}'}</code> — State:
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_STATE}}'}</code> - State:
 							"open" or "closed" (github.*)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_REPO}}'}</code> — Repo
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_REPO}}'}</code> - Repo
 							(owner/repo) (github.*)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_BRANCH}}'}</code> — Head
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_BRANCH}}'}</code> - Head
 							branch (github.pull_request)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_BASE_BRANCH}}'}</code> — Base
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_BASE_BRANCH}}'}</code> - Base
 							branch (github.pull_request)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_ASSIGNEES}}'}</code> —
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_GH_ASSIGNEES}}'}</code> -
 							Comma-separated assignees (github.issue)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_CLI_PROMPT}}'}</code> — Prompt
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_CLI_PROMPT}}'}</code> - Prompt
 							text passed via{' '}
 							<code
 								className="px-1 rounded text-xs"
@@ -714,7 +714,7 @@ export function CueHelpContent({ theme, cueShortcutKeys }: CueHelpContentProps) 
 							flag (cli.trigger)
 						</div>
 						<div>
-							<code style={{ color: theme.colors.accent }}>{'{{CUE_SOURCE_AGENT_ID}}'}</code> —
+							<code style={{ color: theme.colors.accent }}>{'{{CUE_SOURCE_AGENT_ID}}'}</code> -
 							Source agent ID passed via{' '}
 							<code
 								className="px-1 rounded text-xs"
@@ -956,7 +956,7 @@ export function CueHelpContent({ theme, cueShortcutKeys }: CueHelpContentProps) 
 							>
 								file.changed
 							</code>{' '}
-							to build a <strong style={{ color: theme.colors.textMain }}>Karpathy Loop</strong> —
+							to build a <strong style={{ color: theme.colors.textMain }}>Karpathy Loop</strong> -
 							an agent that scores its own runs, detects drift, and proposes edits to its own
 							program for you to approve.{' '}
 							<button
@@ -1085,14 +1085,14 @@ export function CueHelpContent({ theme, cueShortcutKeys }: CueHelpContentProps) 
 					</p>
 					<ul className="list-disc pl-5 space-y-1">
 						<li>
-							<code>time.heartbeat</code> — fires once with the count of missed intervals.
+							<code>time.heartbeat</code> - fires once with the count of missed intervals.
 						</li>
 						<li>
-							<code>time.scheduled</code> — fires once for the most recent missed slot, even if
+							<code>time.scheduled</code> - fires once for the most recent missed slot, even if
 							several were skipped during a long sleep.
 						</li>
 						<li>
-							<code>github.pull_request</code> / <code>github.issue</code> — polled immediately on
+							<code>github.pull_request</code> / <code>github.issue</code> - polled immediately on
 							wake so new items are detected within seconds instead of waiting for the next
 							scheduled poll.
 						</li>
@@ -1132,7 +1132,7 @@ export function CueHelpContent({ theme, cueShortcutKeys }: CueHelpContentProps) 
 						<strong style={{ color: theme.colors.textMain }}>Pipeline selector:</strong> Create,
 						rename, and switch between pipelines. The{' '}
 						<strong style={{ color: theme.colors.textMain }}>All Pipelines</strong> view shows every
-						pipeline side-by-side and is read-only — switch back to a single pipeline to edit.
+						pipeline side-by-side and is read-only - switch back to a single pipeline to edit.
 					</p>
 
 					<div className="flex items-center gap-2 mt-4 mb-1">
@@ -1162,8 +1162,8 @@ export function CueHelpContent({ theme, cueShortcutKeys }: CueHelpContentProps) 
 						<tbody>
 							{(
 								[
-									['Hand mode — left-drag', 'Pan the canvas'],
-									['Pointer mode — left-drag', 'Box-select nodes and edges'],
+									['Hand mode - left-drag', 'Pan the canvas'],
+									['Pointer mode - left-drag', 'Box-select nodes and edges'],
 									['Shift + left-drag (any mode)', 'Pan the canvas'],
 									['Middle / right-drag (any mode)', 'Pan the canvas'],
 									['Scroll wheel', 'Zoom in / out'],

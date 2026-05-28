@@ -228,6 +228,67 @@ describe('BrowserTabView', () => {
 		});
 	});
 
+	it('keeps webview listeners attached across navigation re-renders so loading clears', async () => {
+		// Regression: the listener effect previously depended on tab.url/tab.title
+		// and the inline onUpdateTab, so each navigation event re-rendered the
+		// parent and tore down/re-registered all listeners mid-flight, resetting
+		// isDomReadyRef. did-stop-loading then bailed out of readWebviewState and
+		// the spinner stayed spinning while the title oscillated.
+		let latestTab: BrowserTab = { ...mockTab, isLoading: false };
+		const Wrapper = () => {
+			const [tab, setTab] = React.useState<BrowserTab>(latestTab);
+			latestTab = tab;
+			// Fresh inline callback every render — mirrors MainPanelContent.
+			return (
+				<BrowserTabView
+					tab={tab}
+					theme={mockTheme}
+					onUpdateTab={(_, updates) => setTab((prev) => ({ ...prev, ...updates }))}
+				/>
+			);
+		};
+
+		render(<Wrapper />);
+		const webview = getWebview();
+		webview.canGoBack = vi.fn(() => true);
+		webview.canGoForward = vi.fn(() => false);
+		webview.getURL = vi.fn(() => 'https://example.com/page-b');
+		webview.getTitle = vi.fn(() => 'Page B');
+		webview.isLoading = vi.fn(() => false);
+		webview.getWebContentsId = vi.fn(() => 55);
+		webview.executeJavaScript = vi.fn().mockResolvedValue(undefined);
+
+		await act(async () => {
+			webview.dispatchEvent(new Event('dom-ready'));
+		});
+
+		// Simulate clicking Back: navigation starts (isLoading true; url/title change
+		// triggers a re-render with new props + a new inline onUpdateTab)...
+		webview.getURL = vi.fn(() => 'https://example.com/page-a');
+		webview.getTitle = vi.fn(() => 'Page A');
+		await act(async () => {
+			webview.dispatchEvent(
+				Object.assign(new Event('did-start-navigation'), {
+					url: 'https://example.com/page-a',
+					isMainFrame: true,
+				})
+			);
+		});
+		expect(latestTab.isLoading).toBe(true);
+
+		// ...then finishes. did-stop-loading must still clear isLoading even though
+		// the parent re-rendered (and dom-ready does not fire again).
+		await act(async () => {
+			webview.dispatchEvent(new Event('did-stop-loading'));
+		});
+
+		await waitFor(() => {
+			expect(latestTab.isLoading).toBe(false);
+			expect(latestTab.url).toBe('https://example.com/page-a');
+			expect(latestTab.title).toBe('Page A');
+		});
+	});
+
 	it('selects the full committed URL on focus', () => {
 		const onUpdateTab = vi.fn();
 		const selectSpy = vi.spyOn(HTMLInputElement.prototype, 'select');

@@ -115,6 +115,17 @@ export const BrowserTabView = React.memo(
 			latestTabRef.current = tab;
 		}, [tab]);
 
+		// Keep the latest onUpdateTab in a ref so the webview-listener effect below
+		// can stay keyed on `tab.id` alone. The parent passes a fresh inline
+		// callback every render, and navigation events mutate tab.url/tab.title;
+		// if any of those were effect deps, every navigation would tear down and
+		// re-register all listeners mid-flight (resetting isDomReadyRef), which
+		// stranded the loading spinner and made the tab title oscillate.
+		const onUpdateTabRef = useRef(onUpdateTab);
+		useEffect(() => {
+			onUpdateTabRef.current = onUpdateTab;
+		}, [onUpdateTab]);
+
 		useImperativeHandle(
 			ref,
 			(): BrowserTabViewHandle => ({
@@ -212,7 +223,7 @@ export const BrowserTabView = React.memo(
 			isDomReadyRef.current = false;
 
 			const updateTabState = (updates: Partial<BrowserTab>) => {
-				onUpdateTab(tab.id, updates);
+				onUpdateTabRef.current(latestTabRef.current.id, updates);
 			};
 
 			const readWebviewState = (): Partial<BrowserTab> | null => {
@@ -446,7 +457,7 @@ export const BrowserTabView = React.memo(
 				webview.removeEventListener('dom-ready', handleDomReady);
 				webview.removeEventListener('found-in-page', handleFoundInPage);
 			};
-		}, [onUpdateTab, tab.id, tab.title, tab.url]);
+		}, [tab.id]);
 
 		// Focus the find-bar input whenever it opens. Runs after React commits
 		// the input to the DOM. We focus three times across two animation

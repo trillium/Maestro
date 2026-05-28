@@ -319,25 +319,26 @@ describe('QuickActions command builders', () => {
 			}).map((a) => a.id)
 		).toContain('createDebugPackage');
 
-		expect(
-			buildDebugCommands({
-				activeSession: createMockSession({
-					executionQueue: [{ type: 'message', text: 'x' }] as any,
-				}),
-				activeSessionId: 'session-1',
-				sessions: [createMockSession()],
-				setSessions,
-				setQuickActionOpen: close,
-				setPlaygroundOpen: vi.fn(),
-				setDebugApplicationStatsOpen: vi.fn(),
-				setDebugWizardModalOpen: vi.fn(),
-				onDebugReleaseQueuedItem: vi.fn(),
-				getInstallationId: vi.fn().mockResolvedValue('install-1'),
-				safeClipboardWrite: vi.fn().mockResolvedValue(true),
-				flashCopiedToClipboard: vi.fn(),
-				notifyToast: vi.fn(),
-				logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-			}).map((a) => a.id)
-		).toContain('debugReleaseQueued');
+		const debugCommandIds = buildDebugCommands({
+			activeSession: createMockSession({
+				executionQueue: [{ type: 'message', text: 'x' }] as any,
+			}),
+			activeSessionId: 'session-1',
+			sessions: [createMockSession()],
+			setSessions,
+			setQuickActionOpen: close,
+			setPlaygroundOpen: vi.fn(),
+			setDebugApplicationStatsOpen: vi.fn(),
+			setDebugAgentProbeOpen: vi.fn(),
+			setDebugWizardModalOpen: vi.fn(),
+			onDebugReleaseQueuedItem: vi.fn(),
+			getInstallationId: vi.fn().mockResolvedValue('install-1'),
+			safeClipboardWrite: vi.fn().mockResolvedValue(true),
+			flashCopiedToClipboard: vi.fn(),
+			notifyToast: vi.fn(),
+			logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+		}).map((a) => a.id);
+		expect(debugCommandIds).toContain('debugReleaseQueued');
+		expect(debugCommandIds).toContain('debugAgentProbe');
 	});
 });

@@ -201,6 +201,9 @@ export const MODAL_PRIORITIES = {
 	/** Debug: View Application Stats modal */
 	DEBUG_APPLICATION_STATS: 604,
 
+	/** Debug: Re-Probe Agents modal */
+	DEBUG_AGENT_PROBE: 603,
+
 	/** Windows warning modal - shown on startup for Windows users */
 	WINDOWS_WARNING: 615,
 

@@ -238,7 +238,7 @@ interface ModalEntry<T = unknown> {
 
 ### ModalId Union
 
-The current union in `src/renderer/stores/modalStore.ts` lists ~55 modal identifiers (exact list grows as features land — check the source):
+The current union in `src/renderer/stores/modalStore.ts` lists ~55 modal identifiers (exact list grows as features land - check the source):
 
 - **Chrome / global:** `settings`, `shortcutsHelp`, `about`, `feedback`, `updateCheck`
 - **Agent lifecycle:** `newAgentChoice`, `newInstance`, `editAgent`, `deleteAgent`, `renameInstance`, `agentError`
@@ -507,4 +507,4 @@ Each AI tab within a session:
 | `hasUnread`      | `boolean?`     | Unread indicator                                                                   |
 | `agentError`     | `AgentError?`  | Per-tab error state                                                                |
 
-**Model/effort resolution chain** (used at user-facing spawn time in `useInputProcessing` and `agentStore.processQueuedItem`): `tab.customModel ?? session.customModel ?? agentConfig.model`. The MainPanel model/effort pill writes to the active tab via `tabStore.setTabModel`/`setTabEffort` — only the Edit Agent modal mutates `session.customModel`/`customEffort`. Programmatic spawns (Auto Run batch, synopsis, Cue, group chat, fork/merge) intentionally read the session value only.
+**Model/effort resolution chain** (used at user-facing spawn time in `useInputProcessing` and `agentStore.processQueuedItem`): `tab.customModel ?? session.customModel ?? agentConfig.model`. The MainPanel model/effort pill writes to the active tab via `tabStore.setTabModel`/`setTabEffort` - only the Edit Agent modal mutates `session.customModel`/`customEffort`. Programmatic spawns (Auto Run batch, synopsis, Cue, group chat, fork/merge) intentionally read the session value only.

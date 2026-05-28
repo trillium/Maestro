@@ -204,16 +204,34 @@ describe('BatchRunnerModal', () => {
 			const dialog = screen.getByRole('dialog');
 			expect(dialog).toBeInTheDocument();
 			expect(dialog).toHaveAttribute('aria-modal', 'true');
-			expect(dialog).toHaveAttribute('aria-label', 'Auto Run Configuration');
+			expect(dialog).toHaveAttribute('aria-label', 'Maestro Auto Run');
 		});
 
 		it('displays header with title and close button', async () => {
 			render(<BatchRunnerModal {...createDefaultProps()} />);
 
-			expect(screen.getByText('Auto Run Configuration')).toBeInTheDocument();
+			expect(screen.getByText('Maestro Auto Run')).toBeInTheDocument();
 			// X button is present
 			const closeButtons = screen.getAllByRole('button');
 			expect(closeButtons.some((btn) => btn.querySelector('svg'))).toBe(true);
+		});
+
+		it('opens the Auto Run help guide from the header and returns to config on close', async () => {
+			render(<BatchRunnerModal {...createDefaultProps()} />);
+
+			// Guide is not shown initially
+			expect(screen.queryByText('Auto Run Guide')).not.toBeInTheDocument();
+
+			// Click the (?) help button in the header
+			fireEvent.click(screen.getByRole('button', { name: 'Open help' }));
+			expect(screen.getByText('Auto Run Guide')).toBeInTheDocument();
+
+			// Clicking "Got it" closes the guide; the config modal stays open underneath
+			fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+			await waitFor(() => {
+				expect(screen.queryByText('Auto Run Guide')).not.toBeInTheDocument();
+			});
+			expect(screen.getByText('Maestro Auto Run')).toBeInTheDocument();
 		});
 
 		it('displays task count badge in header', async () => {
@@ -1031,13 +1049,9 @@ describe('BatchRunnerModal', () => {
 			const props = createDefaultProps();
 			render(<BatchRunnerModal {...props} />);
 
-			// Find the X button in the header
-			const header = screen.getByText('Auto Run Configuration').closest('div');
-			const closeButton = header?.querySelector('button');
-			if (closeButton) {
-				fireEvent.click(closeButton);
-				expect(props.onClose).toHaveBeenCalled();
-			}
+			// Click the labeled X button in the header
+			fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+			expect(props.onClose).toHaveBeenCalled();
 		});
 
 		it('closes without confirmation after saving a modified prompt', async () => {
@@ -2442,7 +2456,7 @@ describe('Escape Handler Priority', () => {
 		});
 
 		// Main modal still open
-		expect(screen.getByText('Auto Run Configuration')).toBeInTheDocument();
+		expect(screen.getByText('Maestro Auto Run')).toBeInTheDocument();
 	});
 
 	it('closes save playbook modal on escape', async () => {
@@ -2745,5 +2759,64 @@ describe('Auto Run Fresh-Context Mode Auto-Selection', () => {
 		fireEvent.click(screen.getByRole('button', { name: 'Document' }));
 
 		expect(screen.queryByText(/Heads up/)).not.toBeInTheDocument();
+	});
+
+	it('hides the Fresh context per section until documents are selected', async () => {
+		await setupSessionWithContextWindow(1_000_000);
+
+		// No currentDocument and no preset → the run list starts empty.
+		const props = createDefaultProps();
+		props.currentDocument = '';
+
+		render(<BatchRunnerModal {...props} />);
+
+		expect(screen.queryByText('Fresh context per:')).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Task' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Document' })).not.toBeInTheDocument();
+	});
+
+	it('explains the chosen mode with the average task count and context window', async () => {
+		await setupSessionWithContextWindow(1_000_000);
+
+		const props = createDefaultProps();
+		props.getDocumentTaskCount = vi.fn().mockResolvedValue(5);
+
+		render(<BatchRunnerModal {...props} />);
+
+		// 5 tasks/doc is under the 1M threshold (20), so Document is chosen and
+		// the explanation cites both the task average and the window size.
+		await waitFor(() => {
+			expect(screen.getByText(/average 5 tasks each/)).toBeInTheDocument();
+		});
+		const explanation = screen.getByText(/average 5 tasks each/);
+		expect(explanation).toHaveTextContent(/1M/);
+		expect(explanation).toHaveTextContent(/Defaulted to Document/);
+	});
+
+	it('shows the reworded per-mode hint labels', async () => {
+		await setupSessionWithContextWindow(1_000_000);
+
+		const props = createDefaultProps();
+		props.getDocumentTaskCount = vi.fn().mockResolvedValue(5);
+
+		render(<BatchRunnerModal {...props} />);
+
+		// Auto-selected Document → document hint label.
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: 'Document' })).toHaveClass('ring-2');
+		});
+		expect(
+			screen.getByText(
+				'A new agent session is spawned for each document, processing all tasks together.'
+			)
+		).toBeInTheDocument();
+
+		// Switching to Task swaps in the task hint label.
+		fireEvent.click(screen.getByRole('button', { name: 'Task' }));
+		expect(
+			screen.getByText(
+				'A new agent session is spawned for each unchecked task, clean context per work in the document.'
+			)
+		).toBeInTheDocument();
 	});
 });

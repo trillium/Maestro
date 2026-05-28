@@ -424,9 +424,8 @@ describe('SettingsModal', () => {
 		(window.maestro as any).agents.getAllCustomPaths = vi.fn().mockResolvedValue({});
 		(window.maestro as any).agents.setCustomPath = vi.fn().mockResolvedValue(undefined);
 		(window.maestro as any).agents.setConfig = vi.fn().mockResolvedValue(undefined);
-		// AgentsTab calls these on mount via agentStore.loadCapabilitySnapshots.
-		// Returning {} / unsubscribe stubs keeps the tab inert in tests that
-		// don't exercise the capability-snapshot pipeline.
+		// Generic capability-snapshot stubs so any agentStore call made from
+		// Settings stays inert in tests that don't exercise that pipeline.
 		(window.maestro as any).agents.getAllSnapshots = vi.fn().mockResolvedValue({});
 		(window.maestro as any).agents.getSnapshot = vi.fn().mockResolvedValue(null);
 		(window.maestro as any).agents.reprobe = vi.fn().mockResolvedValue(null);

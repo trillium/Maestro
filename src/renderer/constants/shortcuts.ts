@@ -129,6 +129,11 @@ export const DEFAULT_SHORTCUTS: Record<string, Shortcut> = {
 		label: 'Focus Active Tab',
 		keys: ['Alt', 'Meta', 'f'],
 	},
+	editClipboardImage: {
+		id: 'editClipboardImage',
+		label: 'Edit Image from Clipboard',
+		keys: ['Alt', 'Meta', 'e'],
+	},
 };
 
 // Non-editable shortcuts (displayed in help but not configurable)

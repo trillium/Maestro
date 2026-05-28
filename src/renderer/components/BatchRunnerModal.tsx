@@ -14,6 +14,8 @@ import {
 	Upload,
 	LayoutGrid,
 	Brain,
+	PlayCircle,
+	HelpCircle,
 } from 'lucide-react';
 import { Spinner } from './ui/Spinner';
 import type {
@@ -32,6 +34,7 @@ import { AgentPromptComposerModal } from './AgentPromptComposerModal';
 import { DocumentsPanel } from './DocumentsPanel';
 import { ToggleButtonGroup } from './ToggleButtonGroup';
 import { WorktreeRunSection } from './WorktreeRunSection';
+import { AutoRunnerHelpModal } from './AutoRun/AutoRunnerHelpModal';
 import { useSessionStore, selectSessionById } from '../stores/sessionStore';
 import { useBatchStore } from '../stores/batchStore';
 import { useUIStore } from '../stores/uiStore';
@@ -46,6 +49,7 @@ import { formatMetaKey } from '../utils/shortcutFormatter';
 import { logger } from '../utils/logger';
 import { resolveEffectiveContextWindow } from '../utils/contextWindowResolver';
 import { PER_DOCUMENT_CONTEXT_THRESHOLD } from '../../shared/agentConstants';
+import { formatTokens } from '../../shared/formatters';
 
 // Re-export for external consumers
 export { DEFAULT_BATCH_PROMPT, validateAgentPromptHasTaskReference } from '../hooks';
@@ -242,6 +246,10 @@ export function BatchRunnerModal(props: BatchRunnerModalProps) {
 	// threshold that recommendedMode uses. Null until the resolver finishes
 	// (or there's no active session) — recommendations wait for it.
 	const [effectiveContextWindow, setEffectiveContextWindow] = useState<number | null>(null);
+
+	// Auto Run help guide overlay (same content as the Auto Run panel's Help
+	// button). Renders above this modal; closing it returns here.
+	const [showHelp, setShowHelp] = useState(false);
 
 	// Prompt state
 	const [prompt, setPrompt] = useState(initialPrompt || DEFAULT_BATCH_PROMPT);
@@ -466,7 +474,12 @@ export function BatchRunnerModal(props: BatchRunnerModalProps) {
 			effectiveContextWindow === null ? null : computeTasksPerDocThreshold(effectiveContextWindow),
 		[effectiveContextWindow]
 	);
-	const recommendedMode = useMemo<TaskSelectionMode | null>(() => {
+	const recommendation = useMemo<{
+		mode: TaskSelectionMode;
+		averageTasks: number;
+		docCount: number;
+		threshold: number;
+	} | null>(() => {
 		// Wait for the context window resolver — its value drives the threshold.
 		if (tasksPerDocThreshold === null) return null;
 		const validDocs = documents.filter((d) => !d.isMissing);
@@ -477,9 +490,15 @@ export function BatchRunnerModal(props: BatchRunnerModalProps) {
 			.map((d) => taskCounts[d.filename])
 			.filter((n): n is number => typeof n === 'number');
 		if (knownCounts.length === 0) return null;
-		const avg = knownCounts.reduce((a, b) => a + b, 0) / knownCounts.length;
-		return avg < tasksPerDocThreshold ? 'document' : 'task';
+		const averageTasks = knownCounts.reduce((a, b) => a + b, 0) / knownCounts.length;
+		return {
+			mode: averageTasks < tasksPerDocThreshold ? 'document' : 'task',
+			averageTasks,
+			docCount: validDocs.length,
+			threshold: tasksPerDocThreshold,
+		};
 	}, [documents, taskCounts, tasksPerDocThreshold]);
+	const recommendedMode = recommendation?.mode ?? null;
 
 	// Auto-apply the task-count recommendation when documents/counts change.
 	// Skips if a playbook is loaded (it owns the mode) or the user has
@@ -505,6 +524,28 @@ export function BatchRunnerModal(props: BatchRunnerModalProps) {
 
 	const showRecommendationWarning =
 		userOverrodeMode && recommendedMode !== null && recommendedMode !== taskSelectionMode;
+
+	// Human-readable explanation of the dynamic mode choice: average task count
+	// across selected docs + the resolved context window + the threshold that
+	// scales with it. Drives the copy shown above the Task/Document toggle.
+	const recommendationExplanation = useMemo<string | null>(() => {
+		if (recommendation === null || effectiveContextWindow === null) return null;
+		const { averageTasks, docCount, threshold, mode } = recommendation;
+		const avgLabel = Number.isInteger(averageTasks) ? `${averageTasks}` : averageTasks.toFixed(1);
+		const docLabel = docCount === 1 ? '1 document' : `${docCount} documents`;
+		const taskLabel = avgLabel === '1' ? '1 task' : `${avgLabel} tasks`;
+		const windowLabel = formatTokens(effectiveContextWindow);
+		const recommendedLabel = mode === 'task' ? 'Task' : 'Document';
+		const reason =
+			mode === 'task'
+				? `that's at or above the ${threshold}-task cutoff for a ${windowLabel} context window, so a clean context per task avoids crowding the window`
+				: `that's under the ${threshold}-task cutoff for a ${windowLabel} context window, so one shared session can hold the whole document`;
+		if (showRecommendationWarning) {
+			const currentLabel = taskSelectionMode === 'task' ? 'Task' : 'Document';
+			return `Heads up: your ${docLabel} average ${taskLabel} each; ${reason}, so ${recommendedLabel} is the better fit. You've chosen ${currentLabel} - if you know what you're doing, go for it.`;
+		}
+		return `Your ${docLabel} average ${taskLabel} each - ${reason}. Defaulted to ${recommendedLabel}.`;
+	}, [recommendation, effectiveContextWindow, showRecommendationWarning, taskSelectionMode]);
 
 	// Validate agent prompt has task references
 	const hasValidPrompt = validateAgentPromptHasTaskReference(prompt);
@@ -596,7 +637,7 @@ export function BatchRunnerModal(props: BatchRunnerModalProps) {
 			className="fixed inset-0 modal-overlay flex items-center justify-center z-[9999] animate-in fade-in duration-200"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Auto Run Configuration"
+			aria-label="Maestro Auto Run"
 			tabIndex={-1}
 		>
 			<div
@@ -608,9 +649,21 @@ export function BatchRunnerModal(props: BatchRunnerModalProps) {
 					className="p-4 border-b flex items-center justify-between shrink-0"
 					style={{ borderColor: theme.colors.border }}
 				>
-					<h2 className="text-sm font-bold" style={{ color: theme.colors.textMain }}>
-						Auto Run Configuration
-					</h2>
+					<div className="flex items-center gap-2">
+						<PlayCircle className="w-5 h-5" style={{ color: theme.colors.accent }} />
+						<h2 className="text-sm font-bold" style={{ color: theme.colors.textMain }}>
+							Maestro Auto Run
+						</h2>
+						<button
+							onClick={() => setShowHelp(true)}
+							className="p-1 rounded hover:bg-white/10 transition-colors"
+							aria-label="Open help"
+							title="About Maestro Auto Run"
+							style={{ color: theme.colors.textDim }}
+						>
+							<HelpCircle className="w-4 h-4" />
+						</button>
+					</div>
 					<div className="flex items-center gap-4">
 						{/* Agent thinking pill — shown only while the session agent is busy.
 						    Lives in the header (rather than over the Go button) so it stays
@@ -651,7 +704,11 @@ export function BatchRunnerModal(props: BatchRunnerModalProps) {
 								{totalTaskCount === 1 ? 'task' : 'tasks'}
 							</span>
 						</div>
-						<button onClick={handleCloseWithConfirmation} style={{ color: theme.colors.textDim }}>
+						<button
+							onClick={handleCloseWithConfirmation}
+							aria-label="Close"
+							style={{ color: theme.colors.textDim }}
+						>
 							<X className="w-4 h-4" />
 						</button>
 					</div>
@@ -846,44 +903,45 @@ export function BatchRunnerModal(props: BatchRunnerModalProps) {
 
 					{/* Agent Prompt Section */}
 					<div className="flex flex-col gap-2">
-						{/* Fresh-context-per selector — drives {{TASK_SELECTION_BLOCK}} */}
-						<div className="mb-2">
-							<div
-								className="text-[10px] font-bold uppercase mb-1.5"
-								style={{ color: theme.colors.textDim }}
-							>
-								Fresh context per:
-							</div>
-							<p className="text-[10px] mb-1.5" style={{ color: theme.colors.textDim }}>
-								Controls how agent context is scoped while walking your documents. The right choice
-								depends on the type of document: for huge documents — or tasks that pile up a lot of
-								tool output — pick <strong>Task</strong> so each task gets a clean context. For
-								smaller documents where later tasks benefit from earlier work, pick{' '}
-								<strong>Document</strong> so a single agent shares context across every task. See
-								the in-app help and documentation for the full breakdown.
-							</p>
-							<ToggleButtonGroup<TaskSelectionMode>
-								options={[
-									{ value: 'task', label: 'Task' },
-									{ value: 'document', label: 'Document' },
-								]}
-								value={taskSelectionMode}
-								onChange={handleTaskSelectionModeChange}
-								theme={theme}
-							/>
-							<p className="text-[10px] mt-1.5" style={{ color: theme.colors.textDim }}>
-								{taskSelectionMode === 'task'
-									? 'A new agent is spawned for each unchecked task — clean context every time.'
-									: 'A single agent walks every unchecked task in the document, sharing context across them.'}
-							</p>
-							{showRecommendationWarning && (
-								<p className="text-[10px] mt-1.5" style={{ color: theme.colors.warning }}>
-									Heads up — based on the task count across your selected documents, we think{' '}
-									<strong>{recommendedMode === 'task' ? 'Task' : 'Document'}</strong> is probably
-									the better fit here. If you know what you&apos;re doing, go for it.
+						{/* Fresh-context-per selector - drives {{TASK_SELECTION_BLOCK}}.
+						    Hidden until at least one document is selected; the mode is then
+						    auto-chosen from the docs' task counts and the agent context window. */}
+						{documents.length > 0 && (
+							<div className="mb-2">
+								<div
+									className="text-[10px] font-bold uppercase mb-1.5"
+									style={{ color: theme.colors.textDim }}
+								>
+									Fresh context per:
+								</div>
+								{recommendationExplanation && (
+									<p
+										className="text-[10px] mb-1.5"
+										style={{
+											color: showRecommendationWarning
+												? theme.colors.warning
+												: theme.colors.textDim,
+										}}
+									>
+										{recommendationExplanation}
+									</p>
+								)}
+								<ToggleButtonGroup<TaskSelectionMode>
+									options={[
+										{ value: 'task', label: 'Task' },
+										{ value: 'document', label: 'Document' },
+									]}
+									value={taskSelectionMode}
+									onChange={handleTaskSelectionModeChange}
+									theme={theme}
+								/>
+								<p className="text-[10px] mt-1.5" style={{ color: theme.colors.textDim }}>
+									{taskSelectionMode === 'task'
+										? 'A new agent session is spawned for each unchecked task, clean context per work in the document.'
+										: 'A new agent session is spawned for each document, processing all tasks together.'}
 								</p>
-							)}
-						</div>
+							</div>
+						)}
 
 						<div className="flex items-center justify-between">
 							<div className="flex items-center gap-3">
@@ -1180,6 +1238,13 @@ export function BatchRunnerModal(props: BatchRunnerModalProps) {
 				initialValue={prompt}
 				onSubmit={(value) => setPrompt(value)}
 			/>
+
+			{/* Auto Run help guide - opened via the (?) in the header. Layered above
+			    this modal (z-9999) so it sits on top; closing it (Got it / Escape /
+			    backdrop) returns the user to this config modal. */}
+			{showHelp && (
+				<AutoRunnerHelpModal theme={theme} onClose={() => setShowHelp(false)} zIndex={10000} />
+			)}
 		</div>
 	);
 }

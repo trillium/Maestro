@@ -101,8 +101,8 @@ describe('CueHelpContent', () => {
 			expect(screen.getByText('Canvas controls')).toBeInTheDocument();
 			expect(screen.getByText(/Shift \+ left-drag/)).toBeInTheDocument();
 			expect(screen.getByText(/Middle \/ right-drag/)).toBeInTheDocument();
-			expect(screen.getByText(/Hand mode — left-drag/)).toBeInTheDocument();
-			expect(screen.getByText(/Pointer mode — left-drag/)).toBeInTheDocument();
+			expect(screen.getByText(/Hand mode - left-drag/)).toBeInTheDocument();
+			expect(screen.getByText(/Pointer mode - left-drag/)).toBeInTheDocument();
 		});
 
 		it('should document the All Pipelines view is read-only', () => {

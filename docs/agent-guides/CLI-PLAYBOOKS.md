@@ -235,12 +235,12 @@ maestro-cli update-agent <agent-id> [-g <group-id|none>] [-d <new-cwd>] [--json]
 ```
 
 - `--group <id>` sends a `move_session_to_group` message (reuses the same write path as drag-and-drop in the Left Bar). Pass `none`, `null`, or `""` to ungroup. Supports partial group IDs via `resolveGroupId()`.
-- `--cwd <path>` sends the new `update_session_cwd` message. Resolves to absolute via `path.resolve()`. The renderer mutates `cwd`/`fullPath`/`shellCwd` only — `projectRoot` is preserved so historical provider sessions stay addressable (important for archive workflows where you relocate the case folder but want prior conversations to remain attached).
+- `--cwd <path>` sends the new `update_session_cwd` message. Resolves to absolute via `path.resolve()`. The renderer mutates `cwd`/`fullPath`/`shellCwd` only - `projectRoot` is preserved so historical provider sessions stay addressable (important for archive workflows where you relocate the case folder but want prior conversations to remain attached).
 - The renderer refuses cwd updates when `aiPid > 0` (the PTY's cwd is fixed at spawn time) and returns `{ success: false, error: '...' }`; the CLI surfaces that error and exits non-zero.
 
 ### `list ssh-remotes`
 
-List all configured SSH remotes. Reads directly from `maestro-settings.json` via `readSshRemotes()` — no running app required.
+List all configured SSH remotes. Reads directly from `maestro-settings.json` via `readSshRemotes()` - no running app required.
 
 ```bash
 maestro-cli list ssh-remotes [--json]
@@ -414,17 +414,17 @@ The CLI spawner is simpler than the desktop process manager but honors the same
 per-agent/per-session overrides that users configure in the desktop app:
 
 - **Honored**: custom binary path, custom CLI args, custom env vars, custom model,
-  custom effort/reasoning — all merged via `applyAgentConfigOverrides()` just
+  custom effort/reasoning - all merged via `applyAgentConfigOverrides()` just
   like the desktop (`session` wins over `agent config` wins over defaults).
-- **Honored**: SSH remote execution — when `sessionSshRemoteConfig.enabled` is
+- **Honored**: SSH remote execution - when `sessionSshRemoteConfig.enabled` is
   true, the spawn is wrapped via `wrapSpawnWithSsh()` (dynamic import so the
   SSH chain stays out of the local hot path). If the configured remote can't
   be resolved, the CLI returns a clear error instead of silently falling back
-  to local — users who opt into SSH don't want their prompt leaking locally.
+  to local - users who opt into SSH don't want their prompt leaking locally.
 - **Not applicable**: PTY (CLI uses plain `child_process.spawn`), real-time
   output streaming to UI.
 
-See `src/cli/services/agent-spawner.ts` — the `resolveAgentOverrides()` helper
+See `src/cli/services/agent-spawner.ts` - the `resolveAgentOverrides()` helper
 and `maybeWrapSpawnWithSsh()` are the CLI-side equivalents of the desktop
 `process:spawn` IPC handler's override + SSH wrapping logic.
 

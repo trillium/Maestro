@@ -33,6 +33,7 @@ import {
 import type { Theme } from '../../../shared/theme-types';
 import { GhostIconButton } from '../ui/GhostIconButton';
 import { notifyCenterFlash } from '../../stores/centerFlashStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import type { AnnotatorTool, UseAnnotatorStateReturn } from './useAnnotatorState';
 
 interface AnnotatorToolbarProps {
@@ -60,6 +61,39 @@ export const AnnotatorToolbar = memo(function AnnotatorToolbar({
 	const [confirmingClear, setConfirmingClear] = useState(false);
 	const confirmWrapRef = useRef<HTMLDivElement>(null);
 	const hasContent = strokes.length > 0 || shapes.length > 0 || texts.length > 0;
+
+	// Current-color swatch. Resolution mirrors AnnotatorSettingsDrawer so the
+	// toolbar always shows (and edits) the same color the drawer would: a
+	// selected text/shape's color wins, otherwise the tool-appropriate default
+	// (text tool → text color, anything else → pen color, since pen color drives
+	// pen + all shapes).
+	const defPenColor = useSettingsStore((s) => s.annotatorPenColor);
+	const defTextColor = useSettingsStore((s) => s.annotatorTextColor);
+	const setDefPenColor = useSettingsStore((s) => s.setAnnotatorPenColor);
+	const setDefTextColor = useSettingsStore((s) => s.setAnnotatorTextColor);
+	const selectedShape = state.selectedShapeId
+		? (shapes.find((s) => s.id === state.selectedShapeId) ?? null)
+		: null;
+	const selectedText = state.selectedTextId
+		? (texts.find((t) => t.id === state.selectedTextId) ?? null)
+		: null;
+	let currentColor: string;
+	let setCurrentColor: (c: string) => void;
+	if (selectedText) {
+		currentColor = selectedText.style.color;
+		setCurrentColor = (c) =>
+			state.updateText(selectedText.id, { style: { ...selectedText.style, color: c } });
+	} else if (selectedShape) {
+		currentColor = selectedShape.style.color;
+		setCurrentColor = (c) =>
+			state.updateShape(selectedShape.id, { style: { ...selectedShape.style, color: c } });
+	} else if (tool === 'text') {
+		currentColor = defTextColor;
+		setCurrentColor = setDefTextColor;
+	} else {
+		currentColor = defPenColor;
+		setCurrentColor = setDefPenColor;
+	}
 
 	// Cmd/Ctrl+Z (undo) and Cmd/Ctrl+S (save+exit) for the annotator.
 	//
@@ -295,6 +329,28 @@ export const AnnotatorToolbar = memo(function AnnotatorToolbar({
 			</div>
 
 			{divider}
+
+			<label
+				title={`Current color (${currentColor}) - click to change`}
+				className="rounded hover:bg-white/10 transition-colors cursor-pointer relative flex items-center justify-center"
+				style={{ padding: 8, lineHeight: 0 }}
+			>
+				<span
+					aria-hidden
+					className="block w-5 h-5 rounded-full"
+					style={{
+						backgroundColor: currentColor,
+						boxShadow: `inset 0 0 0 1px rgba(0, 0, 0, 0.25), 0 0 0 1px ${theme.colors.border}`,
+					}}
+				/>
+				<input
+					type="color"
+					value={currentColor}
+					onChange={(e) => setCurrentColor(e.target.value)}
+					aria-label="Current drawing color"
+					className="absolute inset-0 w-full h-full cursor-pointer opacity-0"
+				/>
+			</label>
 
 			<GhostIconButton
 				onClick={onToggleDrawer}

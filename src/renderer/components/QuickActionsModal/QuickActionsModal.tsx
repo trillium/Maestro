@@ -159,6 +159,13 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 
 	// UI store actions for search commands (avoid threading more props through 3-layer chain)
 	const setActiveFocus = useUIStore((s) => s.setActiveFocus);
+	// Sourced from the modal store directly to skip the 3-layer prop chain.
+	const openModal = useModalStore((s) => s.openModal);
+	const closeModal = useModalStore((s) => s.closeModal);
+	const setDebugAgentProbeOpen = useCallback(
+		(open: boolean) => (open ? openModal('debugAgentProbe') : closeModal('debugAgentProbe')),
+		[openModal, closeModal]
+	);
 	const storeSetSessionFilterOpen = useUIStore((s) => s.setSessionFilterOpen);
 	const storeSetOutputSearchOpen = useUIStore((s) => s.setOutputSearchOpen);
 	const storeSetFileTreeFilterOpen = useFileExplorerStore((s) => s.setFileTreeFilterOpen);
@@ -462,6 +469,7 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 				directorNotes: shortcuts.directorNotes,
 				maestroCue: shortcuts.maestroCue,
 				fuzzyFileSearch: shortcuts.fuzzyFileSearch,
+				editClipboardImage: shortcuts.editClipboardImage,
 			},
 			tabShortcuts,
 		}),
@@ -570,6 +578,7 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 			setQuickActionOpen,
 			setPlaygroundOpen,
 			setDebugApplicationStatsOpen,
+			setDebugAgentProbeOpen,
 			setDebugWizardModalOpen,
 			onDebugReleaseQueuedItem,
 			getInstallationId: () => window.maestro.leaderboard.getInstallationId(),
