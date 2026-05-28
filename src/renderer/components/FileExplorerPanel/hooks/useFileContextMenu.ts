@@ -23,6 +23,7 @@ interface UseFileContextMenuArgs {
 	openRenameModal: (node: FileNode, path: string) => void;
 	openDeleteModal: (node: FileNode, path: string) => Promise<void>;
 	openNewFileModal: (parentFolderPath: string, parentFolderAbsolutePath: string) => void;
+	openNewFolderModal: (parentFolderPath: string, parentFolderAbsolutePath: string) => void;
 	setSelectedFileIndex: (n: number) => void;
 	selectedPathsRef: React.MutableRefObject<Set<string>>;
 	setSelectedPaths: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -46,6 +47,7 @@ interface UseFileContextMenuResult {
 	handleOpenInMaestroBrowser: () => void;
 	handleOpenInExplorer: () => void;
 	handleOpenNewFile: () => void;
+	handleOpenNewFolder: () => void;
 	handleOpenRename: () => void;
 	handleOpenDelete: () => Promise<void>;
 	handleFocusInGraph: () => void;
@@ -76,6 +78,7 @@ export function useFileContextMenu({
 	openRenameModal,
 	openDeleteModal,
 	openNewFileModal,
+	openNewFolderModal,
 	setSelectedFileIndex,
 	selectedPathsRef,
 	setSelectedPaths,
@@ -420,6 +423,14 @@ export function useFileContextMenu({
 		setContextMenu(null);
 	}, [contextMenu, session.fullPath, openNewFileModal]);
 
+	const handleOpenNewFolder = useCallback(() => {
+		if (contextMenu && contextMenu.node.type === 'folder') {
+			const parentFolderAbsolutePath = `${session.fullPath}/${contextMenu.path}`;
+			openNewFolderModal(contextMenu.path, parentFolderAbsolutePath);
+		}
+		setContextMenu(null);
+	}, [contextMenu, session.fullPath, openNewFolderModal]);
+
 	const handleOpenRename = useCallback(() => {
 		if (contextMenu) {
 			openRenameModal(contextMenu.node, contextMenu.path);
@@ -447,6 +458,7 @@ export function useFileContextMenu({
 		handleOpenInMaestroBrowser,
 		handleOpenInExplorer,
 		handleOpenNewFile,
+		handleOpenNewFolder,
 		handleOpenRename,
 		handleOpenDelete,
 		handleFocusInGraph,

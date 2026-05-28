@@ -46,6 +46,7 @@ import {
 	navigateToTabByIndex,
 	navigateToLastTab,
 	navigateToUnifiedTabByIndex,
+	navigateToUnifiedTabById,
 	navigateToLastUnifiedTab,
 	navigateToNextUnifiedTab,
 	navigateToPrevUnifiedTab,
@@ -1661,6 +1662,65 @@ describe('tabHelpers', () => {
 			expect(result!.type).toBe('file');
 			expect(result!.session.inputMode).toBe('ai');
 			expect(result!.session.activeTerminalTabId).toBeNull();
+		});
+	});
+
+	describe('navigateToUnifiedTabById', () => {
+		it('activates a browser tab by id, clearing file/terminal selection', () => {
+			const aiTab = createMockTab({ id: 'ai-1' });
+			const browserTab = createMockBrowserTab({ id: 'browser-1' });
+			const session = createMockSession({
+				aiTabs: [aiTab],
+				browserTabs: [browserTab] as any,
+				activeTabId: 'ai-1',
+				activeFileTabId: null,
+				activeBrowserTabId: null,
+				unifiedTabOrder: [
+					{ type: 'ai', id: 'ai-1' },
+					{ type: 'browser', id: 'browser-1' },
+				],
+			});
+
+			const result = navigateToUnifiedTabById(session, 'browser', 'browser-1');
+
+			expect(result!.type).toBe('browser');
+			expect(result!.id).toBe('browser-1');
+			expect(result!.session.activeBrowserTabId).toBe('browser-1');
+			expect(result!.session.activeFileTabId).toBeNull();
+			expect(result!.session.activeTerminalTabId).toBeNull();
+			expect(result!.session.inputMode).toBe('ai');
+		});
+
+		it('activates a terminal tab by id, setting inputMode to terminal', () => {
+			const aiTab = createMockTab({ id: 'ai-1' });
+			const terminalTab = { id: 'term-1', name: 'Terminal 1' };
+			const session = createMockSession({
+				aiTabs: [aiTab],
+				terminalTabs: [terminalTab] as any,
+				activeTabId: 'ai-1',
+				activeTerminalTabId: null,
+				unifiedTabOrder: [
+					{ type: 'ai', id: 'ai-1' },
+					{ type: 'terminal', id: 'term-1' },
+				],
+			});
+
+			const result = navigateToUnifiedTabById(session, 'terminal', 'term-1');
+
+			expect(result!.type).toBe('terminal');
+			expect(result!.session.activeTerminalTabId).toBe('term-1');
+			expect(result!.session.inputMode).toBe('terminal');
+		});
+
+		it('returns null when the target tab no longer exists', () => {
+			const aiTab = createMockTab({ id: 'ai-1' });
+			const session = createMockSession({
+				aiTabs: [aiTab],
+				activeTabId: 'ai-1',
+				unifiedTabOrder: [{ type: 'ai', id: 'ai-1' }],
+			});
+
+			expect(navigateToUnifiedTabById(session, 'browser', 'gone')).toBeNull();
 		});
 	});
 

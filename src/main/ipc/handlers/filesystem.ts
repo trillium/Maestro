@@ -32,6 +32,7 @@ import {
 	readFileRemote,
 	readFileRemoteAbortable,
 	writeFileRemote,
+	mkdirRemote,
 	statRemote,
 	directorySizeRemote,
 	renameRemote,
@@ -485,6 +486,31 @@ export function registerFilesystemHandlers(): void {
 			}
 		}
 	);
+
+	// Create a directory (supports SSH remote). Recursive so intermediate
+	// parents are created as needed.
+	ipcMain.handle('fs:mkdir', async (_, dirPath: string, sshRemoteId?: string) => {
+		try {
+			// SSH remote: dispatch to remote fs operations
+			if (sshRemoteId) {
+				const sshConfig = getSshRemoteById(sshRemoteId);
+				if (!sshConfig) {
+					throw new Error(`SSH remote not found: ${sshRemoteId}`);
+				}
+				const result = await mkdirRemote(dirPath, sshConfig, true);
+				if (!result.success) {
+					throw new Error(result.error || 'Failed to create remote directory');
+				}
+				return { success: true };
+			}
+
+			// Local: standard fs mkdir
+			await fs.mkdir(dirPath, { recursive: true });
+			return { success: true };
+		} catch (error) {
+			throw new Error(`Failed to create directory: ${error}`);
+		}
+	});
 
 	// Rename a file or folder (supports SSH remote)
 	ipcMain.handle('fs:rename', async (_, oldPath: string, newPath: string, sshRemoteId?: string) => {

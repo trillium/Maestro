@@ -29,8 +29,29 @@ import {
 	renameTerminalTab as renameTerminalTabHelper,
 	getTerminalSessionId,
 } from '../../utils/terminalTabHelpers';
-import type { NavHistoryEntry } from './useNavigationHistory';
+import type { NavHistoryEntry, NavTabKind } from './useNavigationHistory';
 import { captureException } from '../../utils/sentry';
+
+/**
+ * Resolve the active tab of a session into a breadcrumb descriptor (id + kind).
+ * Priority mirrors findActiveUnifiedTabIndex (terminal > file > browser > ai)
+ * so the breadcrumb tracks whichever tab the user actually sees.
+ */
+function resolveActiveNavTab(session: Session): { tabId?: string; tabKind?: NavTabKind } {
+	if (session.activeTerminalTabId) {
+		return { tabId: session.activeTerminalTabId, tabKind: 'terminal' };
+	}
+	if (session.activeFileTabId) {
+		return { tabId: session.activeFileTabId, tabKind: 'file' };
+	}
+	if (session.activeBrowserTabId) {
+		return { tabId: session.activeBrowserTabId, tabKind: 'browser' };
+	}
+	if (session.aiTabs?.length > 0) {
+		return { tabId: session.activeTabId, tabKind: 'ai' };
+	}
+	return {};
+}
 
 // ============================================================================
 // Dependencies interface
@@ -647,17 +668,18 @@ export function useSessionLifecycle(deps: SessionLifecycleDeps): SessionLifecycl
 		if (activeGroupChatId) {
 			pushNavigation({ groupChatId: activeGroupChatId });
 		} else if (activeSession) {
-			pushNavigation({
-				sessionId: activeSession.id,
-				tabId:
-					activeSession.inputMode === 'ai' && activeSession.aiTabs?.length > 0
-						? activeSession.activeTabId
-						: undefined,
-			});
+			// Resolve the active tab across all kinds using the same priority as
+			// findActiveUnifiedTabIndex (terminal > file > browser > ai) so the
+			// breadcrumb tracks whichever tab the user actually sees.
+			const { tabId, tabKind } = resolveActiveNavTab(activeSession);
+			pushNavigation({ sessionId: activeSession.id, tabId, tabKind });
 		}
 	}, [
 		activeSessionId,
 		activeSession?.activeTabId,
+		activeSession?.activeFileTabId,
+		activeSession?.activeBrowserTabId,
+		activeSession?.activeTerminalTabId,
 		activeSession?.inputMode,
 		activeSession?.aiTabs?.length,
 		activeGroupChatId,

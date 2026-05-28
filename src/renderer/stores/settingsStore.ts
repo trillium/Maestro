@@ -2010,6 +2010,11 @@ const SHORTCUT_DEFAULT_REMAPS: Record<string, { fromKeys: string[]; toKeys: stri
 		fromKeys: ['Meta', 'Shift', 'm'],
 		toKeys: ['Alt', 'Meta', 'm'],
 	},
+	// toggleAutoRunExpanded moved off Cmd+Shift+2 to free that combo for openBatchRunner.
+	toggleAutoRunExpanded: {
+		fromKeys: ['Meta', 'Shift', '2'],
+		toKeys: ['Meta', 'Shift', 'e'],
+	},
 };
 
 function keysEqual(a: string[], b: string[]): boolean {

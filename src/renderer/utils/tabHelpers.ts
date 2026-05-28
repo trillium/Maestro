@@ -2002,6 +2002,31 @@ export function navigateToUnifiedTabByIndex(
 }
 
 /**
+ * Activate a specific tab by its kind and id, reusing the per-kind field logic
+ * in navigateToUnifiedTabByIndex. Returns null when the tab no longer exists.
+ *
+ * Used by breadcrumb navigation (back/forward) to restore a previously-visited
+ * tab of any kind (ai, file, browser, terminal).
+ *
+ * @param session - The Maestro session
+ * @param tabKind - The kind of tab to activate
+ * @param tabId - The id of the tab to activate
+ */
+export function navigateToUnifiedTabById(
+	session: Session,
+	tabKind: UnifiedTabRef['type'],
+	tabId: string
+): NavigateToUnifiedTabResult | null {
+	const order = getRepairedUnifiedTabOrder(session);
+	const index = order.findIndex((ref) => ref.type === tabKind && ref.id === tabId);
+	if (index === -1) return null;
+	// Pass showUnreadOnly=false: breadcrumb restore must reach the exact tab
+	// regardless of the unread filter, and index is taken from the same
+	// repaired order navigateToUnifiedTabByIndex uses in that mode.
+	return navigateToUnifiedTabByIndex(session, index, false);
+}
+
+/**
  * Navigate to the last tab in the unified tab order.
  * Used for Cmd+0 shortcut.
  *

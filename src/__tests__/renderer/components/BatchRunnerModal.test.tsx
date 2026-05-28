@@ -2793,6 +2793,47 @@ describe('Auto Run Fresh-Context Mode Auto-Selection', () => {
 		expect(explanation).toHaveTextContent(/Defaulted to Document/);
 	});
 
+	it('detects the 1M window from a [1m] model before any usage is reported', async () => {
+		// No customContextWindow and no usage stats: the only 1M signal is the
+		// selected `[1m]` model. Resolving it correctly keeps the explanation from
+		// mis-citing the 200K default (the reported inaccuracy).
+		const { useSessionStore } = await import('../../../renderer/stores/sessionStore');
+		const session = {
+			id: 'session-123',
+			name: 'Test Agent',
+			toolType: 'claude-code',
+			cwd: '/project',
+			fullPath: '/project',
+			projectRoot: '/project',
+			state: 'idle',
+			tabs: [],
+			aiTabs: [],
+			activeTabIndex: 0,
+			isGitRepo: true,
+			isLive: false,
+			changedFiles: [],
+			fileTree: [],
+			fileExplorerExpanded: [],
+			fileExplorerScrollPos: 0,
+			customModel: 'opus[1m]',
+		};
+		useSessionStore.setState({ sessions: [session as never], activeSessionId: 'session-123' });
+
+		const props = createDefaultProps();
+		props.getDocumentTaskCount = vi.fn().mockResolvedValue(5);
+
+		render(<BatchRunnerModal {...props} />);
+
+		await waitFor(() => {
+			expect(screen.getByText(/average 5 tasks each/)).toBeInTheDocument();
+		});
+		const explanation = screen.getByText(/average 5 tasks each/);
+		expect(explanation).toHaveTextContent(/1M/);
+		expect(explanation).not.toHaveTextContent(/200K/);
+		// 5 tasks/doc is under the 1M threshold (20) → Document.
+		expect(screen.getByRole('button', { name: 'Document' })).toHaveClass('ring-2');
+	});
+
 	it('shows the reworded per-mode hint labels', async () => {
 		await setupSessionWithContextWindow(1_000_000);
 

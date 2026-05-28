@@ -9,6 +9,7 @@ import {
 	Edit2,
 	Trash2,
 	FilePlus,
+	FolderPlus,
 	Files,
 } from 'lucide-react';
 import { getRevealLabel } from '../../../utils/platformUtils';
@@ -30,6 +31,7 @@ interface FileTreeContextMenuProps {
 	onOpenInMaestroBrowser: () => void;
 	onOpenInExplorer: () => void;
 	onOpenNewFile: () => void;
+	onOpenNewFolder: () => void;
 	onPreviewFile: () => void;
 	onPreviewAllInFolder: () => void;
 	onPreviewMulti: () => void;
@@ -55,6 +57,7 @@ export function FileTreeContextMenu({
 	onOpenInMaestroBrowser,
 	onOpenInExplorer,
 	onOpenNewFile,
+	onOpenNewFolder,
 	onPreviewFile,
 	onPreviewAllInFolder,
 	onPreviewMulti,
@@ -127,6 +130,14 @@ export function FileTreeContextMenu({
 								>
 									<FilePlus className="w-3.5 h-3.5" style={{ color: theme.colors.accent }} />
 									<span>New File</span>
+								</button>
+								<button
+									onClick={onOpenNewFolder}
+									className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-white/10 transition-colors"
+									style={{ color: theme.colors.textMain }}
+								>
+									<FolderPlus className="w-3.5 h-3.5" style={{ color: theme.colors.accent }} />
+									<span>New Folder</span>
 								</button>
 								<button
 									onClick={onPreviewAllInFolder}

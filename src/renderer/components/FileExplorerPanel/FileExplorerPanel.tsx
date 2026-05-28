@@ -247,6 +247,7 @@ function FileExplorerPanelInner(props: FileExplorerPanelProps) {
 		setRenameValue,
 		handleRename,
 		openNewFileModal,
+		openNewFolderModal,
 		closeNewFileModal,
 		setNewFileValue,
 		handleCreateNewFile,
@@ -299,6 +300,7 @@ function FileExplorerPanelInner(props: FileExplorerPanelProps) {
 		handleOpenInMaestroBrowser,
 		handleOpenInExplorer,
 		handleOpenNewFile,
+		handleOpenNewFolder,
 		handleOpenRename,
 		handleOpenDelete,
 		handleFocusInGraph,
@@ -319,6 +321,7 @@ function FileExplorerPanelInner(props: FileExplorerPanelProps) {
 		openRenameModal,
 		openDeleteModal,
 		openNewFileModal,
+		openNewFolderModal,
 		setSelectedFileIndex,
 		selectedPathsRef,
 		setSelectedPaths,
@@ -761,6 +764,7 @@ function FileExplorerPanelInner(props: FileExplorerPanelProps) {
 					onOpenInMaestroBrowser={handleOpenInMaestroBrowser}
 					onOpenInExplorer={handleOpenInExplorer}
 					onOpenNewFile={handleOpenNewFile}
+					onOpenNewFolder={handleOpenNewFolder}
 					onPreviewFile={handlePreviewFile}
 					onPreviewAllInFolder={handlePreviewAllInFolder}
 					onPreviewMulti={handlePreviewMulti}
@@ -812,6 +816,7 @@ function FileExplorerPanelInner(props: FileExplorerPanelProps) {
 			{newFileModal && (
 				<NewFileModal
 					theme={theme}
+					kind={newFileModal.kind}
 					parentFolderLabel={
 						newFileModal.parentFolderPath
 							? `"${newFileModal.parentFolderPath}"`

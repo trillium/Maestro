@@ -908,6 +908,7 @@ interface MaestroAPI {
 			dataUrl: string,
 			sshRemoteId?: string
 		) => Promise<{ success: boolean }>;
+		mkdir: (dirPath: string, sshRemoteId?: string) => Promise<{ success: boolean }>;
 		stat: (
 			filePath: string,
 			sshRemoteId?: string

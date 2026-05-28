@@ -2100,6 +2100,8 @@ function MaestroConsoleInner() {
 		shortcuts,
 		activeFocus,
 		activeRightTab,
+		rightPanelOpen,
+		handleOpenBatchRunner,
 		sessions,
 		selectedSidebarIndex,
 		activeSessionId,

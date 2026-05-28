@@ -306,6 +306,13 @@ export function useMainKeyboardHandler(): UseMainKeyboardHandlerReturn {
 					!e.altKey &&
 					!e.shiftKey &&
 					(e.key === '=' || e.key === '+' || e.key === '-' || e.key === '0');
+				// Allow the openPromptComposer shortcut to fall through while the Prompt
+				// Composer is the open modal, so pressing it again cycles windowed ->
+				// full screen -> windowed (cyclePromptComposer) instead of being eaten
+				// by the modal guard below.
+				const isPromptComposerCycleShortcut =
+					ctx.isShortcut(e, 'openPromptComposer') &&
+					useModalStore.getState().modals.get('promptComposer')?.open === true;
 
 				if (ctx.hasOpenModal()) {
 					// TRUE MODAL is open - block most shortcuts from App.tsx
@@ -319,7 +326,8 @@ export function useMainKeyboardHandler(): UseMainKeyboardHandlerReturn {
 						!isJumpToBottomShortcut &&
 						!isJumpToTerminalShortcut &&
 						!isMarkdownToggleShortcut &&
-						!isFontSizeShortcut
+						!isFontSizeShortcut &&
+						!isPromptComposerCycleShortcut
 					) {
 						return;
 					}
@@ -684,12 +692,23 @@ export function useMainKeyboardHandler(): UseMainKeyboardHandlerReturn {
 					ctx.setChatRawTextMode(!ctx.chatRawTextMode);
 					trackShortcut('toggleMarkdownMode');
 				}
-			} else if (ctx.isShortcut(e, 'toggleAutoRunExpanded')) {
-				// Toggle Auto Run expanded/contracted view
+			} else if (ctx.isShortcut(e, 'openBatchRunner')) {
+				// Open the Auto Run run modal (BatchRunnerModal) - works from anywhere
 				e.preventDefault();
 				if (useSettingsStore.getState().autoRunDisabled) return;
-				ctx.rightPanelRef?.current?.toggleAutoRunExpanded();
-				trackShortcut('toggleAutoRunExpanded');
+				if (ctx.activeSession) {
+					ctx.handleOpenBatchRunner();
+					trackShortcut('openBatchRunner');
+				}
+			} else if (ctx.isShortcut(e, 'toggleAutoRunExpanded')) {
+				// Toggle Auto Run expanded/contracted view - only when the Auto Run
+				// side panel is open (right panel open with the autorun tab active).
+				e.preventDefault();
+				if (useSettingsStore.getState().autoRunDisabled) return;
+				if (ctx.rightPanelOpen && ctx.activeRightTab === 'autorun') {
+					ctx.rightPanelRef?.current?.toggleAutoRunExpanded();
+					trackShortcut('toggleAutoRunExpanded');
+				}
 			} else if (ctx.isShortcut(e, 'jumpToTerminal')) {
 				e.preventDefault();
 				if (ctx.activeSession && !ctx.activeGroupChatId) {
@@ -1226,6 +1245,18 @@ export function useMainKeyboardHandler(): UseMainKeyboardHandlerReturn {
 					} else {
 						ctx.mainPanelRef?.current?.browserForward();
 					}
+					return;
+				}
+				// Cmd+Shift+, / Cmd+Shift+. forwarded from the webview guest →
+				// breadcrumb back/forward through visited tabs. Handled directly
+				// because a synthetic window event from a focused webview doesn't
+				// reliably reach the navBack/navForward branch of the window handler.
+				if (ctx.isShortcut(probe, 'navBack')) {
+					ctx.handleNavBack();
+					return;
+				}
+				if (ctx.isShortcut(probe, 'navForward')) {
+					ctx.handleNavForward();
 					return;
 				}
 			}

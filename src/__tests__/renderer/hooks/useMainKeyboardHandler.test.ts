@@ -3244,5 +3244,94 @@ describe('useMainKeyboardHandler', () => {
 			expect(focusBrowserAddressBar).not.toHaveBeenCalled();
 			expect(dispatched.find((e) => e.key === 'f' && e.metaKey)).toBeUndefined();
 		});
+
+		it('routes forwarded Cmd+Shift+, to handleNavBack without re-dispatching', () => {
+			let ipcCallback: ((input: Record<string, unknown>) => void) | null = null;
+			(window as any).maestro = {
+				...(window as any).maestro,
+				app: {
+					...((window as any).maestro?.app ?? {}),
+					onBrowserTabShortcutKey: (cb: (input: Record<string, unknown>) => void) => {
+						ipcCallback = cb;
+						return () => {
+							ipcCallback = null;
+						};
+					},
+				},
+			};
+
+			const { result } = renderHook(() => useMainKeyboardHandler());
+			const handleNavBack = vi.fn();
+			const handleNavForward = vi.fn();
+			result.current.keyboardHandlerRef.current = createMockContext({
+				activeSession: { id: 's1', activeBrowserTabId: 'b1' },
+				isTabShortcut: () => false,
+				isShortcut: (_e: unknown, id: string) => id === 'navBack',
+				handleNavBack,
+				handleNavForward,
+			});
+
+			const dispatched: KeyboardEvent[] = [];
+			const listener = (e: Event) => dispatched.push(e as KeyboardEvent);
+			originalAddEventListener.call(window, 'keydown', listener);
+
+			act(() => {
+				ipcCallback!({
+					key: '<',
+					code: 'Comma',
+					meta: true,
+					control: false,
+					alt: false,
+					shift: true,
+				});
+			});
+
+			originalRemoveEventListener.call(window, 'keydown', listener);
+
+			expect(handleNavBack).toHaveBeenCalledTimes(1);
+			expect(handleNavForward).not.toHaveBeenCalled();
+			expect(dispatched.find((e) => (e.key === '<' || e.key === ',') && e.metaKey)).toBeUndefined();
+		});
+
+		it('routes forwarded Cmd+Shift+. to handleNavForward without re-dispatching', () => {
+			let ipcCallback: ((input: Record<string, unknown>) => void) | null = null;
+			(window as any).maestro = {
+				...(window as any).maestro,
+				app: {
+					...((window as any).maestro?.app ?? {}),
+					onBrowserTabShortcutKey: (cb: (input: Record<string, unknown>) => void) => {
+						ipcCallback = cb;
+						return () => {
+							ipcCallback = null;
+						};
+					},
+				},
+			};
+
+			const { result } = renderHook(() => useMainKeyboardHandler());
+			const handleNavBack = vi.fn();
+			const handleNavForward = vi.fn();
+			result.current.keyboardHandlerRef.current = createMockContext({
+				activeSession: { id: 's1', activeBrowserTabId: 'b1' },
+				isTabShortcut: () => false,
+				isShortcut: (_e: unknown, id: string) => id === 'navForward',
+				handleNavBack,
+				handleNavForward,
+			});
+
+			act(() => {
+				ipcCallback!({
+					key: '>',
+					code: 'Period',
+					meta: true,
+					control: false,
+					alt: false,
+					shift: true,
+				});
+			});
+
+			expect(handleNavForward).toHaveBeenCalledTimes(1);
+			expect(handleNavBack).not.toHaveBeenCalled();
+		});
 	});
 });

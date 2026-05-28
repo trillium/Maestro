@@ -48,7 +48,7 @@ import { generateId } from '../utils/ids';
 import { formatMetaKey } from '../utils/shortcutFormatter';
 import { logger } from '../utils/logger';
 import { resolveEffectiveContextWindow } from '../utils/contextWindowResolver';
-import { PER_DOCUMENT_CONTEXT_THRESHOLD } from '../../shared/agentConstants';
+import { getModelContextWindowOverride } from '../../shared/agentConstants';
 import { formatTokens } from '../../shared/formatters';
 
 // Re-export for external consumers
@@ -353,15 +353,12 @@ export function BatchRunnerModal(props: BatchRunnerModalProps) {
 		onApplyPlaybook: handleApplyPlaybook,
 	});
 
-	// Auto-pick the fresh-context mode from the active agent's context window the
-	// first time the modal opens on a blank config (no loaded playbook). Windows
-	// at/above the per-document threshold (Claude 1M, etc.) default to walking the
-	// whole document in one shared context; smaller windows default to per-task.
-	// A loaded playbook's saved mode and any manual toggle take precedence — this
-	// only seeds the initial default, and updating the ref keeps it non-dirty.
+	// Resolve the active agent's context window the first time the modal opens on
+	// a blank config (no loaded playbook). The resolved window drives the
+	// task-count recommendation's scaling threshold; the Task/Document choice
+	// itself is owned by that recommendation (see the auto-apply effect below),
+	// not a raw window-size cutoff.
 	const autoModeAppliedRef = useRef(false);
-	const loadedPlaybookRef = useRef(loadedPlaybook);
-	loadedPlaybookRef.current = loadedPlaybook;
 	useEffect(() => {
 		if (autoModeAppliedRef.current) return;
 		// A playbook supplies its own mode — don't second-guess it.
@@ -380,19 +377,18 @@ export function BatchRunnerModal(props: BatchRunnerModalProps) {
 				(max, tab) => Math.max(max, tab.usageStats?.contextWindow ?? 0),
 				0
 			);
-			const contextWindow = Math.max(configured, reported);
+			// Honor a per-tab `[1m]` model selection before any usage is reported;
+			// the resolver already covers session- and agent-level model overrides.
+			const tabModelWindow = activeSession.aiTabs.reduce(
+				(max, tab) => Math.max(max, getModelContextWindowOverride(tab.customModel) ?? 0),
+				0
+			);
+			const contextWindow = Math.max(configured, reported, tabModelWindow);
 			if (!active) return;
 			// Expose the resolved window so the task-count recommendation can
 			// scale its tasks/doc threshold (5 at 256K → 20 at 1M).
 			setEffectiveContextWindow(contextWindow);
-			// Re-check via refs: a playbook may have loaded (or the auto-pick may
-			// have already run) while the agent config IPC was in flight.
-			if (autoModeAppliedRef.current || loadedPlaybookRef.current) return;
-			const mode: TaskSelectionMode =
-				contextWindow >= PER_DOCUMENT_CONTEXT_THRESHOLD ? 'document' : 'task';
 			autoModeAppliedRef.current = true;
-			setTaskSelectionMode(mode);
-			initialTaskSelectionModeRef.current = mode;
 		})();
 		return () => {
 			active = false;

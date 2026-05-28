@@ -140,6 +140,11 @@ vi.mock('lucide-react', () => ({
 			➕
 		</span>
 	),
+	FolderPlus: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
+		<span data-testid="folder-plus-icon" className={className} style={style}>
+			📁
+		</span>
+	),
 	Files: ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
 		<span data-testid="files-icon" className={className} style={style}>
 			🗂️

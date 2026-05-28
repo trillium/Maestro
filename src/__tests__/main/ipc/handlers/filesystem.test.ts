@@ -28,6 +28,7 @@ vi.mock('fs/promises', () => ({
 		stat: vi.fn(),
 		writeFile: vi.fn(),
 		rename: vi.fn(),
+		mkdir: vi.fn(),
 		rm: vi.fn(),
 		unlink: vi.fn(),
 	},
@@ -50,6 +51,7 @@ vi.mock('../../../../main/utils/remote-fs', () => ({
 	statRemote: vi.fn(),
 	directorySizeRemote: vi.fn(),
 	renameRemote: vi.fn(),
+	mkdirRemote: vi.fn(),
 	deleteRemote: vi.fn(),
 	countItemsRemote: vi.fn(),
 	writeFileRemote: vi.fn(),
@@ -70,6 +72,7 @@ import {
 	directorySizeRemote,
 	countItemsRemote,
 	renameRemote,
+	mkdirRemote,
 	deleteRemote,
 	writeFileRemote,
 } from '../../../../main/utils/remote-fs';
@@ -95,6 +98,7 @@ describe('filesystem handlers', () => {
 			expect(ipcMain.handle).toHaveBeenCalledWith('fs:writeFile', expect.any(Function));
 			expect(ipcMain.handle).toHaveBeenCalledWith('fs:writeImageFile', expect.any(Function));
 			expect(ipcMain.handle).toHaveBeenCalledWith('fs:rename', expect.any(Function));
+			expect(ipcMain.handle).toHaveBeenCalledWith('fs:mkdir', expect.any(Function));
 			expect(ipcMain.handle).toHaveBeenCalledWith('fs:delete', expect.any(Function));
 			expect(ipcMain.handle).toHaveBeenCalledWith('fs:countItems', expect.any(Function));
 			expect(ipcMain.handle).toHaveBeenCalledWith('fs:fetchImageAsBase64', expect.any(Function));
@@ -491,6 +495,30 @@ describe('filesystem handlers', () => {
 			const result = await handler!({}, '/old/path.txt', '/new/path.txt', 'remote-1');
 
 			expect(renameRemote).toHaveBeenCalledWith('/old/path.txt', '/new/path.txt', mockSshConfig);
+			expect(result).toEqual({ success: true });
+		});
+	});
+
+	describe('fs:mkdir', () => {
+		it('should create local directories recursively', async () => {
+			vi.mocked(fs.mkdir).mockResolvedValue(undefined);
+
+			const handler = registeredHandlers.get('fs:mkdir');
+			const result = await handler!({}, '/test/newdir');
+
+			expect(fs.mkdir).toHaveBeenCalledWith('/test/newdir', { recursive: true });
+			expect(result).toEqual({ success: true });
+		});
+
+		it('should create remote directories via SSH', async () => {
+			const mockSshConfig = { id: 'remote-1', host: 'server.com', username: 'user' };
+			vi.mocked(getSshRemoteById).mockReturnValue(mockSshConfig as any);
+			vi.mocked(mkdirRemote).mockResolvedValue({ success: true });
+
+			const handler = registeredHandlers.get('fs:mkdir');
+			const result = await handler!({}, '/remote/newdir', 'remote-1');
+
+			expect(mkdirRemote).toHaveBeenCalledWith('/remote/newdir', mockSshConfig, true);
 			expect(result).toEqual({ success: true });
 		});
 	});

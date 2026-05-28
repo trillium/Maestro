@@ -51,6 +51,7 @@ const defaultProps = {
 	onOpenInMaestroBrowser: vi.fn(),
 	onOpenInExplorer: vi.fn(),
 	onOpenNewFile: vi.fn(),
+	onOpenNewFolder: vi.fn(),
 	onPreviewFile: vi.fn(),
 	onPreviewAllInFolder: vi.fn(),
 	onPreviewMulti: vi.fn(),
@@ -86,6 +87,7 @@ describe('FileTreeContextMenu', () => {
 	it('shows New File + Preview all + Copy Path + Reveal + Rename + Delete for a folder', () => {
 		render(<FileTreeContextMenu {...defaultProps} contextMenu={makeContextMenu(folderNode)} />);
 		expect(screen.getByText('New File')).toBeTruthy();
+		expect(screen.getByText('New Folder')).toBeTruthy();
 		expect(screen.getByText('Preview all files under Folder')).toBeTruthy();
 		expect(screen.getByText('Copy Path')).toBeTruthy();
 		expect(screen.queryByText('Preview')).toBeNull();

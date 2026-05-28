@@ -75,7 +75,8 @@ Tips and gotchas:
 | Go to History Tab              | `Cmd+Shift+H` | `Ctrl+Shift+H` |
 | Go to Auto Run Tab             | `Cmd+Shift+1` | `Ctrl+Shift+1` |
 | Toggle Edit/Preview (Markdown) | `Cmd+E`       | `Ctrl+E`       |
-| Auto Run Expanded Preview      | `Cmd+Shift+2` | `Ctrl+Shift+2` |
+| Run Auto Run                   | `Cmd+Shift+2` | `Ctrl+Shift+2` |
+| Auto Run Expanded Preview      | `Cmd+Shift+E` | `Ctrl+Shift+E` |
 | Insert Checkbox (Auto Run)     | `Cmd+L`       | `Ctrl+L`       |
 | View Git Diff                  | `Cmd+Shift+D` | `Ctrl+Shift+D` |
 | View Git Log                   | `Cmd+Shift+G` | `Ctrl+Shift+G` |

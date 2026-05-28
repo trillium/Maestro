@@ -69,6 +69,7 @@ export interface MultiDeleteModalState {
 }
 
 export interface NewFileModalState {
+	kind: 'file' | 'folder';
 	parentFolderPath: string;
 	parentFolderAbsolutePath: string;
 }

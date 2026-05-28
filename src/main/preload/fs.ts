@@ -131,6 +131,12 @@ export function createFsApi() {
 			ipcRenderer.invoke('fs:writeImageFile', filePath, dataUrl, sshRemoteId),
 
 		/**
+		 * Create a directory (recursive)
+		 */
+		mkdir: (dirPath: string, sshRemoteId?: string): Promise<{ success: boolean }> =>
+			ipcRenderer.invoke('fs:mkdir', dirPath, sshRemoteId),
+
+		/**
 		 * Get file/directory stats
 		 */
 		stat: (filePath: string, sshRemoteId?: string): Promise<FileStat> =>
