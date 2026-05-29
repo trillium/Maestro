@@ -298,26 +298,28 @@ describe('QuickActions command builders', () => {
 			}).map((a) => a.id)
 		).toContain('maestro-cue');
 
-		expect(
-			buildSupportCommands({
-				setQuickActionOpen: close,
-				setSettingsModalOpen: vi.fn(),
-				setSettingsTab: vi.fn(),
-				setShortcutsHelpOpen: vi.fn(),
-				setAboutModalOpen: vi.fn(),
-				setFeedbackModalOpen: vi.fn(),
-				setLogViewerOpen: vi.fn(),
-				setProcessMonitorOpen: vi.fn(),
-				setUpdateCheckModalOpen: vi.fn(),
-				setDebugPackageModalOpen: vi.fn(),
-				getFeedbackDraft: () => ({ isMinimized: false, setMinimized: vi.fn() }),
-				createDebugPackage: vi.fn(),
-				notifyToast: vi.fn(),
-				openUrl: vi.fn(),
-				toggleDevtools: vi.fn(),
-				shortcuts: {},
-			}).map((a) => a.id)
-		).toContain('createDebugPackage');
+		const supportIds = buildSupportCommands({
+			setQuickActionOpen: close,
+			setSettingsModalOpen: vi.fn(),
+			setSettingsTab: vi.fn(),
+			setShortcutsHelpOpen: vi.fn(),
+			setAboutModalOpen: vi.fn(),
+			onOpenLeaderboardRegistration: vi.fn(),
+			isLeaderboardRegistered: false,
+			setFeedbackModalOpen: vi.fn(),
+			setLogViewerOpen: vi.fn(),
+			setProcessMonitorOpen: vi.fn(),
+			setUpdateCheckModalOpen: vi.fn(),
+			setDebugPackageModalOpen: vi.fn(),
+			getFeedbackDraft: () => ({ isMinimized: false, setMinimized: vi.fn() }),
+			createDebugPackage: vi.fn(),
+			notifyToast: vi.fn(),
+			openUrl: vi.fn(),
+			toggleDevtools: vi.fn(),
+			shortcuts: {},
+		}).map((a) => a.id);
+		expect(supportIds).toContain('createDebugPackage');
+		expect(supportIds).toContain('leaderboard');
 
 		const debugCommandIds = buildDebugCommands({
 			activeSession: createMockSession({
