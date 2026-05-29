@@ -8,6 +8,7 @@ import * as path from 'path';
 import { ProcessManager } from '../../process-manager';
 import { AgentDetector } from '../../agents';
 import type { InteractiveReplayController } from '../../agents/claude-interactive-replay';
+import { stripThinkingFromTranscript } from '../../agents/claude-transcript-sanitizer';
 import type { ProcessConfig as ProcessSpawnConfig } from '../../process-manager/types';
 import { logger } from '../../utils/logger';
 import { selectMode } from '../../agents/claude-mode-selector';
@@ -36,7 +37,7 @@ import { shellEscape } from '../../utils/shell-escape';
 import { buildSshCommandWithStdin } from '../../utils/ssh-command-builder';
 import { buildStreamJsonMessage } from '../../process-manager/utils/streamJsonBuilder';
 import { getWindowsShellForAgentExecution } from '../../process-manager/utils/shellEscape';
-import { buildExpandedEnv } from '../../../shared/pathUtils';
+import { buildExpandedEnv, encodeClaudeProjectPath } from '../../../shared/pathUtils';
 import { resolveSshPath } from '../../utils/cliDetection';
 import type { SshRemoteConfig } from '../../../shared/types';
 import { powerManager } from '../../power-manager';
@@ -56,6 +57,48 @@ const handlerOpts = (
 	operation,
 	...extra,
 });
+
+/**
+ * Strip subscription-account thinking blocks from a Claude Code transcript before
+ * an API-mode `--resume` re-sends them.
+ *
+ * Interactive (maestro-p) turns persist thinking as signature-only shells bound
+ * to the Max-plan subscription account. Resuming them under the API token source
+ * trips Anthropic's "thinking blocks cannot be modified" 400 and poisons the
+ * conversation for every later `--resume`. Stripping is benign (thinking is
+ * ephemeral reasoning) and the only thing that resumes cleanly across the mode
+ * switch. Best-effort: a failure here just means the resume might still hit the
+ * 400, so it must never abort the spawn.
+ */
+function sanitizeClaudeTranscriptBeforeApiResume(args: {
+	configDirKey: string;
+	cwd: string;
+	agentSessionId: string;
+	sessionId: string;
+}): void {
+	const { configDirKey, cwd, agentSessionId, sessionId } = args;
+	try {
+		const transcriptPath = path.join(
+			configDirKey,
+			'projects',
+			encodeClaudeProjectPath(cwd),
+			`${agentSessionId}.jsonl`
+		);
+		const result = stripThinkingFromTranscript(transcriptPath);
+		if (result.sanitized) {
+			logger.info('Sanitized transcript thinking blocks before API resume', LOG_CONTEXT, {
+				sessionId,
+				droppedRows: result.droppedRows,
+				strippedBlocks: result.strippedBlocks,
+			});
+		}
+	} catch (err) {
+		logger.warn('Failed to sanitize transcript before API resume; continuing', LOG_CONTEXT, {
+			sessionId,
+			error: (err as Error).message,
+		});
+	}
+}
 
 // AgentConfigsData imported from stores/types
 
@@ -336,6 +379,26 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 						maestroPBin: resolvedMaestroPBinPath,
 						claudeRealBin: claudeRealBinPath,
 						configDirKey: resolvedConfigDirKey,
+					});
+				}
+
+				// Resuming a Claude Code conversation under the API token source? Strip
+				// any subscription-account thinking blocks first. `resolvedConfigDirKey`
+				// is only set when this session uses Adaptive Mode (or previously ran
+				// interactive), i.e. the only cases where the transcript can contain
+				// cross-account thinking blocks that would trip the 400. Pure-API
+				// sessions (key unset) keep their validly-signed thinking blocks.
+				if (
+					claudeResolvedMode === 'api' &&
+					config.agentSessionId &&
+					resolvedConfigDirKey &&
+					isClaudeCode
+				) {
+					sanitizeClaudeTranscriptBeforeApiResume({
+						configDirKey: resolvedConfigDirKey,
+						cwd: config.cwd,
+						agentSessionId: config.agentSessionId,
+						sessionId: config.sessionId,
 					});
 				}
 
@@ -989,6 +1052,18 @@ export function registerProcessHandlers(deps: ProcessHandlerDependencies): void 
 								}
 							} catch {
 								// Best-effort: stale agentSessionId is fine; resume will fall back to a new session.
+							}
+
+							// Sanitize the transcript we're about to `--resume` before the API
+							// turn re-sends it (see helper for the full thinking-block 400
+							// rationale). Best-effort: a failure must not abort the replay.
+							if (freshAgentSessionId) {
+								sanitizeClaudeTranscriptBeforeApiResume({
+									configDirKey: resolvedConfigDirKey,
+									cwd: originalConfig.cwd,
+									agentSessionId: freshAgentSessionId,
+									sessionId: originalConfig.sessionId,
+								});
 							}
 
 							const apiArgs = buildAgentArgs(originalAgent, {

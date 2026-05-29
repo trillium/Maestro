@@ -562,7 +562,7 @@ export const SETTINGS_METADATA: Record<string, SettingMetadata> = {
 	maxOutputLines: {
 		description: 'Maximum lines of agent output displayed per message before truncation.',
 		type: 'number',
-		default: 25,
+		default: Infinity,
 		category: 'logging',
 	},
 	logViewerSelectedLevels: {
