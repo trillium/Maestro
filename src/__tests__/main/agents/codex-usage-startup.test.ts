@@ -3,7 +3,8 @@
  *
  * Covers review-sensitive behavior:
  *   - corrupted CODEX_HOME values fall back to the default account home
- *   - one account failure does not cancel sampling for the rest of the batch
+ *   - recoverable account failures do not cancel sampling for the rest of the batch
+ *   - unexpected account failures are reported after the rest of the batch runs
  *   - discovery only swallows expected missing/unreadable auth.json errors
  */
 
@@ -216,10 +217,11 @@ describe('codex-usage-startup → runCodexUsageSampling', () => {
 		expect(getAllCodexUsageSnapshots()).toHaveProperty('/Users/test/.codex');
 	});
 
-	it('continues sampling other accounts when one account throws unexpectedly', async () => {
+	it('continues sampling other accounts when one account throws a recoverable error', async () => {
+		const recoverable = Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' });
 		sampleCodexUsageMock.mockImplementation(async ({ codexHome }: { codexHome: string }) => {
 			if (codexHome === '/Users/test/.codex-broken') {
-				throw new Error('boom');
+				throw recoverable;
 			}
 			return makeSnapshot(codexHome);
 		});
@@ -249,8 +251,60 @@ describe('codex-usage-startup → runCodexUsageSampling', () => {
 		expect(sampleCodexUsageMock).toHaveBeenCalledTimes(2);
 		expect(snapshots).toHaveProperty('/Users/test/.codex-good');
 		expect(snapshots).not.toHaveProperty('/Users/test/.codex-broken');
+		expect(captureExceptionMock).not.toHaveBeenCalled();
 		expect(loggerWarnMock).toHaveBeenCalledWith(
 			expect.stringContaining('Failed to sample Codex usage snapshot'),
+			expect.any(String),
+			expect.objectContaining({
+				codexHomeKey: '/Users/test/.codex-broken',
+				error: 'timed out',
+			})
+		);
+	});
+
+	it('samples remaining accounts before surfacing unexpected account errors', async () => {
+		const unexpected = new Error('boom');
+		sampleCodexUsageMock.mockImplementation(async ({ codexHome }: { codexHome: string }) => {
+			if (codexHome === '/Users/test/.codex-broken') {
+				throw unexpected;
+			}
+			return makeSnapshot(codexHome);
+		});
+
+		await expect(
+			runCodexUsageSampling({
+				sessionsStore: makeStore({
+					sessions: [
+						{
+							id: 'codex-good',
+							toolType: 'codex',
+							cwd: '/tmp',
+							customEnvVars: { CODEX_HOME: '/Users/test/.codex-good' },
+						},
+						{
+							id: 'codex-broken',
+							toolType: 'codex',
+							cwd: '/tmp',
+							customEnvVars: { CODEX_HOME: '/Users/test/.codex-broken' },
+						},
+					],
+				}) as never,
+				agentConfigsStore: makeStore({ configs: {} }) as never,
+				agentDetector: makeDetector(FAKE_AGENT) as never,
+			})
+		).rejects.toThrow('boom');
+
+		const snapshots = getAllCodexUsageSnapshots();
+		expect(sampleCodexUsageMock).toHaveBeenCalledTimes(2);
+		expect(snapshots).toHaveProperty('/Users/test/.codex-good');
+		expect(snapshots).not.toHaveProperty('/Users/test/.codex-broken');
+		expect(captureExceptionMock).toHaveBeenCalledWith(unexpected, {
+			operation: 'codexUsage:runCodexUsageSampling.sample',
+			codexHome: '/Users/test/.codex-broken',
+			codexHomeKey: '/Users/test/.codex-broken',
+		});
+		expect(loggerWarnMock).toHaveBeenCalledWith(
+			expect.stringContaining('Unexpected failure while sampling Codex usage snapshot'),
 			expect.any(String),
 			expect.objectContaining({
 				codexHomeKey: '/Users/test/.codex-broken',

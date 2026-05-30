@@ -34,9 +34,31 @@ interface SamplingTarget {
 
 const ACCOUNT_DIR_EXCLUDE_RE =
 	/(^|[-_.])(backup|bak|old|archive|archived|stage|local|server)([-_.]|$)/i;
+const RECOVERABLE_SAMPLE_ERROR_CODES = new Set([
+	'ENOENT',
+	'EACCES',
+	'ENOTDIR',
+	'ECONNRESET',
+	'ECONNREFUSED',
+	'ENOTFOUND',
+	'ETIMEDOUT',
+	'EAI_AGAIN',
+]);
 
 function isLikelyCodexAccountDirName(name: string): boolean {
 	return name === '.codex' || name.startsWith('.codex-');
+}
+
+function getErrorCode(err: unknown): string | undefined {
+	if (!err || typeof err !== 'object' || !('code' in err)) return undefined;
+	const code = (err as { code?: unknown }).code;
+	return typeof code === 'string' ? code : undefined;
+}
+
+function isRecoverableSampleError(err: unknown): boolean {
+	const code = getErrorCode(err);
+	if (code && RECOVERABLE_SAMPLE_ERROR_CODES.has(code)) return true;
+	return err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
 }
 
 /**
@@ -146,7 +168,7 @@ export async function runCodexUsageSampling(deps: CodexUsageSamplingDeps): Promi
 		accounts: Array.from(targetsByKey.keys()),
 	});
 
-	await Promise.all(
+	const results = await Promise.allSettled(
 		Array.from(targetsByKey.values()).map(async (target) => {
 			try {
 				const snapshot = await sampleCodexUsage({ codexHome: target.codexHome });
@@ -158,11 +180,30 @@ export async function runCodexUsageSampling(deps: CodexUsageSamplingDeps): Promi
 					weeklyPercent: snapshot.weekly?.percent,
 				});
 			} catch (err) {
-				logger.warn('Failed to sample Codex usage snapshot', LOG_CONTEXT, {
+				const error = err instanceof Error ? err : new Error(String(err));
+				const context = {
 					codexHomeKey: target.codexHomeKey,
-					error: err instanceof Error ? err.message : String(err),
+					error: error.message,
+				};
+				if (isRecoverableSampleError(err)) {
+					logger.warn('Failed to sample Codex usage snapshot', LOG_CONTEXT, context);
+					return;
+				}
+				logger.warn('Unexpected failure while sampling Codex usage snapshot', LOG_CONTEXT, context);
+				void captureException(error, {
+					operation: 'codexUsage:runCodexUsageSampling.sample',
+					codexHome: target.codexHome,
+					codexHomeKey: target.codexHomeKey,
 				});
+				throw error;
 			}
 		})
 	);
+
+	const unexpectedFailure = results.find(
+		(result): result is PromiseRejectedResult => result.status === 'rejected'
+	);
+	if (unexpectedFailure) {
+		throw unexpectedFailure.reason;
+	}
 }
