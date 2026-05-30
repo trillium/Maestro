@@ -312,6 +312,12 @@ export function UsageDashboardModal({
 	const switchViewMode = useCallback((mode: ViewMode) => {
 		setViewMode(mode);
 		setFocusedSection(null);
+		// Anchor the newly selected tab to the top. The scroll container
+		// (contentRef) persists across tab switches, so without this the new
+		// tab would inherit the previous tab's scroll position.
+		if (contentRef.current) {
+			contentRef.current.scrollTop = 0;
+		}
 	}, []);
 
 	// Handle Cmd+Shift+[ and Cmd+Shift+] for tab navigation

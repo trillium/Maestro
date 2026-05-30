@@ -262,6 +262,9 @@ export interface QueuedItem {
 	readOnlyMode?: boolean; // True if queued from a read-only tab
 	// Force parallel: dispatches immediately when this tab finishes, skipping cross-tab wait
 	forceParallel?: boolean;
+	// Held/paused: kept in the queue (preserving order) but skipped by every
+	// dispatch path until the user resumes it. See utils/executionQueue.ts.
+	paused?: boolean;
 }
 
 export interface WorkLogItem {

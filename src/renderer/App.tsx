@@ -1410,6 +1410,15 @@ function MaestroConsoleInner() {
 		}));
 	}, []);
 
+	const handleToggleQueuedItemPause = useCallback((itemId: string) => {
+		updateSessionWith(activeSessionIdRef.current, (s) => ({
+			...s,
+			executionQueue: s.executionQueue.map((item) =>
+				item.id === itemId ? { ...item, paused: !item.paused } : item
+			),
+		}));
+	}, []);
+
 	// toggleBookmark — provided by useSessionCrud hook
 
 	const handleFocusFileInGraph = useFileExplorerStore.getState().focusFileInGraph;
@@ -2087,8 +2096,12 @@ function MaestroConsoleInner() {
 	});
 
 	// Queue browser handlers — extracted to useQueueHandlers hook
-	const { handleRemoveQueueItem, handleSwitchQueueSession, handleReorderQueueItems } =
-		useQueueHandlers();
+	const {
+		handleRemoveQueueItem,
+		handleSwitchQueueSession,
+		handleReorderQueueItems,
+		handleTogglePauseQueueItem,
+	} = useQueueHandlers();
 
 	// Symphony contribution handler — extracted to useSymphonyContribution hook
 	const { handleStartContribution } = useSymphonyContribution({
@@ -2428,6 +2441,7 @@ function MaestroConsoleInner() {
 		handleStopBatchRun,
 		handleDeleteLog,
 		handleRemoveQueuedItem,
+		handleToggleQueuedItemPause,
 		handleForceSendQueuedItem,
 		forcedParallelEnabled: settings.forcedParallelExecution,
 		getForceSendContext,
@@ -2999,6 +3013,7 @@ function MaestroConsoleInner() {
 					onRemoveQueueItem={handleRemoveQueueItem}
 					onSwitchQueueSession={handleSwitchQueueSession}
 					onReorderQueueItems={handleReorderQueueItems}
+					onTogglePauseQueueItem={handleTogglePauseQueueItem}
 					// AppGroupChatModals props
 					onCloseNewGroupChatModal={handleCloseNewGroupChatModal}
 					onCreateGroupChat={handleCreateGroupChat}

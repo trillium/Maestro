@@ -344,6 +344,7 @@ export interface AppModalsProps {
 	onRemoveQueueItem: (sessionId: string, itemId: string) => void;
 	onSwitchQueueSession: (sessionId: string, tabId?: string) => void;
 	onReorderQueueItems: (sessionId: string, fromIndex: number, toIndex: number) => void;
+	onTogglePauseQueueItem: (sessionId: string, itemId: string) => void;
 	// New tab creation (for QuickActionsModal)
 	onQuickActionsNewTab?: () => void;
 	onQuickActionsNewFileTab?: () => void;
@@ -753,6 +754,7 @@ export const AppModals = memo(function AppModals(props: AppModalsProps) {
 		onRemoveQueueItem,
 		onSwitchQueueSession,
 		onReorderQueueItems,
+		onTogglePauseQueueItem,
 		onQuickActionsNewTab,
 		onQuickActionsNewFileTab,
 		onQuickActionsNewBrowserTab,
@@ -1105,6 +1107,7 @@ export const AppModals = memo(function AppModals(props: AppModalsProps) {
 				onRemoveQueueItem={onRemoveQueueItem}
 				onSwitchQueueSession={onSwitchQueueSession}
 				onReorderQueueItems={onReorderQueueItems}
+				onTogglePauseQueueItem={onTogglePauseQueueItem}
 			/>
 
 			{/* Group Chat Modals */}
