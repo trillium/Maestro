@@ -181,7 +181,11 @@ describe('CueModal', () => {
 	const mockOnClose = vi.fn();
 
 	afterEach(() => {
-		useCueDirtyStore.setState({ pipelineDirty: false, yamlDirty: false });
+		useCueDirtyStore.setState({
+			pipelineDirty: false,
+			yamlDirty: false,
+			pipelineSaving: false,
+		});
 	});
 
 	beforeEach(() => {
@@ -624,6 +628,39 @@ describe('CueModal', () => {
 			layerConfig.onEscape();
 
 			// Should close without confirmation
+			expect(mockOnClose).toHaveBeenCalledOnce();
+		});
+
+		it('should close without confirmation when a save is in flight (X button)', () => {
+			render(<CueModal theme={mockTheme} onClose={mockOnClose} />);
+
+			// Pipeline is still dirty (save hasn't completed) but pipelineSaving
+			// is true — the user clicked Save and now wants to dismiss the modal
+			// while the IPC round-trip continues in the background.
+			act(() => {
+				useCueDirtyStore.getState().setPipelineDirty(true);
+				useCueDirtyStore.getState().setPipelineSaving(true);
+			});
+
+			const closeButton = screen.getByLabelText('Close');
+			fireEvent.click(closeButton);
+
+			expect(mockShowConfirmation).not.toHaveBeenCalled();
+			expect(mockOnClose).toHaveBeenCalledOnce();
+		});
+
+		it('should close without confirmation when a save is in flight (escape)', () => {
+			render(<CueModal theme={mockTheme} onClose={mockOnClose} />);
+
+			act(() => {
+				useCueDirtyStore.getState().setPipelineDirty(true);
+				useCueDirtyStore.getState().setPipelineSaving(true);
+			});
+
+			const layerConfig = mockRegisterLayer.mock.calls[0][0];
+			layerConfig.onEscape();
+
+			expect(mockShowConfirmation).not.toHaveBeenCalled();
 			expect(mockOnClose).toHaveBeenCalledOnce();
 		});
 	});

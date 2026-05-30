@@ -246,6 +246,25 @@ describe('Filesystem Preload API', () => {
 		});
 	});
 
+	describe('mkdir', () => {
+		it('should invoke fs:mkdir with dirPath', async () => {
+			mockInvoke.mockResolvedValue({ success: true });
+
+			const result = await api.mkdir('/home/user/newdir');
+
+			expect(mockInvoke).toHaveBeenCalledWith('fs:mkdir', '/home/user/newdir', undefined);
+			expect(result.success).toBe(true);
+		});
+
+		it('should invoke fs:mkdir with SSH remote', async () => {
+			mockInvoke.mockResolvedValue({ success: true });
+
+			await api.mkdir('/home/user/newdir', 'remote-1');
+
+			expect(mockInvoke).toHaveBeenCalledWith('fs:mkdir', '/home/user/newdir', 'remote-1');
+		});
+	});
+
 	describe('delete', () => {
 		it('should invoke fs:delete with targetPath', async () => {
 			mockInvoke.mockResolvedValue({ success: true });

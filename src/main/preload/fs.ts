@@ -119,6 +119,24 @@ export function createFsApi() {
 			ipcRenderer.invoke('fs:writeFile', filePath, content, sshRemoteId),
 
 		/**
+		 * Write a base64 data URL (e.g. `data:image/png;base64,...`) to disk as
+		 * raw binary. Use this for images/binary payloads; `writeFile` encodes
+		 * content as UTF-8 and would corrupt binary data.
+		 */
+		writeImageFile: (
+			filePath: string,
+			dataUrl: string,
+			sshRemoteId?: string
+		): Promise<{ success: boolean }> =>
+			ipcRenderer.invoke('fs:writeImageFile', filePath, dataUrl, sshRemoteId),
+
+		/**
+		 * Create a directory (recursive)
+		 */
+		mkdir: (dirPath: string, sshRemoteId?: string): Promise<{ success: boolean }> =>
+			ipcRenderer.invoke('fs:mkdir', dirPath, sshRemoteId),
+
+		/**
 		 * Get file/directory stats
 		 */
 		stat: (filePath: string, sshRemoteId?: string): Promise<FileStat> =>

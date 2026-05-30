@@ -33,7 +33,7 @@ import type {
 	IncomingAgentEdgeInfo,
 } from '../../../shared/cue-pipeline-types';
 import { CUE_COLOR } from '../../../shared/cue-pipeline-types';
-import { Hand, MousePointer2 } from 'lucide-react';
+import { Hand, MousePointer2, LayoutGrid } from 'lucide-react';
 import { TriggerNode, type TriggerNodeDataProps } from './nodes/TriggerNode';
 import { AgentNode, type AgentNodeDataProps } from './nodes/AgentNode';
 import { CommandNode, type CommandNodeDataProps } from './nodes/CommandNode';
@@ -185,6 +185,9 @@ export interface PipelineCanvasProps {
 	/** True when the canvas is locked for editing (drag/select/connect disabled). */
 	isLocked: boolean;
 	setIsLocked: React.Dispatch<React.SetStateAction<boolean>>;
+	/** Open the auto-arrange confirmation. Button hidden when there's nothing
+	 *  to arrange (no nodes) or while pipelines are still loading. */
+	onAutoArrange: () => void;
 }
 
 export const PipelineCanvas = React.memo(function PipelineCanvas({
@@ -244,6 +247,7 @@ export const PipelineCanvas = React.memo(function PipelineCanvas({
 	setInteractionMode,
 	isLocked,
 	setIsLocked,
+	onAutoArrange,
 }: PipelineCanvasProps) {
 	// `isLocked` is lifted to the parent (CuePipelineEditor) so the L keyboard
 	// shortcut can toggle it. We still need to own the bridge to ReactFlow's
@@ -385,6 +389,11 @@ export const PipelineCanvas = React.memo(function PipelineCanvas({
 				// H/P toggle so box-select can't sneak through.
 				panOnDrag={isLocked || interactionMode === 'hand' ? true : [1, 2]}
 				selectionOnDrag={interactionMode === 'pointer' && !isReadOnly && !isLocked}
+				// Hold Shift to temporarily pan the canvas with left-drag,
+				// regardless of the H/P mode. Overrides ReactFlow's default
+				// of Space (which conflicts with text input in drawers and
+				// is non-obvious for a graph canvas).
+				panActivationKeyCode="Shift"
 				// Hide the "React Flow" attribution badge in the bottom-right.
 				proOptions={REACT_FLOW_PRO_OPTIONS}
 				style={reactFlowStyle}
@@ -449,7 +458,7 @@ export const PipelineCanvas = React.memo(function PipelineCanvas({
 						{
 							mode: 'pointer' as const,
 							Icon: MousePointer2,
-							title: 'Select — left-drag for bounding box (S)',
+							title: 'Select — left-drag for bounding box (S). Hold Shift to pan.',
 						},
 					] satisfies {
 						mode: CanvasInteractionMode;
@@ -482,6 +491,46 @@ export const PipelineCanvas = React.memo(function PipelineCanvas({
 					);
 				})}
 			</div>
+
+			{/* Auto-arrange — top-right corner. Tidies the current layout into an
+			    even grid (group cards in All-Pipelines view, flow columns in a
+			    single pipeline). Shifts left past the agent drawer when it's open.
+			    Hidden when there's nothing to arrange or pipelines are loading. */}
+			{!isLoading && nodes.length > 0 && (
+				<button
+					onClick={onAutoArrange}
+					title="Auto-arrange layout into a tidy grid"
+					style={{
+						position: 'absolute',
+						top: 8,
+						right: agentDrawerOpen ? 250 : 8,
+						zIndex: 21,
+						display: 'flex',
+						alignItems: 'center',
+						gap: 5,
+						padding: '5px 9px',
+						backgroundColor: `${theme.colors.bgActivity}f5`,
+						color: theme.colors.textDim,
+						border: `1px solid ${theme.colors.border}`,
+						borderRadius: 6,
+						fontSize: 12,
+						fontWeight: 500,
+						cursor: 'pointer',
+						transition: 'right 200ms ease, color 0.15s, border-color 0.15s',
+					}}
+					onMouseEnter={(e) => {
+						e.currentTarget.style.color = theme.colors.accent;
+						e.currentTarget.style.borderColor = theme.colors.accent;
+					}}
+					onMouseLeave={(e) => {
+						e.currentTarget.style.color = theme.colors.textDim;
+						e.currentTarget.style.borderColor = theme.colors.border;
+					}}
+				>
+					<LayoutGrid size={14} />
+					Arrange
+				</button>
+			)}
 
 			{/* Config panels — suppressed in read-only (All Pipelines) view so
 			    any selection carried over from a previous single-pipeline view

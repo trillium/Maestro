@@ -46,6 +46,7 @@ import {
 	navigateToTabByIndex,
 	navigateToLastTab,
 	navigateToUnifiedTabByIndex,
+	navigateToUnifiedTabById,
 	navigateToLastUnifiedTab,
 	navigateToNextUnifiedTab,
 	navigateToPrevUnifiedTab,
@@ -1661,6 +1662,65 @@ describe('tabHelpers', () => {
 			expect(result!.type).toBe('file');
 			expect(result!.session.inputMode).toBe('ai');
 			expect(result!.session.activeTerminalTabId).toBeNull();
+		});
+	});
+
+	describe('navigateToUnifiedTabById', () => {
+		it('activates a browser tab by id, clearing file/terminal selection', () => {
+			const aiTab = createMockTab({ id: 'ai-1' });
+			const browserTab = createMockBrowserTab({ id: 'browser-1' });
+			const session = createMockSession({
+				aiTabs: [aiTab],
+				browserTabs: [browserTab] as any,
+				activeTabId: 'ai-1',
+				activeFileTabId: null,
+				activeBrowserTabId: null,
+				unifiedTabOrder: [
+					{ type: 'ai', id: 'ai-1' },
+					{ type: 'browser', id: 'browser-1' },
+				],
+			});
+
+			const result = navigateToUnifiedTabById(session, 'browser', 'browser-1');
+
+			expect(result!.type).toBe('browser');
+			expect(result!.id).toBe('browser-1');
+			expect(result!.session.activeBrowserTabId).toBe('browser-1');
+			expect(result!.session.activeFileTabId).toBeNull();
+			expect(result!.session.activeTerminalTabId).toBeNull();
+			expect(result!.session.inputMode).toBe('ai');
+		});
+
+		it('activates a terminal tab by id, setting inputMode to terminal', () => {
+			const aiTab = createMockTab({ id: 'ai-1' });
+			const terminalTab = { id: 'term-1', name: 'Terminal 1' };
+			const session = createMockSession({
+				aiTabs: [aiTab],
+				terminalTabs: [terminalTab] as any,
+				activeTabId: 'ai-1',
+				activeTerminalTabId: null,
+				unifiedTabOrder: [
+					{ type: 'ai', id: 'ai-1' },
+					{ type: 'terminal', id: 'term-1' },
+				],
+			});
+
+			const result = navigateToUnifiedTabById(session, 'terminal', 'term-1');
+
+			expect(result!.type).toBe('terminal');
+			expect(result!.session.activeTerminalTabId).toBe('term-1');
+			expect(result!.session.inputMode).toBe('terminal');
+		});
+
+		it('returns null when the target tab no longer exists', () => {
+			const aiTab = createMockTab({ id: 'ai-1' });
+			const session = createMockSession({
+				aiTabs: [aiTab],
+				activeTabId: 'ai-1',
+				unifiedTabOrder: [{ type: 'ai', id: 'ai-1' }],
+			});
+
+			expect(navigateToUnifiedTabById(session, 'browser', 'gone')).toBeNull();
 		});
 	});
 
@@ -3718,7 +3778,10 @@ describe('tabHelpers', () => {
 			expect(result.targetSessionId).toBe('a');
 		});
 
-		it('returns jumped=false when no other session has unread tabs', () => {
+		it('returns jumped=false when no other session has unread tabs and the only unread is the active tab', () => {
+			// Active tab with hasUnread is unusual but we tolerate it: the
+			// active tab is what the user is looking at, so we don't silently
+			// clear it and don't claim to have "jumped" anywhere.
 			const sessions = [
 				createMockSession({
 					id: 'a',
@@ -3733,6 +3796,48 @@ describe('tabHelpers', () => {
 			];
 			const result = findNextUnreadSession(sessions, 'a');
 			expect(result.jumped).toBe(false);
+			expect(result.clearedCurrent).toBe(false);
+		});
+
+		it('jumps to a non-active unread tab within the current session before searching others', () => {
+			const sessions = [
+				createMockSession({
+					id: 'a',
+					aiTabs: [
+						createMockTab({ id: 'tab-a1', hasUnread: false }),
+						createMockTab({ id: 'tab-a2', hasUnread: true }),
+					],
+					activeTabId: 'tab-a1',
+				}),
+				createMockSession({
+					id: 'b',
+					aiTabs: [createMockTab({ id: 'tab-b', hasUnread: true })],
+					activeTabId: 'tab-b',
+				}),
+			];
+			const result = findNextUnreadSession(sessions, 'a');
+			expect(result.jumped).toBe(true);
+			expect(result.targetSessionId).toBe('a');
+			expect(result.targetTabId).toBe('tab-a2');
+			expect(result.clearedCurrent).toBe(false);
+		});
+
+		it('reports clearedCurrent=true when moving to another session and current has unread', () => {
+			const sessions = [
+				createMockSession({
+					id: 'a',
+					aiTabs: [createMockTab({ id: 'tab-a', hasUnread: true })],
+					activeTabId: 'tab-a',
+				}),
+				createMockSession({
+					id: 'b',
+					aiTabs: [createMockTab({ id: 'tab-b', hasUnread: true })],
+					activeTabId: 'tab-b',
+				}),
+			];
+			const result = findNextUnreadSession(sessions, 'a');
+			expect(result.jumped).toBe(true);
+			expect(result.targetSessionId).toBe('b');
 			expect(result.clearedCurrent).toBe(true);
 		});
 
@@ -3791,7 +3896,9 @@ describe('tabHelpers', () => {
 			expect(result.targetSessionId).toBe('b');
 		});
 
-		it('reports clearedCurrent when current session has draft tabs', () => {
+		it('does not report clearedCurrent when the only draft tab is the active one', () => {
+			// The active tab's draft is what the user is composing — we don't
+			// jump anywhere and we don't clear unread/draft state.
 			const sessions = [
 				createMockSession({
 					id: 'a',
@@ -3801,7 +3908,24 @@ describe('tabHelpers', () => {
 			];
 			const result = findNextUnreadSession(sessions, 'a');
 			expect(result.jumped).toBe(false);
-			expect(result.clearedCurrent).toBe(true);
+			expect(result.clearedCurrent).toBe(false);
+		});
+
+		it('jumps within the current session to a non-active draft tab', () => {
+			const sessions = [
+				createMockSession({
+					id: 'a',
+					aiTabs: [
+						createMockTab({ id: 'tab-a1', hasUnread: false }),
+						createMockTab({ id: 'tab-a2', hasUnread: false, inputValue: 'unsent text' }),
+					],
+					activeTabId: 'tab-a1',
+				}),
+			];
+			const result = findNextUnreadSession(sessions, 'a');
+			expect(result.jumped).toBe(true);
+			expect(result.targetSessionId).toBe('a');
+			expect(result.targetTabId).toBe('tab-a2');
 		});
 
 		it('prefers the next session in order over earlier ones', () => {

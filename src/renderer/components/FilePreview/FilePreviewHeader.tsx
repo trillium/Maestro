@@ -63,6 +63,8 @@ interface FilePreviewHeaderProps {
 	sshRemoteId?: string;
 	copyContentToClipboard: () => Promise<void>;
 	copyPathToClipboard: () => void;
+	/** Open the image annotator to edit the previewed image. Images only. */
+	onEditImage?: () => void;
 	headerBtnClass: string;
 	headerIconClass: string;
 	/** Whether the previewed file is HTML (.html / .htm). */
@@ -121,6 +123,7 @@ export const FilePreviewHeader = React.memo(function FilePreviewHeader({
 	sshRemoteId,
 	copyContentToClipboard,
 	copyPathToClipboard,
+	onEditImage,
 	headerBtnClass,
 	headerIconClass,
 	isHtml,
@@ -264,12 +267,26 @@ export const FilePreviewHeader = React.memo(function FilePreviewHeader({
 									onClick={() => setMarkdownEditMode(!markdownEditMode)}
 									className={headerBtnClass}
 									style={{ color: markdownEditMode ? theme.colors.accent : theme.colors.textDim }}
+									data-testid="edit-text-toggle"
 								>
 									{markdownEditMode ? (
 										<Eye className={headerIconClass} />
 									) : (
 										<Edit className={headerIconClass} />
 									)}
+								</button>
+							</HoverTooltip>
+						)}
+						{/* Edit image - opens the image annotator. Images only. */}
+						{toolbarVisibility.editImage && isImage && onEditImage && (
+							<HoverTooltip theme={theme} label="Edit image">
+								<button
+									onClick={onEditImage}
+									className={headerBtnClass}
+									style={{ color: theme.colors.textDim }}
+									data-testid="edit-image-button"
+								>
+									<Edit className={headerIconClass} />
 								</button>
 							</HoverTooltip>
 						)}

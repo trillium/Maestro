@@ -12,6 +12,7 @@ import {
 	Monitor,
 	Globe,
 	Wand2,
+	Info,
 } from 'lucide-react';
 import { useSettings } from '../../hooks';
 import type { Theme, LLMProvider } from '../../types';
@@ -31,6 +32,7 @@ import { EncoreTab } from './tabs/EncoreTab';
 import { ShortcutsTab } from './tabs/ShortcutsTab';
 import { ThemeTab } from './tabs/ThemeTab';
 import { EnvironmentTab } from './tabs/EnvironmentTab';
+import { AboutTab } from './tabs/AboutTab';
 import { useSettingsSearch, SettingsSearchInput, SettingsSearchResults } from './SettingsSearch';
 import type { SearchableSetting } from './searchableSettings';
 
@@ -40,6 +42,7 @@ const FEATURE_FLAGS = {
 };
 
 type SettingsTabId =
+	| 'about'
 	| 'general'
 	| 'display'
 	| 'llm'
@@ -60,6 +63,7 @@ const TAB_ITEMS: Array<{
 	label: string;
 	icon: typeof Settings;
 }> = [
+	{ id: 'about', label: 'About', icon: Info },
 	{ id: 'aicommands', label: 'AI Commands', icon: Cpu },
 	{ id: 'display', label: 'Display', icon: Monitor },
 	{ id: 'encore', label: 'Encore Features', icon: FlaskConical },
@@ -147,6 +151,8 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 		setAudioFeedbackCommand,
 		toastDuration,
 		setToastDuration,
+		toastWidth,
+		setToastWidth,
 		idleNotificationEnabled,
 		setIdleNotificationEnabled,
 		idleNotificationCommand,
@@ -663,6 +669,8 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 								setAudioFeedbackCommand={setAudioFeedbackCommand}
 								toastDuration={toastDuration}
 								setToastDuration={setToastDuration}
+								toastWidth={toastWidth}
+								setToastWidth={setToastWidth}
 								idleNotificationEnabled={idleNotificationEnabled}
 								setIdleNotificationEnabled={setIdleNotificationEnabled}
 								idleNotificationCommand={idleNotificationCommand}
@@ -751,6 +759,8 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 						{activeTab === 'environment' && <EnvironmentTab theme={theme} />}
 
 						{activeTab === 'encore' && <EncoreTab theme={theme} isOpen={isOpen} />}
+
+						{activeTab === 'about' && <AboutTab theme={theme} />}
 					</div>
 				</div>
 			</div>

@@ -18,6 +18,7 @@ import {
 	ProcessHandlerDependencies,
 } from '../../../../main/ipc/handlers/process';
 import { getDefaultShell } from '../../../../main/stores/defaults';
+import { stripThinkingFromTranscript } from '../../../../main/agents/claude-transcript-sanitizer';
 
 // Mock electron's ipcMain
 vi.mock('electron', () => ({
@@ -218,6 +219,17 @@ vi.mock('fs/promises', () => ({
 vi.mock('../../../../main/utils/sentry', () => ({
 	captureException: vi.fn(),
 	addBreadcrumb: vi.fn(),
+}));
+
+// Mock the transcript sanitizer so the API-resume gate can be asserted without
+// touching a real Claude Code transcript on disk.
+vi.mock('../../../../main/agents/claude-transcript-sanitizer', () => ({
+	stripThinkingFromTranscript: vi.fn(() => ({
+		sanitized: false,
+		droppedRows: 0,
+		strippedBlocks: 0,
+		backupPath: null,
+	})),
 }));
 
 describe('process IPC handlers', () => {
@@ -824,6 +836,112 @@ describe('process IPC handlers', () => {
 				);
 				expect(resolveCalls.length).toBeGreaterThan(0);
 				expect(resolveCalls[0][2].mode).toBe('api');
+			});
+
+			// Once a conversation has run interactive, its transcript can hold
+			// subscription-account thinking blocks. Resuming it in API mode must
+			// strip them first, or Anthropic returns the "thinking blocks cannot be
+			// modified" 400 and the conversation stays permanently stuck.
+			it('sanitizes the transcript before an API-mode resume of a previously-interactive session', async () => {
+				mockAgentDetector.getAgent.mockResolvedValue(claudeCodeAgent);
+				mockProcessManager.spawn.mockReturnValue({ pid: 4247, success: true });
+
+				// Stage a prior interactive run so the cleanup branch sets the config-dir key.
+				mockSessionsStore.get.mockImplementation((key: string, defaultValue: unknown) => {
+					if (key === 'sessions') {
+						return [
+							{
+								id: 'session-resume',
+								claudeInteractive: { mode: 'interactive', modeReason: 'auto' },
+							},
+						];
+					}
+					return defaultValue;
+				});
+
+				const handler = handlers.get('process:spawn');
+				await handler!({} as any, {
+					sessionId: 'session-resume',
+					toolType: 'claude-code',
+					cwd: '/test',
+					command: 'claude',
+					args: claudeCodeAgent.args,
+					agentSessionId: 'prior-session-uuid', // Resume signal
+					prompt: 'continue',
+				});
+
+				expect(stripThinkingFromTranscript).toHaveBeenCalledTimes(1);
+				const calledPath = vi.mocked(stripThinkingFromTranscript).mock.calls[0][0];
+				expect(calledPath).toContain('prior-session-uuid.jsonl');
+			});
+
+			it('does not sanitize a fresh pure-API spawn (no resume, nothing on disk to touch)', async () => {
+				mockAgentDetector.getAgent.mockResolvedValue(claudeCodeAgent);
+				mockProcessManager.spawn.mockReturnValue({ pid: 4248, success: true });
+
+				const handler = handlers.get('process:spawn');
+				await handler!({} as any, {
+					sessionId: 'session-fresh',
+					toolType: 'claude-code',
+					cwd: '/test',
+					command: 'claude',
+					args: claudeCodeAgent.args,
+					prompt: 'hi',
+				});
+
+				expect(stripThinkingFromTranscript).not.toHaveBeenCalled();
+			});
+
+			// The original gate skipped sanitization when no `resolvedConfigDirKey`
+			// was set, which left transcripts poisoned for sessions where Batch Mode
+			// had since been toggled off (or where the persisted mode flipped to
+			// `'api'` via sticky-limit). The narrowed sanitizer (empty-shell only)
+			// is safe to run on any resume, so the gate now only requires an
+			// `agentSessionId` and Claude Code in API mode.
+			it('sanitizes any API-mode resume of a Claude Code session, even without persisted interactive history', async () => {
+				mockAgentDetector.getAgent.mockResolvedValue(claudeCodeAgent);
+				mockProcessManager.spawn.mockReturnValue({ pid: 4249, success: true });
+
+				// No prior interactive run persisted - this used to skip the sanitize
+				// because resolvedConfigDirKey stayed undefined.
+				mockSessionsStore.get.mockImplementation((key: string, defaultValue: unknown) => {
+					if (key === 'sessions') return [];
+					return defaultValue;
+				});
+
+				const handler = handlers.get('process:spawn');
+				await handler!({} as any, {
+					sessionId: 'session-resume-no-history',
+					toolType: 'claude-code',
+					cwd: '/test',
+					command: 'claude',
+					args: claudeCodeAgent.args,
+					agentSessionId: 'orphaned-transcript-uuid',
+					prompt: 'continue',
+				});
+
+				expect(stripThinkingFromTranscript).toHaveBeenCalledTimes(1);
+				const calledPath = vi.mocked(stripThinkingFromTranscript).mock.calls[0][0];
+				expect(calledPath).toContain('orphaned-transcript-uuid.jsonl');
+			});
+
+			it('does not sanitize SSH-enabled spawns (transcript lives on remote, not local disk)', async () => {
+				mockAgentDetector.getAgent.mockResolvedValue(claudeCodeAgent);
+				mockProcessManager.spawn.mockReturnValue({ pid: 4250, success: true });
+
+				const handler = handlers.get('process:spawn');
+				await handler!({} as any, {
+					sessionId: 'session-ssh',
+					toolType: 'claude-code',
+					cwd: '/test',
+					command: 'claude',
+					args: claudeCodeAgent.args,
+					agentSessionId: 'remote-session-uuid',
+					prompt: 'continue',
+					sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+				});
+
+				expect(stripThinkingFromTranscript).not.toHaveBeenCalled();
 			});
 		});
 	});
@@ -1991,6 +2109,104 @@ describe('process IPC handlers', () => {
 			// The stdin script should use just 'codex', not the full local path
 			expect(spawnCall.sshStdinScript).toContain('codex');
 			expect(spawnCall.sshStdinScript).not.toContain('/opt/homebrew/bin/codex');
+
+			// Regression for #1016: when SSH is enabled, no local dirs should be
+			// injected via extraPathDirs — those would leak macOS paths into the
+			// remote spawn env (the SSH command itself runs locally, but the script
+			// it runs on the remote builds its own PATH).
+			expect(spawnCall.extraPathDirs).toBeUndefined();
+		});
+
+		it('should inject the detected agent parent dir as extraPathDirs for local (non-SSH) spawns', async () => {
+			// Regression for #1016: when codex (or any node-script agent) was
+			// installed alongside a non-standard `node` (e.g. /Users/me/opt/node/bin),
+			// Maestro detected it via shell PATH but spawned with a narrower PATH
+			// that didn't include that bin dir — the `#!/usr/bin/env node` shebang
+			// then failed with exit 127. Fix: prepend dirname(agent.path) so the
+			// co-located runtime is reachable.
+			const mockAgent = {
+				id: 'codex',
+				name: 'Codex',
+				binaryName: 'codex',
+				path: '/Users/me/opt/node/bin/codex',
+				requiresPty: false,
+				capabilities: {
+					supportsStreamJsonInput: false,
+				},
+			};
+
+			mockAgentDetector.getAgent.mockResolvedValue(mockAgent);
+			mockProcessManager.spawn.mockReturnValue({ pid: 12345, success: true });
+
+			const handler = handlers.get('process:spawn');
+			await handler!({} as any, {
+				sessionId: 'session-1',
+				toolType: 'codex',
+				cwd: '/home/devuser/project',
+				command: '/Users/me/opt/node/bin/codex',
+				args: ['exec', '--json'],
+				// NOTE: no sessionSshRemoteConfig — this is a local spawn
+			});
+
+			const spawnCall = mockProcessManager.spawn.mock.calls[0][0];
+			expect(spawnCall.extraPathDirs).toEqual(['/Users/me/opt/node/bin']);
+		});
+
+		it('should prefer sessionCustomPath over agent.path when deriving extraPathDirs (local)', async () => {
+			// When the user overrides the binary, the co-located runtime lives
+			// next to *that* binary — not the auto-detected one. Per CodeRabbit
+			// + Greptile review on #1021.
+			const mockAgent = {
+				id: 'codex',
+				name: 'Codex',
+				binaryName: 'codex',
+				path: '/opt/homebrew/bin/codex',
+				requiresPty: false,
+				capabilities: { supportsStreamJsonInput: false },
+			};
+			mockAgentDetector.getAgent.mockResolvedValue(mockAgent);
+			mockProcessManager.spawn.mockReturnValue({ pid: 12345, success: true });
+
+			const handler = handlers.get('process:spawn');
+			await handler!({} as any, {
+				sessionId: 'session-1',
+				toolType: 'codex',
+				cwd: '/home/devuser/project',
+				command: '/opt/homebrew/bin/codex',
+				args: ['exec'],
+				sessionCustomPath: '/Users/me/opt/node/bin/codex',
+			});
+
+			const spawnCall = mockProcessManager.spawn.mock.calls[0][0];
+			expect(spawnCall.extraPathDirs).toEqual(['/Users/me/opt/node/bin']);
+		});
+
+		it('should not inject extraPathDirs when the spawn binary path is not absolute', async () => {
+			// path.dirname("codex") would return "." — prepending that to PATH
+			// would let a binary in the spawn cwd shadow system tools.
+			// Per Greptile review on #1021.
+			const mockAgent = {
+				id: 'codex',
+				name: 'Codex',
+				binaryName: 'codex',
+				path: 'codex', // bare binary name, no directory
+				requiresPty: false,
+				capabilities: { supportsStreamJsonInput: false },
+			};
+			mockAgentDetector.getAgent.mockResolvedValue(mockAgent);
+			mockProcessManager.spawn.mockReturnValue({ pid: 12345, success: true });
+
+			const handler = handlers.get('process:spawn');
+			await handler!({} as any, {
+				sessionId: 'session-1',
+				toolType: 'codex',
+				cwd: '/home/devuser/project',
+				command: 'codex',
+				args: ['exec'],
+			});
+
+			const spawnCall = mockProcessManager.spawn.mock.calls[0][0];
+			expect(spawnCall.extraPathDirs).toBeUndefined();
 		});
 
 		it('should use sessionCustomPath for SSH remote when user specifies a custom path', async () => {

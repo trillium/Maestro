@@ -33,7 +33,9 @@ import {
 import type { Theme } from '../../../shared/theme-types';
 import { GhostIconButton } from '../ui/GhostIconButton';
 import { notifyCenterFlash } from '../../stores/centerFlashStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import type { AnnotatorTool, UseAnnotatorStateReturn } from './useAnnotatorState';
+import { ANNOTATOR_PALETTE } from './annotatorConstants';
 
 interface AnnotatorToolbarProps {
 	state: UseAnnotatorStateReturn;
@@ -59,7 +61,42 @@ export const AnnotatorToolbar = memo(function AnnotatorToolbar({
 	const { tool, setTool, strokes, shapes, texts, undo, clear } = state;
 	const [confirmingClear, setConfirmingClear] = useState(false);
 	const confirmWrapRef = useRef<HTMLDivElement>(null);
+	const [colorPickerOpen, setColorPickerOpen] = useState(false);
+	const colorWrapRef = useRef<HTMLDivElement>(null);
 	const hasContent = strokes.length > 0 || shapes.length > 0 || texts.length > 0;
+
+	// Current-color swatch. Resolution mirrors AnnotatorSettingsDrawer so the
+	// toolbar always shows (and edits) the same color the drawer would: a
+	// selected text/shape's color wins, otherwise the tool-appropriate default
+	// (text tool → text color, anything else → pen color, since pen color drives
+	// pen + all shapes).
+	const defPenColor = useSettingsStore((s) => s.annotatorPenColor);
+	const defTextColor = useSettingsStore((s) => s.annotatorTextColor);
+	const setDefPenColor = useSettingsStore((s) => s.setAnnotatorPenColor);
+	const setDefTextColor = useSettingsStore((s) => s.setAnnotatorTextColor);
+	const selectedShape = state.selectedShapeId
+		? (shapes.find((s) => s.id === state.selectedShapeId) ?? null)
+		: null;
+	const selectedText = state.selectedTextId
+		? (texts.find((t) => t.id === state.selectedTextId) ?? null)
+		: null;
+	let currentColor: string;
+	let setCurrentColor: (c: string) => void;
+	if (selectedText) {
+		currentColor = selectedText.style.color;
+		setCurrentColor = (c) =>
+			state.updateText(selectedText.id, { style: { ...selectedText.style, color: c } });
+	} else if (selectedShape) {
+		currentColor = selectedShape.style.color;
+		setCurrentColor = (c) =>
+			state.updateShape(selectedShape.id, { style: { ...selectedShape.style, color: c } });
+	} else if (tool === 'text') {
+		currentColor = defTextColor;
+		setCurrentColor = setDefTextColor;
+	} else {
+		currentColor = defPenColor;
+		setCurrentColor = setDefPenColor;
+	}
 
 	// Cmd/Ctrl+Z (undo) and Cmd/Ctrl+S (save+exit) for the annotator.
 	//
@@ -122,6 +159,17 @@ export const AnnotatorToolbar = memo(function AnnotatorToolbar({
 	useEffect(() => {
 		if (!hasContent && confirmingClear) setConfirmingClear(false);
 	}, [hasContent, confirmingClear]);
+
+	useEffect(() => {
+		if (!colorPickerOpen) return;
+		const onMouseDown = (e: MouseEvent) => {
+			if (colorWrapRef.current && !colorWrapRef.current.contains(e.target as Node)) {
+				setColorPickerOpen(false);
+			}
+		};
+		document.addEventListener('mousedown', onMouseDown);
+		return () => document.removeEventListener('mousedown', onMouseDown);
+	}, [colorPickerOpen]);
 
 	const handleConfirmClear = useCallback(() => {
 		clear();
@@ -295,6 +343,72 @@ export const AnnotatorToolbar = memo(function AnnotatorToolbar({
 			</div>
 
 			{divider}
+
+			<div ref={colorWrapRef} style={{ position: 'relative' }}>
+				<button
+					type="button"
+					onClick={() => setColorPickerOpen((v) => !v)}
+					title={`Current color (${currentColor}) - click to change`}
+					aria-label="Current drawing color"
+					aria-haspopup="true"
+					aria-expanded={colorPickerOpen}
+					className="rounded hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center"
+					style={{ padding: 8, lineHeight: 0 }}
+				>
+					<span
+						aria-hidden
+						className="block w-5 h-5 rounded-full"
+						style={{
+							backgroundColor: currentColor,
+							boxShadow: `inset 0 0 0 1px rgba(0, 0, 0, 0.25), 0 0 0 1px ${theme.colors.border}`,
+						}}
+					/>
+				</button>
+				{colorPickerOpen && (
+					<div
+						role="listbox"
+						aria-label="Drawing color"
+						className="absolute flex flex-col gap-1.5 rounded-lg p-2"
+						style={{
+							right: '100%',
+							top: '50%',
+							transform: 'translateY(-50%)',
+							marginRight: 8,
+							backgroundColor: theme.colors.bgMain,
+							border: `1px solid ${theme.colors.border}`,
+							boxShadow: '0 8px 24px -8px rgba(0, 0, 0, 0.5)',
+							zIndex: 1,
+						}}
+					>
+						{ANNOTATOR_PALETTE.map((color) => {
+							const selected = currentColor.toLowerCase() === color.toLowerCase();
+							return (
+								<button
+									key={color}
+									type="button"
+									role="option"
+									aria-selected={selected}
+									onClick={() => {
+										setCurrentColor(color);
+										setColorPickerOpen(false);
+									}}
+									className="rounded-full transition-transform hover:scale-110"
+									style={{
+										width: 22,
+										height: 22,
+										backgroundColor: color,
+										border: selected
+											? `2px solid ${theme.colors.accent}`
+											: `2px solid ${theme.colors.border}`,
+										boxShadow: selected ? `0 0 0 2px ${theme.colors.accent}55` : undefined,
+									}}
+									aria-label={`Set color to ${color}`}
+								/>
+							);
+						})}
+					</div>
+				)}
+			</div>
 
 			<GhostIconButton
 				onClick={onToggleDrawer}

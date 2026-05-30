@@ -49,12 +49,12 @@ With the Files tab focused, navigate the file list without touching the mouse:
 | --------------------------- | ---------------------------------------------------------------------------------- |
 | `Up` / `Down`               | Move the focused file up or down by one                                            |
 | `Option+Up` / `Option+Down` | Jump ten files at a time (page up / page down)                                     |
-| `Shift+Up` / `Shift+Down`   | **Peek scroll** — slide the file list up or down without changing the focused file |
+| `Shift+Up` / `Shift+Down`   | **Peek scroll** - slide the file list up or down without changing the focused file |
 | `Cmd+Up` / `Cmd+Down`       | Jump to the top or bottom of the list (`Ctrl+Up` / `Ctrl+Down` on Windows/Linux)   |
 | `Left` / `Right`            | Collapse / expand the focused folder (`Left` on a file jumps to its parent folder) |
 | `Enter`                     | Open the focused file (or toggle the folder if a folder is focused)                |
 
-Use `Shift+Up` / `Shift+Down` when you want to glance further down the tree without losing your place — the focused file stays put while the viewport slides.
+Use `Shift+Up` / `Shift+Down` when you want to glance further down the tree without losing your place - the focused file stays put while the viewport slides.
 
 ### Breadcrumb Navigation
 
@@ -82,8 +82,8 @@ Share files directly as GitHub Gists from the File Preview:
 **Visibility options:**
 | Option | Description |
 |--------|-------------|
-| **Publish Secret** (default) | Creates an unlisted gist — not searchable, only accessible via direct link |
-| **Publish Public** | Creates a public gist — visible on your profile and searchable |
+| **Publish Secret** (default) | Creates an unlisted gist - not searchable, only accessible via direct link |
+| **Publish Public** | Creates a public gist - visible on your profile and searchable |
 
 The confirmation modal focuses "Publish Secret" by default, so you can press `Enter` to quickly publish. Press `Esc` to cancel.
 
@@ -106,7 +106,7 @@ Reference files in your AI prompts using `@` mentions:
 
 ## Prompt Composer
 
-For complex prompts that need more editing space, use the **Prompt Composer** — a fullscreen editing modal.
+For complex prompts that need more editing space, use the **Prompt Composer** - a fullscreen editing modal.
 
 **To open the Prompt Composer:**
 
@@ -119,7 +119,7 @@ The Prompt Composer provides:
 
 - **Full-screen editing space** for complex, multi-paragraph prompts
 - **Character and token count** displayed in the footer
-- **All input controls** — History toggle, Read-only mode, Thinking toggle, and send shortcut indicator
+- **All input controls** - History toggle, Read-only mode, Thinking toggle, and send shortcut indicator
 - **Image attachment support** via the image icon in the footer
 
 ![Prompt Composer](./screenshots/prompt-composer.png)
@@ -135,7 +135,7 @@ The AI input box includes three toggle buttons that control session behavior:
 | Toggle        | Shortcut                       | Description                                                          |
 | ------------- | ------------------------------ | -------------------------------------------------------------------- |
 | **History**   | `Cmd+S` / `Ctrl+S`             | Save a synopsis of each completion to the [History panel](./history) |
-| **Read-only** | `Cmd+R` / `Ctrl+R`             | Enable plan/read-only mode — AI can read but not modify files        |
+| **Read-only** | `Cmd+R` / `Ctrl+R`             | Enable plan/read-only mode - AI can read but not modify files        |
 | **Thinking**  | `Cmd+Shift+K` / `Ctrl+Shift+K` | Show streaming thinking/reasoning as the AI works                    |
 
 **Per-tab persistence:** Each toggle state is saved per tab. If you enable Thinking on one tab, it stays enabled for that tab even when you switch away and back.
@@ -176,10 +176,10 @@ When working with image attachments, use the **Image Carousel** to view, manage,
 
 **Carousel controls:**
 
-- **Arrow keys** — Navigate between images
-- **Delete** or **Backspace** — Remove the currently selected image
-- **Click the X** — Remove an image by clicking its remove button
-- **Esc** — Close the carousel
+- **Arrow keys** - Navigate between images
+- **Delete** or **Backspace** - Remove the currently selected image
+- **Click the X** - Remove an image by clicking its remove button
+- **Esc** - Close the carousel
 
 Images can be attached via drag-and-drop, paste, or the attachment button. The carousel shows all images queued for the current message.
 
@@ -220,9 +220,9 @@ Click the indicator to toggle between plain text and regex mode.
 
 ### Filter Controls
 
-- **Query input** — Type your search term or regex pattern
-- **Esc** — Clear the filter and close the filter bar
-- **Click outside** — If the query is empty, the filter bar closes
+- **Query input** - Type your search term or regex pattern
+- **Esc** - Clear the filter and close the filter bar
+- **Click outside** - If the query is empty, the filter bar closes
 
 ### Placeholders
 
@@ -259,11 +259,11 @@ The command interpreter can be focused for a clean, terminal-only experience whe
 
 ## Command Terminal
 
-Each agent has a Command Terminal alongside its AI Terminal — a real PTY shell scoped to the agent's working directory. Switch between them with `Cmd+J` / `Ctrl+J`. Open a new terminal tab with `Ctrl+Shift+` + `` ` ``; close, rename, and reorder it just like an AI tab. Right-click (or hover) a terminal tab to open its action menu.
+Each agent has a Command Terminal alongside its AI Terminal - a real PTY shell scoped to the agent's working directory. Switch between them with `Cmd+J` / `Ctrl+J`. Open a new terminal tab with `Ctrl+Shift+` + `` ` ``; close, rename, and reorder it just like an AI tab. Right-click (or hover) a terminal tab to open its action menu.
 
 ### Startup Command
 
-Configure a command to run automatically every time a terminal tab's shell is started — including after you quit and reopen Maestro. This is the simplest way to keep something like `npm run dev`, a watcher, or a long-running log tail attached to a specific tab.
+Configure a command to run automatically every time a terminal tab's shell is started - including after you quit and reopen Maestro. This is the simplest way to keep something like `npm run dev`, a watcher, or a long-running log tail attached to a specific tab.
 
 **To configure:**
 
@@ -274,34 +274,34 @@ Configure a command to run automatically every time a terminal tab's shell is st
 
 **Behavior:**
 
-- The command runs each time the PTY for that tab is spawned. The most common trigger is launching Maestro after a quit — any open terminal tab is restored, its shell respawned, and the configured command executes.
+- The command runs each time the PTY for that tab is spawned. The most common trigger is launching Maestro after a quit - any open terminal tab is restored, its shell respawned, and the configured command executes.
 - Configuring a command on an already-running shell does **not** retroactively run it. The next spawn (app restart, or close-and-reopen the tab) picks it up.
 - The configured working directory becomes the shell's spawn directory, so the command starts in the right place even if the tab's last `cd` was somewhere else.
 - Leave the command field empty and save to disable the feature for that tab.
-- Each terminal tab has its own startup command — one tab can run a dev server while another runs a log tail.
+- Each terminal tab has its own startup command - one tab can run a dev server while another runs a log tail.
 
 > **SSH agents**: when the agent is configured to run on a remote host, the terminal tab also runs on that host, and the startup command executes remotely (the working directory must be a path on the remote machine).
 
 ## Agent Management
 
-Agents are the core of Maestro — each agent represents an AI coding assistant running in its own workspace.
+Agents are the core of Maestro - each agent represents an AI coding assistant running in its own workspace.
 
 ### Creating Agents
 
 **To create a new agent:**
 
 1. Press `Cmd+N` / `Ctrl+N`, or click the **New Agent** button in the bottom-left sidebar
-2. Choose **Manual Setup** or **Guided Setup** (Wizard) — see [Getting Started](./getting-started) for details on each path
+2. Choose **Manual Setup** or **Guided Setup** (Wizard) - see [Getting Started](./getting-started) for details on each path
 3. For Manual Setup: select an available AI provider (Claude Code, Codex, OpenCode, or Factory Droid), choose a working directory, and optionally name the agent
 
 **Advanced configuration options:**
 
-- **New Session Message** — A hidden message prefixed to the first message whenever a new session (tab) is created. Use this for initial context, setup instructions, or persona definitions that should apply at the start of every conversation. Not visible in chat.
-- **Nudge Message** — A hidden message appended to every interactive user message sent to the agent. This is useful for persistent instructions or reminders that guide the agent's behavior across all conversations. **Note:** Nudge messages only apply to interactive AI messages — they are not included in Auto Run tasks.
-- **Custom Path** — Override the default executable path
-- **Custom Arguments** — Additional command-line arguments
-- **Environment Variables** — Custom environment variables for the agent process
-- **Model Selection** — Choose a specific model and (where supported) reasoning/effort level. This sets the default for new tabs in this agent. You can override the model or effort on any individual tab using the model/effort pill in the input bar — per-tab overrides only affect that tab and don't change the agent default or any other tab.
+- **New Session Message** - A hidden message prefixed to the first message whenever a new session (tab) is created. Use this for initial context, setup instructions, or persona definitions that should apply at the start of every conversation. Not visible in chat.
+- **Nudge Message** - A hidden message appended to every interactive user message sent to the agent. This is useful for persistent instructions or reminders that guide the agent's behavior across all conversations. **Note:** Nudge messages only apply to interactive AI messages - they are not included in Auto Run tasks.
+- **Custom Path** - Override the default executable path
+- **Custom Arguments** - Additional command-line arguments
+- **Environment Variables** - Custom environment variables for the agent process
+- **Model Selection** - Choose a specific model and (where supported) reasoning/effort level. This sets the default for new tabs in this agent. You can override the model or effort on any individual tab using the model/effort pill in the input bar - per-tab overrides only affect that tab and don't change the agent default or any other tab.
 
 ### Editing Agents
 
@@ -368,13 +368,13 @@ Rearrange agents by dragging them:
 
 Right-click any agent for quick actions:
 
-- **Rename** — Change the agent's display name
-- **Edit Agent...** — Open configuration modal
-- **Add/Remove Bookmark** — Toggle bookmark status
-- **Move to Group** — Organize into groups
-- **Create Worktree** — Create a git worktree sub-agent (if configured)
-- **Configure Worktrees** — Set up worktree configuration
-- **Remove Agent** — Delete the agent from Maestro
+- **Rename** - Change the agent's display name
+- **Edit Agent...** - Open configuration modal
+- **Add/Remove Bookmark** - Toggle bookmark status
+- **Move to Group** - Organize into groups
+- **Create Worktree** - Create a git worktree sub-agent (if configured)
+- **Configure Worktrees** - Set up worktree configuration
+- **Remove Agent** - Delete the agent from Maestro
 
 ### Sidebar Width
 

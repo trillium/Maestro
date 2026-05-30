@@ -147,6 +147,9 @@ export class ExitHandler {
 			if (agentError) {
 				managedProcess.errorEmitted = true;
 				agentError.sessionId = sessionId;
+				if (managedProcess.sshRemoteId) {
+					agentError.sshRemoteId = managedProcess.sshRemoteId;
+				}
 				logger.debug('[ProcessManager] Error detected from exit', 'ProcessManager', {
 					sessionId,
 					exitCode: code,
@@ -188,6 +191,7 @@ export class ExitHandler {
 					recoverable: sshError.recoverable,
 					agentId: toolType,
 					sessionId,
+					sshRemoteId: managedProcess.sshRemoteId,
 					timestamp: Date.now(),
 					raw: {
 						exitCode: code,
@@ -368,6 +372,7 @@ export class ExitHandler {
 				recoverable: true,
 				agentId: managedProcess.toolType,
 				sessionId,
+				sshRemoteId: managedProcess.sshRemoteId,
 				timestamp: Date.now(),
 				raw: {
 					stderr: error.message,

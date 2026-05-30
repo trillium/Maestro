@@ -28,6 +28,7 @@ vi.mock('fs/promises', () => ({
 		stat: vi.fn(),
 		writeFile: vi.fn(),
 		rename: vi.fn(),
+		mkdir: vi.fn(),
 		rm: vi.fn(),
 		unlink: vi.fn(),
 	},
@@ -50,8 +51,10 @@ vi.mock('../../../../main/utils/remote-fs', () => ({
 	statRemote: vi.fn(),
 	directorySizeRemote: vi.fn(),
 	renameRemote: vi.fn(),
+	mkdirRemote: vi.fn(),
 	deleteRemote: vi.fn(),
 	countItemsRemote: vi.fn(),
+	writeFileRemote: vi.fn(),
 }));
 
 // Mock stores
@@ -69,7 +72,9 @@ import {
 	directorySizeRemote,
 	countItemsRemote,
 	renameRemote,
+	mkdirRemote,
 	deleteRemote,
+	writeFileRemote,
 } from '../../../../main/utils/remote-fs';
 
 describe('filesystem handlers', () => {
@@ -91,7 +96,9 @@ describe('filesystem handlers', () => {
 			expect(ipcMain.handle).toHaveBeenCalledWith('fs:stat', expect.any(Function));
 			expect(ipcMain.handle).toHaveBeenCalledWith('fs:directorySize', expect.any(Function));
 			expect(ipcMain.handle).toHaveBeenCalledWith('fs:writeFile', expect.any(Function));
+			expect(ipcMain.handle).toHaveBeenCalledWith('fs:writeImageFile', expect.any(Function));
 			expect(ipcMain.handle).toHaveBeenCalledWith('fs:rename', expect.any(Function));
+			expect(ipcMain.handle).toHaveBeenCalledWith('fs:mkdir', expect.any(Function));
 			expect(ipcMain.handle).toHaveBeenCalledWith('fs:delete', expect.any(Function));
 			expect(ipcMain.handle).toHaveBeenCalledWith('fs:countItems', expect.any(Function));
 			expect(ipcMain.handle).toHaveBeenCalledWith('fs:fetchImageAsBase64', expect.any(Function));
@@ -389,6 +396,85 @@ describe('filesystem handlers', () => {
 		});
 	});
 
+	describe('fs:writeImageFile', () => {
+		// A 1x1 transparent PNG as a data URL; the base64 payload after the comma
+		// is what should be decoded and written as raw bytes.
+		const PNG_BASE64 =
+			'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+		const PNG_DATA_URL = `data:image/png;base64,${PNG_BASE64}`;
+
+		it('decodes the data URL and writes raw bytes locally', async () => {
+			vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+
+			const handler = registeredHandlers.get('fs:writeImageFile');
+			const result = await handler!({}, '/test/edited.png', PNG_DATA_URL);
+
+			expect(fs.writeFile).toHaveBeenCalledTimes(1);
+			const [path, buffer] = vi.mocked(fs.writeFile).mock.calls[0];
+			expect(path).toBe('/test/edited.png');
+			expect(Buffer.isBuffer(buffer)).toBe(true);
+			// Buffer must be the decoded bytes, not the UTF-8 of the base64 string.
+			expect((buffer as Buffer).equals(Buffer.from(PNG_BASE64, 'base64'))).toBe(true);
+			expect(result).toEqual({ success: true });
+		});
+
+		it('treats a bare base64 string (no data: prefix) as the payload', async () => {
+			vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+
+			const handler = registeredHandlers.get('fs:writeImageFile');
+			await handler!({}, '/test/edited.png', PNG_BASE64);
+
+			const [, buffer] = vi.mocked(fs.writeFile).mock.calls[0];
+			expect((buffer as Buffer).equals(Buffer.from(PNG_BASE64, 'base64'))).toBe(true);
+		});
+
+		it('writes remotely via SSH when a remote id is given', async () => {
+			const mockSshConfig = { id: 'remote-1', host: 'server.com', username: 'user' };
+			vi.mocked(getSshRemoteById).mockReturnValue(mockSshConfig as any);
+			vi.mocked(writeFileRemote).mockResolvedValue({ success: true });
+
+			const handler = registeredHandlers.get('fs:writeImageFile');
+			const result = await handler!({}, '/remote/edited.png', PNG_DATA_URL, 'remote-1');
+
+			expect(fs.writeFile).not.toHaveBeenCalled();
+			expect(writeFileRemote).toHaveBeenCalledTimes(1);
+			const [path, buffer, config] = vi.mocked(writeFileRemote).mock.calls[0];
+			expect(path).toBe('/remote/edited.png');
+			expect((buffer as Buffer).equals(Buffer.from(PNG_BASE64, 'base64'))).toBe(true);
+			expect(config).toBe(mockSshConfig);
+			expect(result).toEqual({ success: true });
+		});
+
+		it('throws when the SSH remote cannot be resolved', async () => {
+			vi.mocked(getSshRemoteById).mockReturnValue(undefined);
+
+			const handler = registeredHandlers.get('fs:writeImageFile');
+			await expect(handler!({}, '/remote/edited.png', PNG_DATA_URL, 'missing')).rejects.toThrow(
+				'Failed to write image file'
+			);
+		});
+
+		it('throws when the remote write fails', async () => {
+			const mockSshConfig = { id: 'remote-1', host: 'server.com', username: 'user' };
+			vi.mocked(getSshRemoteById).mockReturnValue(mockSshConfig as any);
+			vi.mocked(writeFileRemote).mockResolvedValue({ success: false, error: 'disk full' });
+
+			const handler = registeredHandlers.get('fs:writeImageFile');
+			await expect(handler!({}, '/remote/edited.png', PNG_DATA_URL, 'remote-1')).rejects.toThrow(
+				'Failed to write image file'
+			);
+		});
+
+		it('throws on local write failure', async () => {
+			vi.mocked(fs.writeFile).mockRejectedValue(new Error('Permission denied'));
+
+			const handler = registeredHandlers.get('fs:writeImageFile');
+			await expect(handler!({}, '/readonly/edited.png', PNG_DATA_URL)).rejects.toThrow(
+				'Failed to write image file'
+			);
+		});
+	});
+
 	describe('fs:rename', () => {
 		it('should rename local files', async () => {
 			vi.mocked(fs.rename).mockResolvedValue(undefined);
@@ -409,6 +495,30 @@ describe('filesystem handlers', () => {
 			const result = await handler!({}, '/old/path.txt', '/new/path.txt', 'remote-1');
 
 			expect(renameRemote).toHaveBeenCalledWith('/old/path.txt', '/new/path.txt', mockSshConfig);
+			expect(result).toEqual({ success: true });
+		});
+	});
+
+	describe('fs:mkdir', () => {
+		it('should create local directories recursively', async () => {
+			vi.mocked(fs.mkdir).mockResolvedValue(undefined);
+
+			const handler = registeredHandlers.get('fs:mkdir');
+			const result = await handler!({}, '/test/newdir');
+
+			expect(fs.mkdir).toHaveBeenCalledWith('/test/newdir', { recursive: true });
+			expect(result).toEqual({ success: true });
+		});
+
+		it('should create remote directories via SSH', async () => {
+			const mockSshConfig = { id: 'remote-1', host: 'server.com', username: 'user' };
+			vi.mocked(getSshRemoteById).mockReturnValue(mockSshConfig as any);
+			vi.mocked(mkdirRemote).mockResolvedValue({ success: true });
+
+			const handler = registeredHandlers.get('fs:mkdir');
+			const result = await handler!({}, '/remote/newdir', 'remote-1');
+
+			expect(mkdirRemote).toHaveBeenCalledWith('/remote/newdir', mockSshConfig, true);
 			expect(result).toEqual({ success: true });
 		});
 	});

@@ -17,6 +17,7 @@ export interface SearchableSetting {
 	id: string;
 	/** Which tab this setting lives in */
 	tab:
+		| 'about'
 		| 'general'
 		| 'display'
 		| 'shortcuts'
@@ -536,12 +537,41 @@ export const DISPLAY_SETTINGS: SearchableSetting[] = [
 		],
 	},
 	{
+		id: 'display-left-panel-starred-sessions',
+		tab: 'display',
+		tabLabel: 'Display',
+		label: 'Show Starred Sessions section',
+		description:
+			'Show a Starred Sessions section at the top of the left side bar listing every starred AI tab and named session across all agents',
+		keywords: [
+			'starred',
+			'star',
+			'favorite',
+			'favourite',
+			'bookmark',
+			'pinned',
+			'left',
+			'side',
+			'sidebar',
+			'side bar',
+			'side panel',
+			'panel',
+			'section',
+			'tabs',
+			'sessions',
+			'agents',
+			'jump',
+			'navigate',
+			'cross-agent',
+		],
+	},
+	{
 		id: 'display-left-side-panel',
 		tab: 'display',
 		tabLabel: 'Display',
 		label: 'Left Side Panel',
 		description:
-			'Configure the left side bar: group member counts, location pills, git change indicator, Cue indicator, and worktree badges',
+			'Configure the left side bar: group member counts, collapsed pills per row, location pills, git change indicator, Cue indicator, and worktree badges',
 		keywords: [
 			'left',
 			'side',
@@ -561,6 +591,12 @@ export const DISPLAY_SETTINGS: SearchableSetting[] = [
 			'git',
 			'pill',
 			'pills',
+			'per row',
+			'row',
+			'rows',
+			'wrap',
+			'density',
+			'collapsed',
 			'badge',
 			'badges',
 			'location',
@@ -612,9 +648,9 @@ export const DISPLAY_SETTINGS: SearchableSetting[] = [
 		id: 'display-tab-filtering',
 		tab: 'display',
 		tabLabel: 'Display',
-		label: 'Tab Filtering',
+		label: 'Tab Options',
 		description:
-			'Show starred and file preview tabs when filtering by unread; Command+0 vs Command+9 last-tab shortcut',
+			'Show starred and file preview tabs when filtering by unread; Command+0 vs Command+9 last-tab shortcut; browser tab domain pill',
 		keywords: [
 			'tab',
 			'filter',
@@ -632,6 +668,11 @@ export const DISPLAY_SETTINGS: SearchableSetting[] = [
 			'shortcut',
 			'keyboard',
 			'browser style',
+			'browser tab',
+			'domain',
+			'hostname',
+			'url',
+			'pill',
 		],
 	},
 	{
@@ -824,6 +865,14 @@ export const NOTIFICATION_SETTINGS: SearchableSetting[] = [
 			'sticky',
 			'persist',
 		],
+	},
+	{
+		id: 'notifications-toast-width',
+		tab: 'notifications',
+		tabLabel: 'Notifications',
+		label: 'Toast Notification Width',
+		description: 'Width of toast notifications: Small, Medium, or Large',
+		keywords: ['toast', 'notification', 'width', 'size', 'small', 'medium', 'large'],
 	},
 ];
 
@@ -1069,9 +1118,35 @@ export const PROMPTS_SETTINGS: SearchableSetting[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// About Tab
+// ---------------------------------------------------------------------------
+export const ABOUT_SETTINGS: SearchableSetting[] = [
+	{
+		id: 'about-maestro',
+		tab: 'about',
+		tabLabel: 'About',
+		label: 'About Maestro',
+		description: 'Maestro version, tagline, and origin — born on Nov 26, 2025 in Austin, TX',
+		keywords: [
+			'about',
+			'version',
+			'maestro',
+			'tagline',
+			'origin',
+			'austin',
+			'texas',
+			'born',
+			'commit',
+			'build',
+		],
+	},
+];
+
+// ---------------------------------------------------------------------------
 // Composed registry
 // ---------------------------------------------------------------------------
 export const ALL_SEARCHABLE_SETTINGS: SearchableSetting[] = [
+	...ABOUT_SETTINGS,
 	...GENERAL_SETTINGS,
 	...DISPLAY_SETTINGS,
 	...SHORTCUTS_SETTINGS,

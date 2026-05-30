@@ -112,7 +112,13 @@ export function CueModal({ theme, onClose, cueShortcutKeys }: CueModalProps) {
 			setActivitySearchQuery('');
 			return;
 		}
-		if (useCueDirtyStore.getState().pipelineDirty) {
+		// Skip the dirty-changes confirmation when a save is already in flight —
+		// the save promise lives in the persistence hook and continues running
+		// after CueModal unmounts (it toasts success/failure when it lands).
+		// Forcing the user to wait or discard would defeat the whole point of
+		// being able to close mid-save.
+		const cueDirtyState = useCueDirtyStore.getState();
+		if (cueDirtyState.pipelineDirty && !cueDirtyState.pipelineSaving) {
 			getModalActions().showConfirmation(
 				'You have unsaved changes in the pipeline editor. Discard and close?',
 				() => onCloseRef.current()
@@ -208,9 +214,11 @@ export function CueModal({ theme, onClose, cueShortcutKeys }: CueModalProps) {
 		[refresh]
 	);
 
-	// Close with unsaved changes confirmation
+	// Close with unsaved changes confirmation. A save in flight bypasses the
+	// confirmation (see escape handler above for the rationale).
 	const handleCloseWithConfirm = useCallback(() => {
-		if (useCueDirtyStore.getState().pipelineDirty) {
+		const cueDirtyState = useCueDirtyStore.getState();
+		if (cueDirtyState.pipelineDirty && !cueDirtyState.pipelineSaving) {
 			getModalActions().showConfirmation(
 				'You have unsaved changes in the pipeline editor. Discard and close?',
 				() => onClose()

@@ -28,6 +28,9 @@ import { usePipelineContextMenu } from '../../hooks/cue/usePipelineContextMenu';
 import { PipelineToolbar } from './PipelineToolbar';
 import { PipelineCanvas, type CanvasInteractionMode } from './PipelineCanvas';
 import { PipelineContextMenu } from './PipelineContextMenu';
+import { arrangePipelineNodes, arrangePipelineGroups } from './utils/pipelineAutoArrange';
+import { ConfirmModal } from '../ConfirmModal';
+import { LayoutGrid } from 'lucide-react';
 import type { TriggerNodeData } from '../../../shared/cue-pipeline-types';
 
 export { validatePipelines, DEFAULT_TRIGGER_LABELS } from '../../hooks/cue/usePipelineState';
@@ -84,6 +87,11 @@ function CuePipelineEditorInner({
 	// Canvas lock — when true, drag / select / connect are disabled (pan + zoom
 	// still work). Lifted here so the L keyboard shortcut can toggle it.
 	const [isLocked, setIsLocked] = useState(false);
+
+	// Auto-arrange confirmation gate. The button opens this; confirming runs
+	// handleAutoArrange. Kept here (not in PipelineCanvas) so the layout
+	// mutation has access to setPipelineState / persistLayout / offsets.
+	const [arrangeConfirmOpen, setArrangeConfirmOpen] = useState(false);
 
 	// Selection bridge: usePipelineState needs selection IDs for its mutation
 	// callbacks, but usePipelineSelection needs pipelineState. We resolve the
@@ -361,6 +369,48 @@ function CuePipelineEditorInner({
 		]
 	);
 
+	// ─── Auto-arrange ──────────────────────────────────────────────────────
+	// In All-Pipelines view, pack the group cards into a grid (viewOffset per
+	// pipeline). In a single-pipeline view, lay that pipeline's nodes out in
+	// flow-depth columns. Either way: mutate canonical state (flips dirty,
+	// undoable via Discard), persist like a drag, then re-fit so the result
+	// is centered in view.
+	const handleAutoArrange = useCallback(() => {
+		setPipelineState((prev) => {
+			if (prev.selectedPipelineId === null) {
+				const offsets = arrangePipelineGroups(prev.pipelines, stableYOffsetsRef.current);
+				if (offsets.size === 0) return prev;
+				return {
+					...prev,
+					pipelines: prev.pipelines.map((p) => {
+						const next = offsets.get(p.id);
+						return next ? { ...p, viewOffset: next } : p;
+					}),
+				};
+			}
+			return {
+				...prev,
+				pipelines: prev.pipelines.map((p) =>
+					p.id === prev.selectedPipelineId ? { ...p, nodes: arrangePipelineNodes(p) } : p
+				),
+			};
+		});
+		persistLayout();
+		// Wait for React → ReactFlow to re-measure the moved nodes before fitting.
+		setTimeout(() => reactFlowInstance.fitView({ padding: 0.2, duration: 300 }), 180);
+	}, [setPipelineState, persistLayout, stableYOffsetsRef, reactFlowInstance]);
+
+	const arrangeConfirmMessage = useMemo(() => {
+		if (isAllPipelinesView) {
+			const count = pipelineState.pipelines.filter((p) => p.nodes.length > 0).length;
+			return `Auto-arrange will reposition all ${count} pipeline${count === 1 ? '' : 's'} into a tidy grid. Your current placement is preserved as ordering, just aligned. You can undo with Discard before saving.`;
+		}
+		const name = pipelineState.pipelines.find(
+			(p) => p.id === pipelineState.selectedPipelineId
+		)?.name;
+		return `Auto-arrange will reposition the nodes in "${name ?? 'this pipeline'}" into a clean left-to-right layout. You can undo with Discard before saving.`;
+	}, [isAllPipelinesView, pipelineState.pipelines, pipelineState.selectedPipelineId]);
+
 	// ─── Canvas callbacks ──────────────────────────────────────────────────
 	const canvasCallbacks = usePipelineCanvasCallbacks({
 		state: { pipelineState, isAllPipelinesView },
@@ -519,7 +569,22 @@ function CuePipelineEditorInner({
 				setInteractionMode={setInteractionMode}
 				isLocked={isLocked}
 				setIsLocked={setIsLocked}
+				onAutoArrange={() => setArrangeConfirmOpen(true)}
 			/>
+
+			{arrangeConfirmOpen && (
+				<ConfirmModal
+					theme={theme}
+					title="Auto-arrange layout"
+					message={arrangeConfirmMessage}
+					destructive={false}
+					confirmLabel="Arrange"
+					headerIcon={<LayoutGrid className="w-4 h-4" style={{ color: theme.colors.accent }} />}
+					icon={<LayoutGrid className="w-5 h-5" style={{ color: theme.colors.warning }} />}
+					onConfirm={handleAutoArrange}
+					onClose={() => setArrangeConfirmOpen(false)}
+				/>
+			)}
 
 			{contextMenu && (
 				<PipelineContextMenu

@@ -45,7 +45,7 @@ function renderList(overrides: Partial<Parameters<typeof GroupChatList>[0]> = {}
 		onEditGroupChat: vi.fn(),
 		onRenameGroupChat: vi.fn(),
 		onDeleteGroupChat: vi.fn(),
-	} as const;
+	};
 	return render(<GroupChatList {...defaults} {...overrides} />);
 }
 
@@ -107,5 +107,43 @@ describe('GroupChatList', () => {
 		unmount();
 		expectAllListenersRemoved(spies.addSpy, spies.removeSpy);
 		spies.restore();
+	});
+
+	it('stays collapsed when a new chat is added', () => {
+		const onExpandedChange = vi.fn();
+		const secondChat: GroupChat = { ...baseChat, id: 'gc-2', name: 'Second Chat' };
+		const { rerender } = renderList({
+			isExpanded: false,
+			onExpandedChange,
+			groupChats: [baseChat],
+		});
+		rerender(
+			<GroupChatList
+				theme={mockTheme}
+				groupChats={[baseChat, secondChat]}
+				activeGroupChatId={null}
+				onOpenGroupChat={vi.fn()}
+				onNewGroupChat={vi.fn()}
+				onEditGroupChat={vi.fn()}
+				onRenameGroupChat={vi.fn()}
+				onDeleteGroupChat={vi.fn()}
+				isExpanded={false}
+				onExpandedChange={onExpandedChange}
+			/>
+		);
+		expect(onExpandedChange).not.toHaveBeenCalled();
+	});
+
+	it('expands and creates a chat when New Chat is clicked while collapsed', () => {
+		const onExpandedChange = vi.fn();
+		const onNewGroupChat = vi.fn();
+		const { getByText } = renderList({
+			isExpanded: false,
+			onExpandedChange,
+			onNewGroupChat,
+		});
+		fireEvent.click(getByText('+ New Chat'));
+		expect(onExpandedChange).toHaveBeenCalledWith(true);
+		expect(onNewGroupChat).toHaveBeenCalledTimes(1);
 	});
 });

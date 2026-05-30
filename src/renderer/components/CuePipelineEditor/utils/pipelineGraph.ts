@@ -72,10 +72,12 @@ const NODE_HEIGHT = 100; // approximate node height
 
 // Approximate node footprint used to compute the bounding box of the per-pipeline
 // translucent background card in All Pipelines view. Real nodes are a touch
-// narrower/shorter, so the box always fully encloses them.
-const NODE_BG_WIDTH = 320;
-const NODE_BG_HEIGHT = 100;
-const PIPELINE_GROUP_PADDING = 28;
+// narrower/shorter, so the box always fully encloses them. Exported so the
+// auto-arrange layout (pipelineAutoArrange.ts) sizes group cells with the exact
+// same footprint the renderer uses, keeping grid spacing pixel-accurate.
+export const NODE_BG_WIDTH = 320;
+export const NODE_BG_HEIGHT = 100;
+export const PIPELINE_GROUP_PADDING = 28;
 
 /**
  * Computes vertical offsets so pipeline groups don't overlap in the

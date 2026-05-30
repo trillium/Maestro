@@ -363,15 +363,32 @@ export const MainPanel = React.memo(
 					}
 				},
 				focusBrowserAddressBar: () => {
-					if (activeSession?.activeBrowserTabId) {
-						const input = document.getElementById(
-							`browser-tab-address-${activeSession.activeBrowserTabId}`
-						) as HTMLInputElement | null;
-						if (input) {
-							input.focus();
-							input.select();
-						}
-					}
+					// Read fresh from the store: `useImperativeHandle` only rebuilds when
+					// session ID changes, so opening a browser tab inside an existing
+					// session leaves `activeBrowserTabId` stale in the captured closure.
+					const session = selectActiveSession(useSessionStore.getState());
+					if (!session?.activeBrowserTabId) return;
+					const input = document.getElementById(
+						`browser-tab-address-${session.activeBrowserTabId}`
+					) as HTMLInputElement | null;
+					input?.focus();
+					input?.select();
+				},
+				openBrowserFind: () => {
+					// Same fresh-from-store reasoning as `focusBrowserAddressBar`.
+					const session = selectActiveSession(useSessionStore.getState());
+					if (!session?.activeBrowserTabId) return;
+					browserViewRef.current?.openFind();
+				},
+				browserBack: () => {
+					const session = selectActiveSession(useSessionStore.getState());
+					if (!session?.activeBrowserTabId) return;
+					browserViewRef.current?.goBack();
+				},
+				browserForward: () => {
+					const session = selectActiveSession(useSessionStore.getState());
+					if (!session?.activeBrowserTabId) return;
+					browserViewRef.current?.goForward();
 				},
 				focusActiveTab: () => {
 					// Read fresh from the store: useImperativeHandle only rebuilds when
@@ -408,22 +425,22 @@ export const MainPanel = React.memo(
 					tabElement.focus({ preventScroll: true });
 				},
 				reloadBrowserTab: () => {
-					if (activeSession?.activeBrowserTabId) {
-						const host = document.querySelector('[data-testid="browser-tab-host"]');
-						const webview = host?.querySelector('webview') as
-							| (HTMLElement & { reload: () => void; stop: () => void; isLoading: () => boolean })
-							| null;
-						if (webview) {
-							try {
-								if (webview.isLoading()) {
-									webview.stop();
-								} else {
-									webview.reload();
-								}
-							} catch {
-								// webview not ready
-							}
+					// Same stale-closure caveat as `focusBrowserAddressBar` — read fresh.
+					const session = selectActiveSession(useSessionStore.getState());
+					if (!session?.activeBrowserTabId) return;
+					const host = document.querySelector('[data-testid="browser-tab-host"]');
+					const webview = host?.querySelector('webview') as
+						| (HTMLElement & { reload: () => void; stop: () => void; isLoading: () => boolean })
+						| null;
+					if (!webview) return;
+					try {
+						if (webview.isLoading()) {
+							webview.stop();
+						} else {
+							webview.reload();
 						}
+					} catch {
+						// webview not ready
 					}
 				},
 				openTerminalSearch: () => {
@@ -618,6 +635,10 @@ export const MainPanel = React.memo(
 				setGitDiffPreview(diff.diff);
 			} else {
 				notifyCenterFlash({ message: 'No diff to examine', color: 'theme' });
+				// Polling cache said there were changes but `git diff` is empty —
+				// repo state changed since the last poll. Re-sync so the widget
+				// stops advertising stale stats.
+				void refreshGitStatus();
 			}
 		}, [
 			activeSession?.isGitRepo,
@@ -626,6 +647,7 @@ export const MainPanel = React.memo(
 			activeSession?.cwd,
 			filePreviewSshRemoteId,
 			setGitDiffPreview,
+			refreshGitStatus,
 		]);
 
 		// Show log viewer
@@ -938,6 +960,9 @@ export const MainPanel = React.memo(
 							onOpenPromptComposer={props.onOpenPromptComposer}
 							onReplayMessage={props.onReplayMessage}
 							onForkConversation={props.onForkConversation}
+							onSessionRecover={props.onSessionRecover}
+							isRecoveringSession={props.isRecoveringSession}
+							sessionRecoveryError={props.sessionRecoveryError}
 							fileTree={props.fileTree}
 							onFileClick={props.onFileClick}
 							refreshFileTree={props.refreshFileTree}

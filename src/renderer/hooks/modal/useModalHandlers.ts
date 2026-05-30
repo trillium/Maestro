@@ -34,6 +34,7 @@ import { CONDUCTOR_BADGES } from '../../constants/conductorBadges';
 import { gitService } from '../../services/git';
 import { cueService } from '../../services/cue';
 import { notifyCenterFlash } from '../../stores/centerFlashStore';
+import { useGitDetail } from '../../contexts/GitStatusContext';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -932,6 +933,8 @@ export function useModalHandlers(
 	// Git Diff Opener (Tier 3C)
 	// ====================================================================
 
+	const { refreshGitStatus } = useGitDetail();
+
 	const handleViewGitDiff = useCallback(async () => {
 		if (!activeSession || !activeSession.isGitRepo) return;
 
@@ -951,8 +954,12 @@ export function useModalHandlers(
 			getModalActions().setGitDiffPreview(diff.diff);
 		} else {
 			notifyCenterFlash({ message: 'No diff to examine', color: 'theme' });
+			// Polling cache said there were changes but `git diff` is empty —
+			// repo state changed since the last poll. Re-sync so the widget
+			// stops advertising stale stats.
+			void refreshGitStatus();
 		}
-	}, [activeSession]);
+	}, [activeSession, refreshGitStatus]);
 
 	// ====================================================================
 	// Director's Notes Session Navigation (Tier 3C)

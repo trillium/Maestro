@@ -587,12 +587,19 @@ export const HistoryPanel = React.memo(
 		// Keyboard navigation handler - combines hook handler with custom Escape/Cmd+F logic
 		const handleKeyDown = useCallback(
 			(e: React.KeyboardEvent) => {
-				// Open search filter with Cmd+F
-				if (e.key === 'f' && (e.metaKey || e.ctrlKey) && !searchFilterOpen) {
+				// Open (or re-focus) search filter with Cmd+F. When already open we
+				// still want to pull focus back to the input so the user can keep
+				// typing after using arrow keys to scroll the list.
+				if (e.key === 'f' && (e.metaKey || e.ctrlKey)) {
 					e.preventDefault();
-					setSearchFilterOpen(true);
-					// Focus the search input after state update
-					setTimeout(() => searchInputRef.current?.focus(), 0);
+					if (!searchFilterOpen) setSearchFilterOpen(true);
+					setTimeout(() => {
+						const input = searchInputRef.current;
+						if (!input) return;
+						input.focus();
+						const len = input.value.length;
+						input.setSelectionRange(len, len);
+					}, 0);
 					return;
 				}
 

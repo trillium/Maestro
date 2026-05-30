@@ -13,6 +13,8 @@ import {
 	getOpenCodeConfigPaths,
 	getOpenCodeCommandDirs,
 } from '../../agents';
+import { capabilitySnapshots } from '../../agents/capability-snapshot';
+import type { AgentCapabilitiesSnapshotMap } from '../../../shared/agentCapabilities';
 import { execFileNoThrow } from '../../utils/execFile';
 import { logger } from '../../utils/logger';
 import { getWhichCommand } from '../../../shared/platformDetection';
@@ -299,8 +301,12 @@ function getSshRemoteById(
  * Agent configs can have function properties that cannot be sent over IPC:
  * - argBuilder in configOptions
  * - resumeArgs, modelArgs, workingDirArgs, imageArgs, imagePromptBuilder, promptArgs on the agent config
+ *
+ * Also attaches the current capability snapshot (if any) for the requested
+ * environment so renderer code can render status pills directly from the
+ * detect result.
  */
-function stripAgentFunctions(agent: any) {
+function stripAgentFunctions(agent: any, sshRemoteId?: string) {
 	if (!agent) return null;
 
 	// Destructure to remove function properties from agent config
@@ -314,12 +320,15 @@ function stripAgentFunctions(agent: any) {
 		...serializableAgent
 	} = agent;
 
+	const snapshot = agent.id ? capabilitySnapshots.get(agent.id, sshRemoteId) : undefined;
+
 	return {
 		...serializableAgent,
 		configOptions: agent.configOptions?.map((opt: any) => {
 			const { argBuilder: _argBuilder, ...serializableOpt } = opt;
 			return serializableOpt;
 		}),
+		...(snapshot ? { snapshot } : {}),
 	};
 }
 
@@ -396,6 +405,30 @@ async function detectAgentsRemote(sshRemote: SshRemoteConfig): Promise<any[]> {
 				capabilities: getAgentCapabilities(agentDef.id),
 				error: connectionError,
 			});
+
+			// Mirror remote detection into the snapshot store, keyed by the
+			// stable SSH remote UUID so each host has its own readiness pill.
+			// Skip when the observed state matches the existing snapshot —
+			// otherwise an `agents:reprobe` for a single agent would emit
+			// snapshot-updated broadcasts for every other agent on the host.
+			if (agentDef.id !== 'terminal') {
+				const existing = capabilitySnapshots.get(agentDef.id, sshRemote.id);
+				if (available) {
+					if (existing?.status === 'auth_required') {
+						// no-op: reactive auth_required state stays intact
+					} else if (existing?.status !== 'ok' || existing.path !== path) {
+						capabilitySnapshots.markOk(agentDef.id, { path }, sshRemote.id);
+					}
+				} else if (!connectionError && existing?.status !== 'not_installed') {
+					capabilitySnapshots.markNotInstalled(agentDef.id, sshRemote.id);
+				} else if (connectionError && existing?.status !== 'failed') {
+					// In-band SSH connection failure: stderr matched a connection
+					// error without throwing, so the catch below never runs. Resolve
+					// a pending `probing` snapshot (from an `agents:reprobe`) to
+					// `failed` instead of leaving the status pill spinning forever.
+					capabilitySnapshots.markFailed(agentDef.id, connectionError, sshRemote.id);
+				}
+			}
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			connectionError = errorMessage;
@@ -409,6 +442,9 @@ async function detectAgentsRemote(sshRemote: SshRemoteConfig): Promise<any[]> {
 				capabilities: getAgentCapabilities(agentDef.id),
 				error: `Failed to connect: ${errorMessage}`,
 			});
+			if (agentDef.id !== 'terminal') {
+				capabilitySnapshots.markFailed(agentDef.id, errorMessage, sshRemote.id);
+			}
 		}
 	}
 
@@ -789,13 +825,16 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 						LOG_CONTEXT
 					);
 					return AGENT_DEFINITIONS.map((agentDef) =>
-						stripAgentFunctions({
-							...agentDef,
-							available: false,
-							path: undefined,
-							capabilities: getAgentCapabilities(agentDef.id),
-							error: `SSH remote configuration not found: ${sshRemoteId}`,
-						})
+						stripAgentFunctions(
+							{
+								...agentDef,
+								available: false,
+								path: undefined,
+								capabilities: getAgentCapabilities(agentDef.id),
+								error: `SSH remote configuration not found: ${sshRemoteId}`,
+							},
+							sshRemoteId
+						)
 					);
 				}
 				logger.info(`Detecting agents on remote host: ${sshConfig.host}`, LOG_CONTEXT);
@@ -807,7 +846,7 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 						agents: agents.map((a: any) => a.id),
 					}
 				);
-				return agents.map(stripAgentFunctions);
+				return agents.map((a) => stripAgentFunctions(a, sshConfig.id));
 			}
 
 			// Local detection
@@ -818,7 +857,7 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 				agents: agents.map((a) => a.id),
 			});
 			// Strip argBuilder functions before sending over IPC
-			return agents.map(stripAgentFunctions);
+			return agents.map((a) => stripAgentFunctions(a));
 		})
 	);
 
@@ -866,13 +905,13 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 				}
 
 				logger.info(`Agent refresh debug info for ${agentId}`, LOG_CONTEXT, debugInfo);
-				return { agents: agents.map(stripAgentFunctions), debugInfo };
+				return { agents: agents.map((a) => stripAgentFunctions(a)), debugInfo };
 			}
 
 			logger.info(`Refreshed agent detection`, LOG_CONTEXT, {
 				agents: agents.map((a) => ({ id: a.id, available: a.available, path: a.path })),
 			});
-			return { agents: agents.map(stripAgentFunctions), debugInfo: null };
+			return { agents: agents.map((a) => stripAgentFunctions(a)), debugInfo: null };
 		})
 	);
 
@@ -892,13 +931,16 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 					if (!agentDef) {
 						throw new Error(`Unknown agent: ${agentId}`);
 					}
-					return stripAgentFunctions({
-						...agentDef,
-						available: false,
-						path: undefined,
-						capabilities: getAgentCapabilities(agentDef.id),
-						error: `SSH remote configuration not found: ${sshRemoteId}`,
-					});
+					return stripAgentFunctions(
+						{
+							...agentDef,
+							available: false,
+							path: undefined,
+							capabilities: getAgentCapabilities(agentDef.id),
+							error: `SSH remote configuration not found: ${sshRemoteId}`,
+						},
+						sshRemoteId
+					);
 				}
 
 				logger.info(`Getting agent ${agentId} on remote host: ${sshConfig.host}`, LOG_CONTEXT);
@@ -971,25 +1013,45 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 						logger.debug(`Agent "${agentDef.name}" not found on remote`, LOG_CONTEXT);
 					}
 
-					return stripAgentFunctions({
-						...agentDef,
-						available,
-						path,
-						capabilities: getAgentCapabilities(agentDef.id),
-						error: connectionError,
-					});
+					if (agentDef.id !== 'terminal') {
+						if (available) {
+							const existing = capabilitySnapshots.get(agentDef.id, sshConfig.id);
+							if (existing?.status !== 'auth_required') {
+								capabilitySnapshots.markOk(agentDef.id, { path }, sshConfig.id);
+							}
+						} else if (!connectionError) {
+							capabilitySnapshots.markNotInstalled(agentDef.id, sshConfig.id);
+						}
+					}
+
+					return stripAgentFunctions(
+						{
+							...agentDef,
+							available,
+							path,
+							capabilities: getAgentCapabilities(agentDef.id),
+							error: connectionError,
+						},
+						sshConfig.id
+					);
 				} catch (error) {
 					const errorMessage = error instanceof Error ? error.message : String(error);
 					logger.warn(
 						`Failed to check agent "${agentDef.name}" on remote: ${errorMessage}`,
 						LOG_CONTEXT
 					);
-					return stripAgentFunctions({
-						...agentDef,
-						available: false,
-						capabilities: getAgentCapabilities(agentDef.id),
-						error: `Failed to connect: ${errorMessage}`,
-					});
+					if (agentDef.id !== 'terminal') {
+						capabilitySnapshots.markFailed(agentDef.id, errorMessage, sshConfig.id);
+					}
+					return stripAgentFunctions(
+						{
+							...agentDef,
+							available: false,
+							capabilities: getAgentCapabilities(agentDef.id),
+							error: `Failed to connect: ${errorMessage}`,
+						},
+						sshConfig.id
+					);
 				}
 			}
 
@@ -1454,6 +1516,19 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 		)
 	);
 
+	// Get the persisted capability snapshot for a single agent in a given
+	// environment (local or per-SSH-remote). Returns null when no snapshot
+	// has been written yet — callers should fall back to detection.
+	ipcMain.handle(
+		'agents:getSnapshot',
+		withIpcErrorLogging(
+			handlerOpts('getSnapshot'),
+			async (agentId: string, sshRemoteId?: string) => {
+				return capabilitySnapshots.get(agentId, sshRemoteId) ?? null;
+			}
+		)
+	);
+
 	// Auto-detected maestro-p binary path (bundled with the app). The renderer's
 	// AgentConfigPanel shows this as helper text for the Batch Mode path override.
 	// Returns null when no bundled script can be located — usually means the user
@@ -1467,6 +1542,59 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 				return getMaestroPBinPath();
 			}
 		)
+	);
+
+	// Get every persisted snapshot — used by the renderer at startup to
+	// hydrate the agents store before the first live detection completes.
+	ipcMain.handle(
+		'agents:getAllSnapshots',
+		withIpcErrorLogging(
+			handlerOpts('getAllSnapshots'),
+			async (): Promise<AgentCapabilitiesSnapshotMap> => capabilitySnapshots.getAll()
+		)
+	);
+
+	// Re-probe a single agent: clear its snapshot, then run detection so a
+	// fresh status emits via the snapshot-updated event channel. The
+	// returned snapshot reflects the post-detection state.
+	ipcMain.handle(
+		'agents:reprobe',
+		withIpcErrorLogging(handlerOpts('reprobe'), async (agentId: string, sshRemoteId?: string) => {
+			// `terminal` is internal — detection paths intentionally skip it,
+			// so a probe call would leave the snapshot stuck at `probing` forever.
+			if (agentId === 'terminal') {
+				return null;
+			}
+
+			capabilitySnapshots.clear(agentId, sshRemoteId);
+
+			if (sshRemoteId) {
+				const sshConfig = getSshRemoteById(settingsStore, sshRemoteId);
+				if (!sshConfig) {
+					capabilitySnapshots.markFailed(
+						agentId,
+						`SSH remote not found: ${sshRemoteId}`,
+						sshRemoteId
+					);
+					return capabilitySnapshots.get(agentId, sshRemoteId) ?? null;
+				}
+				capabilitySnapshots.markProbing(agentId, sshRemoteId);
+				// `detectAgentsRemote` enumerates every agent on the remote in
+				// one SSH round-trip per binary. Other agents' snapshots only
+				// flip when their detected state actually changes (see
+				// `markOk` + detector's change-suppression logic) so the
+				// requested agent is the dominant signal.
+				await detectAgentsRemote(sshConfig);
+				return capabilitySnapshots.get(agentId, sshRemoteId) ?? null;
+			}
+
+			const agentDetector = requireDependency(getAgentDetector, 'Agent detector');
+			capabilitySnapshots.markProbing(agentId);
+			agentDetector.clearCache();
+			agentDetector.clearModelCache(agentId);
+			await agentDetector.detectAgents();
+			return capabilitySnapshots.get(agentId) ?? null;
+		})
 	);
 
 	// Snapshot mirror for the renderer: returns every non-expired Claude Max-plan

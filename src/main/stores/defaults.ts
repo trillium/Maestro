@@ -13,6 +13,7 @@ import type {
 	SessionsData,
 	GroupsData,
 	AgentConfigsData,
+	AgentCapabilitiesData,
 	WindowState,
 	ClaudeSessionOriginsData,
 	AgentSessionOriginsData,
@@ -98,6 +99,10 @@ export const GROUPS_DEFAULTS: GroupsData = {
 
 export const AGENT_CONFIGS_DEFAULTS: AgentConfigsData = {
 	configs: {},
+};
+
+export const AGENT_CAPABILITIES_DEFAULTS: AgentCapabilitiesData = {
+	snapshots: {},
 };
 
 export const WINDOW_STATE_DEFAULTS: WindowState = {
