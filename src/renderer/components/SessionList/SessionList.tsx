@@ -114,13 +114,15 @@ interface SessionListProps {
 	// Maestro Cue
 	onConfigureCue?: (session: Session) => void;
 
-	// Starred sessions cross-agent jump
+	// Starred sessions cross-agent jump. Resolves to `false` when the session can
+	// no longer be loaded (aged out), so the click handler can offer to unstar it.
 	onJumpToStarredSession?: (
 		agentId: string,
 		projectPath: string,
 		agentSessionId: string,
-		sessionName: string
-	) => void;
+		sessionName: string,
+		parentSessionId: string
+	) => Promise<boolean>;
 
 	// Group Chat handlers
 	onOpenGroupChat?: (id: string) => void;
@@ -372,7 +374,7 @@ function SessionListInner(props: SessionListProps) {
 	}, [showStarredSessionsSection, sessions, starredNamedSessions]);
 
 	const handleStarredItemClick = useCallback(
-		(item: StarredItem) => {
+		async (item: StarredItem) => {
 			useSessionStore.getState().setActiveSessionId(item.parentSessionId);
 			if (item.kind === 'open') {
 				updateSessionWith(item.parentSessionId, (s) => ({
@@ -383,12 +385,40 @@ function SessionListInner(props: SessionListProps) {
 					activeBrowserTabId: null,
 					inputMode: 'ai',
 				}));
-			} else if (props.onJumpToStarredSession) {
-				props.onJumpToStarredSession(
-					item.agentId,
-					item.projectPath,
-					item.agentSessionId,
-					item.sessionName
+				return;
+			}
+			// Closed session: ask the owning agent to resume it. If it can't be
+			// loaded the conversation has aged out (no longer on disk), so offer to
+			// remove the now-dangling star instead of silently doing nothing.
+			const opened = await props.onJumpToStarredSession?.(
+				item.agentId,
+				item.projectPath,
+				item.agentSessionId,
+				item.sessionName,
+				item.parentSessionId
+			);
+			if (opened === false) {
+				props.showConfirmation?.(
+					`"${item.sessionName}" is no longer available. It has aged out and its conversation could not be loaded. Remove the star?`,
+					async () => {
+						await window.maestro.agentSessions.setSessionStarred(
+							item.agentId,
+							item.projectPath,
+							item.agentSessionId,
+							false
+						);
+						// Drop it from the local list so the section updates immediately.
+						setStarredNamedSessions((prev) =>
+							prev.filter(
+								(s) =>
+									!(
+										s.agentId === item.agentId &&
+										s.agentSessionId === item.agentSessionId &&
+										s.projectPath === item.projectPath
+									)
+							)
+						);
+					}
 				);
 			}
 		},
@@ -1220,7 +1250,7 @@ function SessionListInner(props: SessionListProps) {
 										<button
 											key={item.key}
 											type="button"
-											onClick={() => handleStarredItemClick(item)}
+											onClick={() => void handleStarredItemClick(item)}
 											className="px-3 py-1.5 flex flex-col text-left hover:bg-white/5 transition-colors"
 											style={{ color: theme.colors.textMain }}
 											title={`${item.displayName} - ${item.agentName}`}
