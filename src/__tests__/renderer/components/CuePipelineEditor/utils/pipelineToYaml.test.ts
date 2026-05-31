@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import {
 	pipelineToYamlSubscriptions,
 	pipelinesToYaml,
+	pipelinesToYamlByOwnerCwd,
 	ensureSourceOutputVariable,
 } from '../../../../../renderer/components/CuePipelineEditor/utils/pipelineToYaml';
 import type { CuePipeline } from '../../../../../shared/cue-pipeline-types';
@@ -2212,5 +2213,69 @@ describe('source_sub emission on agent chain subs', () => {
 		expect(subs[1].event).toBe('agent.completed');
 		expect(subs[1].source_session).toBe('A');
 		expect(subs[1].source_sub).toBe('Pipeline 1');
+	});
+});
+
+describe('pipelinesToYamlByOwnerCwd — owner id resolution', () => {
+	// Regression: an agent node bound by NAME only (empty/stale sessionId, e.g.
+	// a legacy pipeline or an agent deleted-and-recreated under the same name)
+	// passed the save-time root validation (which falls back to name) but failed
+	// emission, which read sessionId directly and produced agent_id=<missing>.
+	// The "Unresolvable agent_id" save failure. The resolver closes that gap.
+	const makeNameOnlyPipeline = (): CuePipeline =>
+		makePipeline({
+			name: 'Pedsidian',
+			nodes: [
+				{
+					id: 't1',
+					type: 'trigger',
+					position: { x: 0, y: 0 },
+					data: {
+						eventType: 'time.scheduled',
+						label: 'S',
+						config: { schedule_times: ['06:30'] },
+					},
+				},
+				{
+					id: 'a1',
+					type: 'agent',
+					position: { x: 300, y: 0 },
+					data: {
+						sessionId: '',
+						sessionName: 'Pedsidian',
+						toolType: 'claude-code',
+						inputPrompt: 'go',
+					},
+				},
+			],
+			edges: [{ id: 'e1', source: 't1', target: 'a1', mode: 'pass' }],
+		});
+
+	const sessionsById = new Map([['live-id-123', { projectRoot: '/Users/pedram' }]]);
+
+	it('reports unresolved without a resolver (the pre-fix behavior)', () => {
+		const { unresolved } = pipelinesToYamlByOwnerCwd(
+			[makeNameOnlyPipeline()],
+			undefined,
+			sessionsById
+		);
+		expect(unresolved).toEqual([{ subName: 'Pedsidian', agentId: '' }]);
+	});
+
+	it('resolves a name-only node to the live agent_id via the resolver', () => {
+		const resolveOwnerId = (id?: string, name?: string): string | undefined => {
+			if (id && sessionsById.has(id)) return id;
+			if (name === 'Pedsidian') return 'live-id-123';
+			return id;
+		};
+		const { byCwd, unresolved } = pipelinesToYamlByOwnerCwd(
+			[makeNameOnlyPipeline()],
+			undefined,
+			sessionsById,
+			resolveOwnerId
+		);
+		expect(unresolved).toEqual([]);
+		expect([...byCwd.keys()]).toEqual(['/Users/pedram']);
+		expect(byCwd.get('/Users/pedram')?.yaml).toContain('agent_id: live-id-123');
 	});
 });

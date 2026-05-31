@@ -39,6 +39,7 @@ import {
 } from '../../utils/browserTabPersistence';
 import { generateId } from '../../utils/ids';
 import { clearLiveDraft } from '../../utils/liveDraftStore';
+import { persistTabStarred } from '../../utils/starredSessions';
 import { useSessionStore, selectActiveSession, updateAiTab } from '../../stores/sessionStore';
 import { useModalStore } from '../../stores/modalStore';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -1592,17 +1593,8 @@ export function useTabHandlers(): TabHandlersReturn {
 			prev.map((s) => {
 				if (s.id !== session.id) return s;
 				const tab = s.aiTabs.find((t) => t.id === tabId);
-				if (tab?.agentSessionId) {
-					const agentId = s.toolType || 'claude-code';
-					if (agentId === 'claude-code') {
-						window.maestro.claude
-							.updateSessionStarred(s.projectRoot, tab.agentSessionId, starred)
-							.catch((err) => logger.error('Failed to persist tab starred:', undefined, err));
-					} else {
-						window.maestro.agentSessions
-							.setSessionStarred(agentId, s.projectRoot, tab.agentSessionId, starred)
-							.catch((err) => logger.error('Failed to persist tab starred:', undefined, err));
-					}
+				if (tab) {
+					persistTabStarred(s, tab, starred);
 				}
 				return {
 					...s,

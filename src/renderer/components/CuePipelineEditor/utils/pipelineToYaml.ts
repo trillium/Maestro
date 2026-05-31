@@ -696,12 +696,31 @@ export interface PipelineSubscriptionRecords {
 }
 
 /**
+ * Resolves a node's owning agent to a live session id, mirroring the id→name
+ * fallback in `resolveNodeWriteRoot` (see pipelineRoots.ts). Given the node's
+ * own `(sessionId, sessionName)`, return the id the YAML should bind to.
+ *
+ * The default behavior (no resolver) emits the raw `sessionId`. handleSave
+ * passes a resolver backed by the live session maps so that a node bound by
+ * NAME only — empty/stale `sessionId` but a `sessionName` that still matches a
+ * live agent — emits the live agent's id instead of an empty `agent_id`. That
+ * asymmetry (validation resolves by name, emission did not) was the
+ * "Unresolvable agent_id ... (agent_id=<missing>)" save failure on legacy
+ * pipelines whose nodes predate stable session ids.
+ */
+export type OwnerIdResolver = (
+	sessionId: string | undefined,
+	sessionName: string | undefined
+) => string | undefined;
+
+/**
  * Build the intermediate subscription records for a list of pipelines without
  * serializing to YAML. Exposed so the per-owner-cwd emitter can split records
  * by `record.agent_id` → cwd before calling the YAML serializer.
  */
 export function pipelinesToSubscriptionRecords(
-	pipelines: CuePipeline[]
+	pipelines: CuePipeline[],
+	resolveOwnerId?: OwnerIdResolver
 ): PipelineSubscriptionRecords {
 	const allSubscriptions: Array<Record<string, unknown>> = [];
 	const comments: string[] = [];
@@ -720,8 +739,14 @@ export function pipelinesToSubscriptionRecords(
 				event: sub.event,
 			};
 
-			// Bind subscription to its owning agent by session ID
-			const agentId = subAgentIdMap.get(sub.name);
+			// Bind subscription to its owning agent by session ID. When a
+			// resolver is supplied, normalize the raw node id through it (with
+			// the node's session name as the fallback key) so a node bound by
+			// name only still emits a live `agent_id` instead of <missing>.
+			const rawAgentId = subAgentIdMap.get(sub.name);
+			const agentId = resolveOwnerId
+				? resolveOwnerId(rawAgentId, subAgentMap.get(sub.name))
+				: rawAgentId;
 			if (agentId) record.agent_id = agentId;
 
 			// Persist the owning pipeline's name and color so they round-trip
@@ -933,9 +958,10 @@ export interface CwdYamlEntry extends PipelineYamlResult {
 export function pipelinesToYamlByOwnerCwd(
 	pipelines: CuePipeline[],
 	settings: Partial<CueSettings> | undefined,
-	sessionsById: ReadonlyMap<string, SessionRootRef>
+	sessionsById: ReadonlyMap<string, SessionRootRef>,
+	resolveOwnerId?: OwnerIdResolver
 ): { byCwd: Map<string, CwdYamlEntry>; unresolved: Array<{ subName: string; agentId: string }> } {
-	const { records, promptFiles } = pipelinesToSubscriptionRecords(pipelines);
+	const { records, promptFiles } = pipelinesToSubscriptionRecords(pipelines, resolveOwnerId);
 
 	const recordsByCwd = new Map<string, Array<Record<string, unknown>>>();
 	const unresolved: Array<{ subName: string; agentId: string }> = [];

@@ -177,6 +177,8 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 	const setIdleNotificationEnabled = useSettingsStore((s) => s.setIdleNotificationEnabled);
 	const bionifyReadingMode = useSettingsStore((s) => s.bionifyReadingMode);
 	const setBionifyReadingMode = useSettingsStore((s) => s.setBionifyReadingMode);
+	const showStarredSessionsSection = useSettingsStore((s) => s.showStarredSessionsSection);
+	const setShowStarredSessionsSection = useSettingsStore((s) => s.setShowStarredSessionsSection);
 	const enterToSendAI = useSettingsStore((s) => s.enterToSendAI);
 	const storeSetHistorySearchFilterOpen = useUIStore((s) => s.setHistorySearchFilterOpen);
 	const setSuccessFlashNotification = useUIStore((s) => s.setSuccessFlashNotification);
@@ -464,6 +466,8 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 			setAudioFeedbackEnabled,
 			idleNotificationEnabled,
 			setIdleNotificationEnabled,
+			showStarredSessionsSection,
+			setShowStarredSessionsSection,
 			shortcuts: {
 				usageDashboard: shortcuts.usageDashboard,
 				agentSessions: shortcuts.agentSessions,

@@ -53,6 +53,10 @@ import { cueService } from '../../services/cue';
 import { captureException } from '../../utils/sentry';
 import { useEventListener } from '../../hooks/utils/useEventListener';
 import { getTabDisplayName } from '../../utils/tabHelpers';
+import {
+	notifyStarredSessionsChanged,
+	onStarredSessionsChanged,
+} from '../../utils/starredSessions';
 import { updateSessionWith } from '../../stores/sessionStore';
 
 // ============================================================================
@@ -282,32 +286,37 @@ function SessionListInner(props: SessionListProps) {
 		}>
 	>([]);
 	const [starredSectionCollapsed, setStarredSectionCollapsed] = useState(false);
-	useEffect(() => {
+	const loadStarredNamedSessions = useCallback(async () => {
 		if (!showStarredSessionsSection) return;
-		let mounted = true;
-		(async () => {
-			try {
-				const all = await window.maestro.agentSessions.getAllNamedSessions();
-				if (!mounted) return;
-				setStarredNamedSessions(
-					all
-						.filter((s) => s.starred === true)
-						.map((s) => ({
-							agentId: s.agentId,
-							agentSessionId: s.agentSessionId,
-							projectPath: s.projectPath,
-							sessionName: s.sessionName,
-							lastActivityAt: s.lastActivityAt,
-						}))
-				);
-			} catch (err) {
-				captureException(err, { extra: { context: 'SessionList.loadStarredNamedSessions' } });
-			}
-		})();
-		return () => {
-			mounted = false;
-		};
-	}, [showStarredSessionsSection, sessions.length]);
+		try {
+			const all = await window.maestro.agentSessions.getAllNamedSessions();
+			setStarredNamedSessions(
+				all
+					.filter((s) => s.starred === true)
+					.map((s) => ({
+						agentId: s.agentId,
+						agentSessionId: s.agentSessionId,
+						projectPath: s.projectPath,
+						sessionName: s.sessionName,
+						lastActivityAt: s.lastActivityAt,
+					}))
+			);
+		} catch (err) {
+			captureException(err, { extra: { context: 'SessionList.loadStarredNamedSessions' } });
+		}
+	}, [showStarredSessionsSection]);
+
+	// Refresh the closed/named starred cache when the agent count changes (a new
+	// session may have been starred) and whenever any star toggles anywhere in the
+	// app (so unstarring removes the row immediately instead of leaving a stale
+	// closed twin behind).
+	useEffect(() => {
+		void loadStarredNamedSessions();
+	}, [loadStarredNamedSessions, sessions.length]);
+	useEffect(
+		() => onStarredSessionsChanged(() => void loadStarredNamedSessions()),
+		[loadStarredNamedSessions]
+	);
 
 	// Combine open starred AI tabs with closed starred named sessions into the
 	// flat list rendered by the "Starred Sessions" Left Bar section.
@@ -334,10 +343,16 @@ function SessionListInner(props: SessionListProps) {
 	const starredItems = useMemo<StarredItem[]>(() => {
 		if (!showStarredSessionsSection) return [];
 		const items: StarredItem[] = [];
+		// Suppress a closed/named row whenever its conversation is already open as a
+		// tab, regardless of that tab's star state. Tracking every open tab's
+		// agentSessionId (not just starred ones) prevents a restored session from
+		// rendering twice - once as the open tab and once as its lingering closed
+		// twin - which is the duplication seen when restoring an aged-out star.
 		const openAgentSessionIds = new Set<string>();
 		for (const s of sessions) {
 			if (!s.aiTabs) continue;
 			for (const t of s.aiTabs) {
+				if (t.agentSessionId) openAgentSessionIds.add(t.agentSessionId);
 				if (!t.starred) continue;
 				items.push({
 					kind: 'open',
@@ -347,7 +362,6 @@ function SessionListInner(props: SessionListProps) {
 					parentSessionId: s.id,
 					tabId: t.id,
 				});
-				if (t.agentSessionId) openAgentSessionIds.add(t.agentSessionId);
 			}
 		}
 		const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -407,7 +421,8 @@ function SessionListInner(props: SessionListProps) {
 							item.agentSessionId,
 							false
 						);
-						// Drop it from the local list so the section updates immediately.
+						// Drop it from the local list so the section updates immediately,
+						// and broadcast so any other starred views refresh too.
 						setStarredNamedSessions((prev) =>
 							prev.filter(
 								(s) =>
@@ -418,6 +433,7 @@ function SessionListInner(props: SessionListProps) {
 									)
 							)
 						);
+						notifyStarredSessionsChanged();
 					}
 				);
 			}

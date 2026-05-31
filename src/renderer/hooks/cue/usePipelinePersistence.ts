@@ -302,10 +302,28 @@ export function usePipelinePersistence({
 			for (const [id, s] of sessionsById) {
 				sessionsByIdForEmit.set(id, { projectRoot: s.projectRoot });
 			}
+			// Mirror resolveNodeWriteRoot's id→name fallback so a node bound by
+			// name only (empty/stale sessionId on a legacy pipeline) still emits
+			// a live agent_id instead of failing the save with <missing>. The
+			// validation gate above already accepts these nodes by name; without
+			// this the emitter would reject them — the exact asymmetry behind the
+			// "Unresolvable agent_id" save failure.
+			const resolveOwnerId = (
+				id: string | undefined,
+				name: string | undefined
+			): string | undefined => {
+				if (id && sessionsById.has(id)) return id;
+				if (name) {
+					const byName = sessionsByName.get(name);
+					if (byName) return byName.id;
+				}
+				return id;
+			};
 			const { byCwd, unresolved } = pipelinesToYamlByOwnerCwd(
 				writablePipelines,
 				cueSettings,
-				sessionsByIdForEmit
+				sessionsByIdForEmit,
+				resolveOwnerId
 			);
 			if (unresolved.length > 0) {
 				// Defense-in-depth: validation above should have caught these.

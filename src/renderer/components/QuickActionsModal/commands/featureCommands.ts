@@ -44,6 +44,8 @@ interface BuildFeatureCommandsArgs {
 	setAudioFeedbackEnabled: (enabled: boolean) => void;
 	idleNotificationEnabled: boolean;
 	setIdleNotificationEnabled: (enabled: boolean) => void;
+	showStarredSessionsSection: boolean;
+	setShowStarredSessionsSection: (enabled: boolean) => void;
 	shortcuts: {
 		usageDashboard?: QuickAction['shortcut'];
 		agentSessions?: QuickAction['shortcut'];
@@ -102,6 +104,8 @@ export function buildFeatureCommands({
 	setAudioFeedbackEnabled,
 	idleNotificationEnabled,
 	setIdleNotificationEnabled,
+	showStarredSessionsSection,
+	setShowStarredSessionsSection,
 	shortcuts,
 	tabShortcuts,
 }: BuildFeatureCommandsArgs): QuickAction[] {
@@ -153,6 +157,22 @@ export function buildFeatureCommands({
 				flash(
 					setSuccessFlashNotification,
 					newState ? 'Idle Notifications: ON' : 'Idle Notifications: OFF'
+				);
+				setQuickActionOpen(false);
+			},
+		},
+		{
+			id: 'toggleStarredSessionsSection',
+			label: showStarredSessionsSection
+				? 'Hide Starred Sessions Section'
+				: 'Show Starred Sessions Section',
+			subtext: `Starred Sessions section: ${showStarredSessionsSection ? 'visible' : 'hidden'}`,
+			action: () => {
+				const newState = !showStarredSessionsSection;
+				setShowStarredSessionsSection(newState);
+				flash(
+					setSuccessFlashNotification,
+					newState ? 'Starred Sessions: SHOWN' : 'Starred Sessions: HIDDEN'
 				);
 				setQuickActionOpen(false);
 			},

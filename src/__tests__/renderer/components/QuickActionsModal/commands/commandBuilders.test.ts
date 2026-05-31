@@ -294,6 +294,8 @@ describe('QuickActions command builders', () => {
 				setAudioFeedbackEnabled: vi.fn(),
 				idleNotificationEnabled: false,
 				setIdleNotificationEnabled: vi.fn(),
+				showStarredSessionsSection: true,
+				setShowStarredSessionsSection: vi.fn(),
 				shortcuts: {},
 			}).map((a) => a.id)
 		).toContain('maestro-cue');
@@ -315,6 +317,8 @@ describe('QuickActions command builders', () => {
 			setAudioFeedbackEnabled: vi.fn(),
 			idleNotificationEnabled: false,
 			setIdleNotificationEnabled: vi.fn(),
+			showStarredSessionsSection: true,
+			setShowStarredSessionsSection: vi.fn(),
 			shortcuts: {},
 		});
 		const viewInGraph = graphCommands.find((a) => a.id === 'viewInDocumentGraph');
@@ -337,6 +341,8 @@ describe('QuickActions command builders', () => {
 				setAudioFeedbackEnabled: vi.fn(),
 				idleNotificationEnabled: false,
 				setIdleNotificationEnabled: vi.fn(),
+				showStarredSessionsSection: true,
+				setShowStarredSessionsSection: vi.fn(),
 				shortcuts: {},
 			}).map((a) => a.id)
 		).not.toContain('viewInDocumentGraph');
