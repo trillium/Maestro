@@ -1660,7 +1660,7 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 				}
 
 				await runStartupUsageSampling({
-					sessionsStore: sessionsStore as unknown as Store<{ sessions: any[] }>,
+					sessionsStore,
 					agentConfigsStore,
 					settingsStore: settingsStore as unknown as Store<MaestroSettings>,
 					agentDetector,
@@ -1714,7 +1714,7 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 				}
 
 				await runCodexUsageSampling({
-					sessionsStore: sessionsStore as unknown as Store<{ sessions: any[] }>,
+					sessionsStore,
 					agentConfigsStore,
 					agentDetector,
 				});

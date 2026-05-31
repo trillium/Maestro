@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import Store from 'electron-store';
 
 import type { AgentDetector } from './detector';
-import type { AgentConfigsData } from '../stores/types';
+import type { AgentConfigsData, SessionsData } from '../stores/types';
 import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
 import { resolveCodexHomeKey, setCodexUsageSnapshot } from '../stores/codexUsageStore';
@@ -22,7 +22,11 @@ import { sampleCodexUsage } from './codex-usage-sampler';
 const LOG_CONTEXT = '[CodexUsageSampler]';
 
 export interface CodexUsageSamplingDeps {
-	sessionsStore: Store<{ sessions: any[] }>;
+	// Read-only slice of the sessions store: the sampler only enumerates stored
+	// sessions, never writes. Typing it as `Pick<Store<SessionsData>, 'get'>`
+	// (rather than a looser `Store<{ sessions: any[] }>`) lets the real store
+	// instance assign without an `as unknown as` cast at the call site.
+	sessionsStore: Pick<Store<SessionsData>, 'get'>;
 	agentConfigsStore: Store<AgentConfigsData>;
 	agentDetector: AgentDetector;
 }

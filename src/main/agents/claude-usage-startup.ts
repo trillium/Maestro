@@ -41,7 +41,7 @@ import path from 'path';
 import Store from 'electron-store';
 
 import type { AgentDetector } from './detector';
-import type { AgentConfigsData } from '../stores/types';
+import type { AgentConfigsData, SessionsData } from '../stores/types';
 import type { MaestroSettings } from '../ipc/handlers/persistence';
 import { logger } from '../utils/logger';
 import { sampleUsage } from './claude-usage-sampler';
@@ -60,7 +60,11 @@ export const STARTUP_SESSION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export const USAGE_SNAPSHOT_STALE_MS = 5 * 60 * 1000;
 
 export interface StartupUsageSamplingDeps {
-	sessionsStore: Store<{ sessions: any[] }>;
+	// Read-only slice of the sessions store: the sampler only enumerates stored
+	// sessions, never writes. Typing it as `Pick<Store<SessionsData>, 'get'>`
+	// (rather than a looser `Store<{ sessions: any[] }>`) lets the real store
+	// instance assign without an `as unknown as` cast at the call site.
+	sessionsStore: Pick<Store<SessionsData>, 'get'>;
 	agentConfigsStore: Store<AgentConfigsData>;
 	settingsStore: Store<MaestroSettings>;
 	agentDetector: AgentDetector;
