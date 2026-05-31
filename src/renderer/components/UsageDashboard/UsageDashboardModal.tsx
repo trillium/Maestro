@@ -228,9 +228,7 @@ export function UsageDashboardModal({
 		(s) => s.encoreFeatures.maestroCue && s.encoreFeatures.usageStats
 	);
 	const claudeUsageSnapshots = useClaudeUsageStore((s) => s.snapshots);
-	const claudeUsageSnapshotsLoaded = useClaudeUsageStore((s) => s.loaded);
 	const codexUsageSnapshots = useCodexUsageStore((s) => s.snapshots);
-	const codexUsageSnapshotsLoaded = useCodexUsageStore((s) => s.loaded);
 	const hasAnthropicUsageDetails =
 		usageStatsTabEnabled &&
 		Object.values(claudeUsageSnapshots).some(hasUsefulAnthropicQuotaDetails);
@@ -342,18 +340,63 @@ export function UsageDashboardModal({
 		[timeRange]
 	);
 
-	// Quota provider tabs are based on cached/sanitized snapshots only.
-	// This refreshes the renderer mirror from main without triggering provider
-	// samplers such as Claude Code's TUI-backed /usage flow.
+	// Populate the quota provider tabs when the dashboard opens. We always
+	// mirror cached main-process state first (cheap), then - only for a provider
+	// that still has no useful cached snapshot - trigger one sampling pass so the
+	// tab can appear at all. Without this, the tabs are a closed loop: the tab
+	// only renders once a snapshot exists, but the sampler that would create the
+	// first snapshot never runs (boot sampling uses a strict recent-session
+	// filter and the panels mount with autoRefresh={false}). Sampling is gated
+	// to once per open and skipped entirely when data is already present, so the
+	// expensive paths (Claude's maestro-p spawn, Codex's quota HTTP request) only
+	// fire when there is genuinely nothing to show.
+	const quotaSampledForOpenRef = useRef(false);
 	useEffect(() => {
-		if (!isOpen || !usageStatsTabEnabled) return;
-		if (!claudeUsageSnapshotsLoaded) {
-			void useClaudeUsageStore.getState().refresh();
+		if (!isOpen) {
+			quotaSampledForOpenRef.current = false;
+			return;
 		}
-		if (!codexUsageSnapshotsLoaded) {
-			void useCodexUsageStore.getState().refresh();
-		}
-	}, [isOpen, usageStatsTabEnabled, claudeUsageSnapshotsLoaded, codexUsageSnapshotsLoaded]);
+		if (!usageStatsTabEnabled) return;
+		if (quotaSampledForOpenRef.current) return;
+		quotaSampledForOpenRef.current = true;
+
+		void (async () => {
+			// Mirror first so we don't re-sample a provider that already has data.
+			await Promise.all([
+				useClaudeUsageStore.getState().refresh(),
+				useCodexUsageStore.getState().refresh(),
+			]);
+
+			const claudeHasData = Object.values(useClaudeUsageStore.getState().snapshots).some(
+				hasUsefulAnthropicQuotaDetails
+			);
+			const codexHasData = Object.values(useCodexUsageStore.getState().snapshots).some(
+				hasUsefulCodexQuotaDetails
+			);
+
+			const jobs: Promise<unknown>[] = [];
+			if (!claudeHasData) {
+				jobs.push(
+					window.maestro.agents
+						.refreshClaudeUsageSnapshots()
+						.then(() => useClaudeUsageStore.getState().refresh())
+						.catch(() => {
+							// Sampler failures surface in main logs; the tab simply
+							// stays hidden rather than blocking the dashboard.
+						})
+				);
+			}
+			if (!codexHasData) {
+				jobs.push(
+					window.maestro.agents
+						.refreshCodexUsageSnapshots()
+						.then(() => useCodexUsageStore.getState().refresh())
+						.catch(() => {})
+				);
+			}
+			await Promise.all(jobs);
+		})();
+	}, [isOpen, usageStatsTabEnabled]);
 
 	// Initial fetch and real-time updates subscription
 	useEffect(() => {

@@ -162,36 +162,35 @@ function setEncoreFlags({ maestroCue, usageStats }: { maestroCue: boolean; usage
 }
 
 function seedAnthropicUsageSnapshots() {
-	useClaudeUsageStore.setState({
-		loaded: true,
-		refreshing: false,
-		snapshots: {
-			'/Users/me/.claude-work': {
-				sampledAt: '2026-05-23T00:00:00.000Z',
-				configDirKey: '/Users/me/.claude-work',
-				authState: 'authenticated',
-				session: { percent: 20, resetsAt: '2026-05-23T05:00:00.000Z' },
-				weekAllModels: { percent: 40, resetsAt: '2026-05-30T00:00:00.000Z' },
-				weekSonnetOnly: { percent: 10, resetsAt: '2026-05-30T00:00:00.000Z' },
-			},
+	const snapshots = {
+		'/Users/me/.claude-work': {
+			sampledAt: '2026-05-23T00:00:00.000Z',
+			configDirKey: '/Users/me/.claude-work',
+			authState: 'authenticated',
+			session: { percent: 20, resetsAt: '2026-05-23T05:00:00.000Z' },
+			weekAllModels: { percent: 40, resetsAt: '2026-05-30T00:00:00.000Z' },
+			weekSonnetOnly: { percent: 10, resetsAt: '2026-05-30T00:00:00.000Z' },
 		},
-	} as any);
+	};
+	useClaudeUsageStore.setState({ loaded: true, refreshing: false, snapshots } as any);
+	// Back the renderer mirror with the same data so the dashboard's
+	// sample-on-open mirror pull preserves the seeded snapshots instead of
+	// clobbering them with an empty main-process map.
+	mockAgents.getClaudeUsageSnapshots.mockResolvedValue(snapshots);
 }
 
 function seedCodexUsageSnapshots() {
-	useCodexUsageStore.setState({
-		loaded: true,
-		refreshing: false,
-		snapshots: {
-			'/Users/me/.codex-work': {
-				sampledAt: '2026-05-23T00:00:00.000Z',
-				codexHomeKey: '/Users/me/.codex-work',
-				authState: 'authenticated',
-				session: { percent: 15, resetsAt: '2026-05-23T05:00:00.000Z' },
-				weekly: { percent: 33, resetsAt: '2026-05-30T00:00:00.000Z' },
-			},
+	const snapshots = {
+		'/Users/me/.codex-work': {
+			sampledAt: '2026-05-23T00:00:00.000Z',
+			codexHomeKey: '/Users/me/.codex-work',
+			authState: 'authenticated',
+			session: { percent: 15, resetsAt: '2026-05-23T05:00:00.000Z' },
+			weekly: { percent: 33, resetsAt: '2026-05-30T00:00:00.000Z' },
 		},
-	} as any);
+	};
+	useCodexUsageStore.setState({ loaded: true, refreshing: false, snapshots } as any);
+	mockAgents.getCodexUsageSnapshots.mockResolvedValue(snapshots);
 }
 
 beforeEach(() => {
@@ -323,6 +322,51 @@ describe('UsageDashboardModal — provider quota tabs', () => {
 		expect(screen.getByTestId('codex-usage-mock')).toBeInTheDocument();
 		expect(mockAgents.refreshClaudeUsageSnapshots).not.toHaveBeenCalled();
 		expect(mockAgents.refreshCodexUsageSnapshots).not.toHaveBeenCalled();
+	});
+
+	it('samples both providers on open when no cached snapshot exists, then surfaces the tabs', async () => {
+		setEncoreFlags({ maestroCue: false, usageStats: true });
+		// Stores start empty (beforeEach reset + getters resolve {}). Sampling is
+		// the only way a first snapshot can appear, so opening the dashboard must
+		// trigger it. Wire each sampler to populate its mirror getter on call.
+		mockAgents.refreshClaudeUsageSnapshots.mockImplementation(async () => {
+			mockAgents.getClaudeUsageSnapshots.mockResolvedValue({
+				'/Users/me/.claude-work': {
+					sampledAt: '2026-05-23T00:00:00.000Z',
+					configDirKey: '/Users/me/.claude-work',
+					authState: 'authenticated',
+					session: { percent: 20, resetsAt: '2026-05-23T05:00:00.000Z' },
+					weekAllModels: { percent: 40, resetsAt: '2026-05-30T00:00:00.000Z' },
+					weekSonnetOnly: { percent: 10, resetsAt: '2026-05-30T00:00:00.000Z' },
+				},
+			});
+			return { refreshed: 1 };
+		});
+		mockAgents.refreshCodexUsageSnapshots.mockImplementation(async () => {
+			mockAgents.getCodexUsageSnapshots.mockResolvedValue({
+				'/Users/me/.codex-work': {
+					sampledAt: '2026-05-23T00:00:00.000Z',
+					codexHomeKey: '/Users/me/.codex-work',
+					authState: 'authenticated',
+					session: { percent: 15, resetsAt: '2026-05-23T05:00:00.000Z' },
+					weekly: { percent: 33, resetsAt: '2026-05-30T00:00:00.000Z' },
+				},
+			});
+			return { refreshed: 1 };
+		});
+
+		render(<UsageDashboardModal isOpen={true} onClose={() => {}} theme={mockTheme} />);
+
+		await waitFor(() => {
+			expect(mockAgents.refreshClaudeUsageSnapshots).toHaveBeenCalledTimes(1);
+			expect(mockAgents.refreshCodexUsageSnapshots).toHaveBeenCalledTimes(1);
+		});
+
+		// Once sampling populates the mirror, the gated tabs appear.
+		await waitFor(() => {
+			expect(screen.getByRole('tab', { name: 'Anthropic Usage' })).toBeInTheDocument();
+			expect(screen.getByRole('tab', { name: 'Codex Usage' })).toBeInTheDocument();
+		});
 	});
 
 	it('hides provider quota tabs when usageStats is disabled even if snapshots exist', async () => {
