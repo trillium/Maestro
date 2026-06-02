@@ -578,7 +578,7 @@ interface AgentSessionInfo {
 
 ### External Activity Watching (`getStorageWatchSpec()`)
 
-Beyond reading historical sessions, a storage class can opt into **live observation** of sessions Maestro did not spawn (Remote Agent Visibility, Phases 1–4). `BaseSessionStorage.getStorageWatchSpec()` returns `null` by default — meaning "this agent exposes no observable session files." Override it to return a `StorageWatchSpec`:
+Beyond reading historical sessions, a storage class can opt into **live observation** of sessions Maestro did not spawn (Remote Agent Visibility, Phases 1-4). `BaseSessionStorage.getStorageWatchSpec()` returns `null` by default, meaning "this agent exposes no observable session files." Override it to return a `StorageWatchSpec`:
 
 ```typescript
 interface StorageWatchSpec {
@@ -587,12 +587,12 @@ interface StorageWatchSpec {
 	rootDir: string;
 	// Pure, synchronous map from a path relative to rootDir to a session
 	// match, or null for paths that aren't tracked session files (sidecars,
-	// wrong depth, junk). Called on every chokidar event — MUST NOT do I/O.
+	// wrong depth, junk). Called on every chokidar event, so it MUST NOT do I/O.
 	fileMatcher: (relPath: string) => { sessionId: string; projectPath: string } | null;
 	// Which filesystem signal counts as "new activity":
-	//  'append' (default) — one growing JSONL file per session (Claude, Codex,
+	//  'append' (default): one growing JSONL file per session (Claude, Codex,
 	//                       Copilot, Factory Droid). Activity = the file grew.
-	//  'create'           — one file per message in a per-session dir
+	//  'create'           : one file per message in a per-session dir
 	//                       (OpenCode). Activity = a new file appeared.
 	activityEvent?: 'append' | 'create';
 }

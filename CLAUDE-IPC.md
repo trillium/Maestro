@@ -65,7 +65,7 @@ window.maestro.storage = {
   // (older builds, web renderer, ProcessManager not ready at boot).
   listExternalSessions: () => Promise<SessionActivityEvent[]>,
   // Live subscription: callback fires with the full tracked-session array on
-  // each coalesced transition. Returns an unsubscribe function — call on unmount.
+  // each coalesced transition. Returns an unsubscribe function; call on unmount.
   onExternalActivity: (callback: (events: SessionActivityEvent[]) => void) => () => void,
 };
 ```
