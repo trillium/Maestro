@@ -2154,6 +2154,9 @@ interface MaestroAPI {
 				customPath?: string;
 				customArgs?: string;
 				customEnvVars?: Record<string, string>;
+				enableMaestroP?: boolean;
+				maestroPMode?: 'interactive' | 'dynamic';
+				maestroPPath?: string;
 			}
 		) => Promise<GroupChatData>;
 		list: () => Promise<Array<GroupChatData>>;
@@ -2169,6 +2172,9 @@ interface MaestroAPI {
 					customPath?: string;
 					customArgs?: string;
 					customEnvVars?: Record<string, string>;
+					enableMaestroP?: boolean;
+					maestroPMode?: 'interactive' | 'dynamic';
+					maestroPPath?: string;
 				};
 			}
 		) => Promise<GroupChatData>;
