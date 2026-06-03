@@ -258,6 +258,10 @@ export function FileSearchModal({
 			.stat(debouncedPath)
 			.then((stat) => {
 				if (cancelled) return;
+				if (!stat) {
+					setAbsPathState({ status: 'missing' });
+					return;
+				}
 				setAbsPathState(
 					stat.isFile ? { status: 'file', name: getBasename(debouncedPath) } : { status: 'folder' }
 				);
