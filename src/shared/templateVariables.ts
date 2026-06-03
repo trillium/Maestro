@@ -366,6 +366,11 @@ export const TEMPLATE_VARIABLES = [
 		description: 'Loop iteration (00001, 00002...)',
 		autoRunOnly: true,
 	},
+	{
+		variable: '{{LOOP_NUMBER_HUMAN}}',
+		description: 'Loop iteration, unpadded (1, 2, 3...)',
+		autoRunOnly: true,
+	},
 	{ variable: '{{MONTH}}', description: 'Month (01-12)' },
 	{ variable: '{{MAESTRO_CLI_PATH}}', description: 'Path to maestro-cli' },
 	{ variable: '{{TAB_DEEP_LINK}}', description: 'Deep link to agent + active tab (maestro://)' },
@@ -445,6 +450,9 @@ export function substituteTemplateVariables(template: string, context: TemplateC
 
 		// Loop tracking (1-indexed, defaults to 1 if not in loop mode, 5-digit padded)
 		LOOP_NUMBER: String(loopNumber ?? 1).padStart(5, '0'),
+		// Same iteration counter without zero-padding, for human-readable display
+		// (e.g. the Goal-Driven prompt's "Iteration: 3").
+		LOOP_NUMBER_HUMAN: String(loopNumber ?? 1),
 
 		// Date/Time variables
 		DATE: now.toISOString().split('T')[0],

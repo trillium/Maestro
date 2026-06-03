@@ -23,6 +23,7 @@ function rec(
 		rationale: null,
 		complete: false,
 		deadlock: false,
+		deadlockReason: null,
 		...extra,
 	};
 }
@@ -98,6 +99,26 @@ describe('evaluateGoalExit', () => {
 			expect(decision.action).toBe('stop');
 			if (decision.action === 'stop') {
 				expect(decision.reason).toBe('deadlock');
+			}
+		});
+
+		it('prefers the deadlock-marker reason over the progress rationale', () => {
+			// The agent put a throwaway note in its progress rationale but the real
+			// blocker in the deadlock marker; the detail must surface the latter.
+			const history = [
+				rec(1, 40),
+				rec(2, 40, {
+					deadlock: true,
+					rationale: 'still investigating',
+					deadlockReason: 'no write access to the production database',
+				}),
+			];
+			const decision = evaluateGoalExit(history, config());
+			expect(decision.action).toBe('stop');
+			if (decision.action === 'stop') {
+				expect(decision.reason).toBe('deadlock');
+				expect(decision.detail).toContain('no write access to the production database');
+				expect(decision.detail).not.toContain('still investigating');
 			}
 		});
 

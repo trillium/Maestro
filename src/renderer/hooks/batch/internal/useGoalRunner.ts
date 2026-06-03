@@ -430,6 +430,7 @@ export function useGoalRunner({
 					rationale: markers.rationale,
 					complete: markers.complete,
 					deadlock: markers.deadlock,
+					deadlockReason: markers.deadlockReason,
 				});
 
 				// Update batch state via the broadcast updater so desktop + web stay in sync.
@@ -565,8 +566,10 @@ export function useGoalRunner({
 								: undefined,
 						achievementAction: 'openAbout',
 					});
-				} catch {
-					// Ignore history errors.
+				} catch (historyError) {
+					// A failed final-history write shouldn't abort cleanup, but it also
+					// shouldn't vanish silently - log it (matching the stats catch below).
+					logger.warn('[GoalRunner] Failed to write final history entry:', undefined, historyError);
 				}
 
 				if (statsAutoRunId) {

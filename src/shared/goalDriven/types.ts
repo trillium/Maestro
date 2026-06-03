@@ -57,6 +57,8 @@ export interface GoalIterationRecord {
 	complete: boolean;
 	/** Whether the iteration reported a deadlock. */
 	deadlock: boolean;
+	/** Optional reason captured from the iteration's deadlock marker; `null` if absent. */
+	deadlockReason: string | null;
 }
 
 /** The reason a goal-driven run stopped. */

@@ -44,15 +44,13 @@ function buildRecord(
 	prevProgress: number
 ): GoalIterationRecord {
 	const progress = markers.progress ?? prevProgress;
-	const rationale = markers.deadlock
-		? (markers.deadlockReason ?? markers.rationale)
-		: markers.rationale;
 	return {
 		iteration,
 		progress,
-		rationale,
+		rationale: markers.rationale,
 		complete: markers.complete,
 		deadlock: markers.deadlock,
+		deadlockReason: markers.deadlockReason,
 	};
 }
 

@@ -45,6 +45,11 @@ export const AutoRunBottomPanel = memo(function AutoRunBottomPanel({
 	const bottomPanelRef = useRef<HTMLDivElement>(null);
 	const [isCompact, setIsCompact] = useState(false);
 
+	// Clamp the reported goal percent to 0-100 once for display, so an
+	// out-of-range value from the runner can't leak into the UI (mirrors the
+	// clamping other goal-progress surfaces apply).
+	const goalPercent = goal == null ? null : Math.min(100, Math.max(0, Math.round(goal.progress)));
+
 	// Threshold: 350px - below this, use icons only for save/revert and hide "completed"
 	useEffect(() => {
 		if (!bottomPanelRef.current) return;
@@ -108,10 +113,10 @@ export const AutoRunBottomPanel = memo(function AutoRunBottomPanel({
 						<span
 							className="shrink-0 font-medium"
 							style={{
-								color: goal.progress >= 100 ? theme.colors.success : theme.colors.accent,
+								color: (goalPercent ?? 0) >= 100 ? theme.colors.success : theme.colors.accent,
 							}}
 						>
-							Goal: {goal.progress}%
+							Goal: {goalPercent}%
 						</span>
 						{goal.iteration > 0 && (
 							<span className="shrink-0 opacity-60">iteration {goal.iteration}</span>

@@ -89,9 +89,12 @@ export function evaluateGoalExit(
 		};
 	}
 
-	// 2. Deadlock — the agent declared it cannot make further progress.
+	// 2. Deadlock — the agent declared it cannot make further progress. Prefer the
+	// reason from the deadlock marker itself (what the prompt instructs the agent
+	// to emit); fall back to the progress rationale only when no deadlock reason
+	// was given.
 	if (latest.deadlock) {
-		const reason = latest.rationale?.trim();
+		const reason = latest.deadlockReason?.trim() || latest.rationale?.trim();
 		return {
 			action: 'stop',
 			reason: 'deadlock',
