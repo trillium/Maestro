@@ -376,6 +376,13 @@ export const SETTINGS_METADATA: Record<string, SettingMetadata> = {
 		default: true,
 		category: 'editor',
 	},
+	synopsisDebounceSeconds: {
+		description:
+			'Seconds of idle time to wait after a task completes before generating its History synopsis. Rapid back-to-back completions are coalesced into one synopsis. 0 generates a synopsis immediately after each completion.',
+		type: 'number',
+		default: 0,
+		category: 'editor',
+	},
 	defaultShowThinking: {
 		description: 'Show model thinking/reasoning in responses. Values: off, on, sticky.',
 		type: 'string',

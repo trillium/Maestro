@@ -63,6 +63,19 @@ function isImagePlaceholderText(text: string | undefined): boolean {
 }
 
 /**
+ * Remove any synthetic `[Image: ...]` placeholder lines from a text blob,
+ * returning the trimmed remainder. A message that is nothing but placeholder
+ * lines collapses to an empty string so callers can drop it entirely.
+ */
+function stripImagePlaceholderLines(text: string): string {
+	return text
+		.split('\n')
+		.filter((line) => !isImagePlaceholderText(line))
+		.join('\n')
+		.trim();
+}
+
+/**
  * Extract semantic text from message content.
  * Skips images, tool_use, and tool_result - only returns actual text content.
  */
@@ -696,7 +709,7 @@ export class ClaudeSessionStorage extends BaseSessionStorage {
 						if (typeof entry.message.content === 'string') {
 							msgContent = entry.message.content;
 						} else if (Array.isArray(entry.message.content)) {
-							let textBlocks = entry.message.content.filter(
+							const textBlocks = entry.message.content.filter(
 								(b: { type?: string }) => b.type === 'text'
 							);
 							const toolBlocks = entry.message.content.filter(
@@ -724,16 +737,16 @@ export class ClaudeSessionStorage extends BaseSessionStorage {
 								}
 							}
 
-							// When we recovered the real images, drop the synthetic
-							// `[Image: ... Multiply coordinates by ...]` placeholder so the
-							// restored bubble doesn't duplicate it next to the image.
-							if (images) {
-								textBlocks = textBlocks.filter(
-									(b: { text?: string }) => !isImagePlaceholderText(b.text)
-								);
-							}
-
-							msgContent = textBlocks.map((b: { text?: string }) => b.text).join('\n');
+							// Always drop the synthetic `[Image: ... Multiply coordinates by
+							// ...]` placeholder lines. They are redundant either way: when the
+							// image is in this same message we render the recovered image, and
+							// when the placeholder arrives as its own follow-up message it is a
+							// text echo of an image already shown in a prior message. Filtering
+							// line-by-line lets a placeholder-only message collapse to empty so
+							// it is dropped entirely below.
+							msgContent = stripImagePlaceholderLines(
+								textBlocks.map((b: { text?: string }) => b.text || '').join('\n')
+							);
 							if (toolBlocks.length > 0) {
 								toolUse = toolBlocks;
 							}

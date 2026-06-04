@@ -457,11 +457,26 @@ function CuePipelineEditorInner({
 						}),
 					};
 				}
-				const layout = mode === 'untangle' ? untanglePipelineNodes : arrangePipelineNodes;
+				// Arrange repacks the sub-circuits to best fill the visible canvas, so
+				// it needs the editor's current viewport aspect. Tidy keeps the user's
+				// columns where they are and ignores it.
+				const rect = containerRef.current?.getBoundingClientRect();
+				const viewport =
+					rect && rect.width > 0 && rect.height > 0
+						? { width: rect.width, height: rect.height }
+						: undefined;
 				return {
 					...prev,
 					pipelines: prev.pipelines.map((p) =>
-						p.id === prev.selectedPipelineId ? { ...p, nodes: layout(p, measuredWidths) } : p
+						p.id === prev.selectedPipelineId
+							? {
+									...p,
+									nodes:
+										mode === 'untangle'
+											? untanglePipelineNodes(p, measuredWidths, viewport)
+											: arrangePipelineNodes(p, measuredWidths),
+								}
+							: p
 					),
 				};
 			});
@@ -469,7 +484,7 @@ function CuePipelineEditorInner({
 			// Wait for React → ReactFlow to re-measure the moved nodes before fitting.
 			setTimeout(() => reactFlowInstance.fitView({ padding: 0.2, duration: 300 }), 180);
 		},
-		[setPipelineState, persistLayout, stableYOffsetsRef, reactFlowInstance]
+		[setPipelineState, persistLayout, stableYOffsetsRef, reactFlowInstance, containerRef]
 	);
 
 	const arrangeConfirmMessage = useMemo(() => {
@@ -482,9 +497,9 @@ function CuePipelineEditorInner({
 		)?.name;
 		const target = `"${name ?? 'this pipeline'}"`;
 		if (arrangeConfirmMode === 'untangle') {
-			return `Arrange will reposition the nodes in ${target} into a clean left-to-right layout and reorder them within each column to minimize crossing edges. You can undo with Discard before saving.`;
+			return `Arrange will reposition the nodes in ${target} into a clean left-to-right layout, reorder them within each column to minimize crossing edges, and pack independent sub-circuits into as many columns as needed to fit the view. You can undo with Discard before saving.`;
 		}
-		return `Tidy will align the nodes in ${target} into clean left-to-right columns, keeping their current top-to-bottom order. You can undo with Discard before saving.`;
+		return `Tidy will align the nodes in ${target} into clean left-to-right columns, keeping their current top-to-bottom order and your current column layout. You can undo with Discard before saving.`;
 	}, [
 		isAllPipelinesView,
 		arrangeConfirmMode,

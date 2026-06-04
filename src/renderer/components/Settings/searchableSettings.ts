@@ -179,6 +179,15 @@ export const GENERAL_SETTINGS: SearchableSetting[] = [
 		keywords: ['history', 'synopsis', 'save', 'toggle'],
 	},
 	{
+		id: 'general-synopsis-debounce',
+		tab: 'general',
+		tabLabel: 'General',
+		label: 'Synopsis Debounce',
+		description:
+			'Idle time to wait before generating a History synopsis; coalesces rapid completions into one',
+		keywords: ['synopsis', 'debounce', 'coalesce', 'history', 'delay', 'throttle', 'idle'],
+	},
+	{
 		id: 'general-thinking-mode',
 		tab: 'general',
 		tabLabel: 'General',

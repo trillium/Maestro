@@ -321,6 +321,7 @@ export interface SettingsStoreState {
 	forcedParallelExecution: boolean;
 	forcedParallelAcknowledged: boolean;
 	defaultSaveToHistory: boolean;
+	synopsisDebounceSeconds: number;
 	defaultShowThinking: ThinkingMode;
 	leftSidebarWidth: number;
 	rightPanelWidth: number;
@@ -467,6 +468,7 @@ export interface SettingsStoreActions {
 	setForcedParallelExecution: (value: boolean) => void;
 	setForcedParallelAcknowledged: (value: boolean) => void;
 	setDefaultSaveToHistory: (value: boolean) => void;
+	setSynopsisDebounceSeconds: (value: number) => void;
 	setDefaultShowThinking: (value: ThinkingMode) => void;
 	setLeftSidebarWidth: (value: number) => void;
 	setRightPanelWidth: (value: number) => void;
@@ -674,6 +676,7 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => {
 		forcedParallelExecution: false,
 		forcedParallelAcknowledged: false,
 		defaultSaveToHistory: true,
+		synopsisDebounceSeconds: 0,
 		defaultShowThinking: 'off',
 		leftSidebarWidth: 256,
 		rightPanelWidth: 384,
@@ -899,6 +902,12 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => {
 		setDefaultSaveToHistory: (value) => {
 			set({ defaultSaveToHistory: value });
 			window.maestro.settings.set('defaultSaveToHistory', value);
+		},
+
+		setSynopsisDebounceSeconds: (value) => {
+			const clamped = Math.max(0, Math.round(value));
+			set({ synopsisDebounceSeconds: clamped });
+			window.maestro.settings.set('synopsisDebounceSeconds', clamped);
 		},
 
 		setDefaultShowThinking: (value) => {
@@ -2188,6 +2197,9 @@ export async function loadAllSettings(): Promise<void> {
 		if (allSettings['defaultSaveToHistory'] !== undefined)
 			patch.defaultSaveToHistory = allSettings['defaultSaveToHistory'] as boolean;
 
+		if (allSettings['synopsisDebounceSeconds'] !== undefined)
+			patch.synopsisDebounceSeconds = allSettings['synopsisDebounceSeconds'] as number;
+
 		// ThinkingMode: support legacy boolean values (true -> 'on', false -> 'off')
 		if (allSettings['defaultShowThinking'] !== undefined) {
 			const raw = allSettings['defaultShowThinking'];
@@ -2852,6 +2864,7 @@ export function getSettingsActions() {
 		setCustomThemeBaseId: state.setCustomThemeBaseId,
 		setEnterToSendAI: state.setEnterToSendAI,
 		setDefaultSaveToHistory: state.setDefaultSaveToHistory,
+		setSynopsisDebounceSeconds: state.setSynopsisDebounceSeconds,
 		setDefaultShowThinking: state.setDefaultShowThinking,
 		setLeftSidebarWidth: state.setLeftSidebarWidth,
 		setRightPanelWidth: state.setRightPanelWidth,

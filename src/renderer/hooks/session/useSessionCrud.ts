@@ -466,7 +466,6 @@ export function useSessionCrud(deps: UseSessionCrudDeps): UseSessionCrudReturn {
 	// ========================================================================
 	const handleDragStart = useCallback(
 		(sessionId: string) => {
-			console.log('[DND-DEBUG] dragStart — sessionId=', sessionId);
 			setDraggingSessionId(sessionId);
 		},
 		[setDraggingSessionId]

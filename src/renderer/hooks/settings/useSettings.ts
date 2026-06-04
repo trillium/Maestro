@@ -99,6 +99,8 @@ export interface UseSettingsReturn {
 	setEnterToSendAIExpanded: (value: boolean) => void;
 	defaultSaveToHistory: boolean;
 	setDefaultSaveToHistory: (value: boolean) => void;
+	synopsisDebounceSeconds: number;
+	setSynopsisDebounceSeconds: (value: number) => void;
 
 	// Default thinking toggle (three states: 'off' | 'on' | 'sticky')
 	defaultShowThinking: ThinkingMode;

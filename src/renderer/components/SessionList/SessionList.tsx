@@ -138,6 +138,10 @@ interface SessionListProps {
 	onDeleteAllArchivedGroupChats?: () => void;
 }
 
+// Sentinel for the "ungrouped" drop zone in the drag-over highlight state.
+// Real group ids are prefixed `group-`, so this can never collide with one.
+const UNGROUPED_DROP_TARGET = '__ungrouped__';
+
 function SessionListInner(props: SessionListProps) {
 	// Store subscriptions
 	// PERF: Equality fn skips re-renders driven purely by streaming log/usage
@@ -598,6 +602,34 @@ function SessionListInner(props: SessionListProps) {
 	const menuRef = useRef<HTMLDivElement>(null);
 	const ignoreNextBlurRef = useRef(false);
 	const sessionFilterInputRef = useRef<HTMLInputElement>(null);
+
+	// Drag-over highlight for the group / ungrouped drop zones. While an agent is
+	// being dragged, the zone under the cursor lights up so the drop destination
+	// is unambiguous - mirrors the file panel's drop-target affordance. The value
+	// is a group id or the UNGROUPED_DROP_TARGET sentinel (group ids are prefixed
+	// `group-`, so the sentinel can never collide with a real one).
+	const [dragOverTarget, setDragOverTarget] = useState<string | null>(null);
+
+	// The highlight is purely transient: clear it the instant the agent drag ends
+	// (successful drop, cancel, or release outside any zone). Keying off the
+	// shared draggingSessionId means a zone can never stay stuck highlighted.
+	useEffect(() => {
+		if (!draggingSessionId) setDragOverTarget(null);
+	}, [draggingSessionId]);
+
+	const handleDropTargetEnter = useCallback((target: string) => {
+		// Only a session drag should light up a drop zone; ignore OS/file drags.
+		if (useUIStore.getState().draggingSessionId) setDragOverTarget(target);
+	}, []);
+
+	const handleDropTargetLeave = useCallback((e: React.DragEvent) => {
+		// dragenter/leave also fire for descendants; keep the highlight while the
+		// cursor stays within the zone (relatedTarget still inside currentTarget).
+		const next = e.relatedTarget as Node | null;
+		const zone = e.currentTarget as Node | null;
+		if (zone && next && zone.contains(next)) return;
+		setDragOverTarget(null);
+	}, []);
 
 	// Toggle bookmark for a session - memoized to prevent SessionItem re-renders
 	const toggleBookmark = useCallback(
@@ -1367,7 +1399,21 @@ function SessionListInner(props: SessionListProps) {
 						if (showUnreadAgentsOnly && groupSessions.length === 0) return null;
 						const groupCollapsedPills = groupSessions.filter((session) => !session.parentSessionId);
 						return (
-							<div key={group.id} className="mb-1">
+							<div
+								key={group.id}
+								className="mb-1 rounded"
+								style={
+									dragOverTarget === group.id
+										? {
+												outline: `1px dashed ${theme.colors.accent}`,
+												outlineOffset: '-2px',
+												backgroundColor: `${theme.colors.accent}14`,
+											}
+										: undefined
+								}
+								onDragEnter={() => handleDropTargetEnter(group.id)}
+								onDragLeave={handleDropTargetLeave}
+							>
 								<div
 									role="button"
 									tabIndex={0}
@@ -1379,10 +1425,18 @@ function SessionListInner(props: SessionListProps) {
 										}
 									}}
 									className="px-3 py-1.5 flex items-center justify-between cursor-pointer hover:bg-opacity-50 group"
+									style={
+										dragOverTarget === group.id
+											? { backgroundColor: `${theme.colors.accent}33` }
+											: undefined
+									}
 									onClick={() => toggleGroup(group.id)}
 									onContextMenu={(e) => handleGroupContextMenu(e, group.id)}
 									onDragOver={handleDragOver}
-									onDrop={() => handleDropOnGroup(group.id)}
+									onDrop={() => {
+										setDragOverTarget(null);
+										handleDropOnGroup(group.id);
+									}}
 								>
 									<div
 										className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider flex-1"
@@ -1526,12 +1580,33 @@ function SessionListInner(props: SessionListProps) {
 						</>
 					) : groups.length > 0 && ungroupedSessions.length > 0 ? (
 						/* UNGROUPED FOLDER - Groups exist and there are ungrouped agents */
-						<div className="mb-1 mt-4">
+						<div
+							className="mb-1 mt-4 rounded"
+							style={
+								dragOverTarget === UNGROUPED_DROP_TARGET
+									? {
+											outline: `1px dashed ${theme.colors.accent}`,
+											outlineOffset: '-2px',
+											backgroundColor: `${theme.colors.accent}14`,
+										}
+									: undefined
+							}
+							onDragEnter={() => handleDropTargetEnter(UNGROUPED_DROP_TARGET)}
+							onDragLeave={handleDropTargetLeave}
+						>
 							<div
 								className="px-3 py-1.5 flex items-center justify-between cursor-pointer hover:bg-opacity-50 group"
+								style={
+									dragOverTarget === UNGROUPED_DROP_TARGET
+										? { backgroundColor: `${theme.colors.accent}33` }
+										: undefined
+								}
 								onClick={() => setUngroupedCollapsed(!ungroupedCollapsed)}
 								onDragOver={handleDragOver}
-								onDrop={handleDropOnUngrouped}
+								onDrop={() => {
+									setDragOverTarget(null);
+									handleDropOnUngrouped();
+								}}
 							>
 								<div
 									className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider flex-1"
@@ -1605,15 +1680,31 @@ function SessionListInner(props: SessionListProps) {
 						</div>
 					) : groups.length > 0 && !showUnreadAgentsOnly ? (
 						/* NO UNGROUPED AGENTS - Show drop zone for ungrouping + New Group button */
-						<div className="mt-4 px-3" onDragOver={handleDragOver} onDrop={handleDropOnUngrouped}>
-							{/* Drop zone indicator when dragging */}
+						<div
+							className="mt-4 px-3"
+							onDragOver={handleDragOver}
+							onDragEnter={() => handleDropTargetEnter(UNGROUPED_DROP_TARGET)}
+							onDragLeave={handleDropTargetLeave}
+							onDrop={() => {
+								setDragOverTarget(null);
+								handleDropOnUngrouped();
+							}}
+						>
+							{/* Drop zone indicator when dragging - intensifies on hover so the
+							    drop destination is obvious, matching the group-header affordance. */}
 							{draggingSessionId && (
 								<div
-									className="mb-2 px-3 py-2 rounded border-2 border-dashed text-center text-xs"
+									className="mb-2 px-3 py-2 rounded border-2 border-dashed text-center text-xs transition-colors"
 									style={{
 										borderColor: theme.colors.accent,
-										color: theme.colors.textDim,
-										backgroundColor: theme.colors.accent + '10',
+										color:
+											dragOverTarget === UNGROUPED_DROP_TARGET
+												? theme.colors.textMain
+												: theme.colors.textDim,
+										backgroundColor:
+											dragOverTarget === UNGROUPED_DROP_TARGET
+												? `${theme.colors.accent}33`
+												: theme.colors.accent + '10',
 									}}
 								>
 									Drop here to ungroup

@@ -3028,6 +3028,8 @@ function MaestroConsoleInner() {
 					onQuickActionsNewBrowserTab={handleNewBrowserTab}
 					onQuickActionsNewTerminalTab={handleOpenTerminalTab}
 					onGoToNextUnread={goToNextUnreadTab}
+					onNavBack={handleNavBack}
+					onNavForward={handleNavForward}
 					onRemoveQueueItem={handleRemoveQueueItem}
 					onSwitchQueueSession={handleSwitchQueueSession}
 					onReorderQueueItems={handleReorderQueueItems}

@@ -18,8 +18,9 @@
  * dangle.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useSessionStore } from '../../../stores/sessionStore';
+import { useSettingsStore } from '../../../stores/settingsStore';
 import { notifyToast } from '../../../stores/notificationStore';
 import { REGEX_AI_TAB } from '../../../utils/sessionIdParser';
 import { getActiveTab } from '../../../utils/tabHelpers';
@@ -32,7 +33,9 @@ import { refreshGitRefsAfterTerminalExit } from './helpers/exitGitRefresh';
 import {
 	runExitSynopsis,
 	shouldRunSynopsisOnExit,
+	turnDidMeaningfulWork,
 	type SynopsisData,
+	type RunExitSynopsisDeps,
 } from './helpers/exitSynopsis';
 import { getAutorunSynopsisPrompt } from './helpers/autorunSynopsisPrompt';
 import type { LogEntry, QueuedItem, SessionState, UsageStats } from '../../../types';
@@ -51,11 +54,78 @@ export interface UseAgentExitListenerDeps {
 }
 
 export function useAgentExitListener(deps: UseAgentExitListenerDeps): void {
+	// Pending debounced synopses, keyed by `${sessionId}:${tabId}`. When the
+	// Synopsis Debounce setting is on, each eligible exit (re)arms a timer here
+	// instead of spawning immediately, so rapid-fire turns coalesce into one
+	// synopsis. Flushed on unmount so in-flight work still reaches History.
+	const debounceTimersRef = useRef<
+		Map<string, { timer: ReturnType<typeof setTimeout>; data: SynopsisData; anyWork: boolean }>
+	>(new Map());
+
 	useEffect(() => {
 		const setSessions = useSessionStore.getState().setSessions;
 		const getSessions = () => useSessionStore.getState().sessions;
 		const getGroups = () => useSessionStore.getState().groups;
 		const getActiveSessionId = () => useSessionStore.getState().activeSessionId;
+
+		// Shared deps for every synopsis spawn (immediate or debounced).
+		const runSynopsisDeps: RunExitSynopsisDeps = {
+			spawnBackgroundSynopsisRef: deps.spawnBackgroundSynopsisRef,
+			addHistoryEntryRef: deps.addHistoryEntryRef,
+			rightPanelRef: deps.rightPanelRef,
+			getAutorunSynopsisPrompt,
+			updateLastSynopsisTime: (sId, tId, time) => {
+				setSessions((prev) =>
+					prev.map((s) => {
+						if (s.id !== sId) return s;
+						return {
+							...s,
+							aiTabs: s.aiTabs.map((tab) =>
+								tab.id !== tId ? tab : { ...tab, lastSynopsisTime: time }
+							),
+						};
+					})
+				);
+			},
+		};
+
+		/**
+		 * Route an eligible synopsis through the activity gate and (optionally) the
+		 * debounce window.
+		 *
+		 * - Activity gate (always on): a turn that did no real work - a plain Q&A
+		 *   with no tool use - is dropped. We never pay for a synopsis spawn or a
+		 *   History entry on a turn that produced nothing.
+		 * - Debounce (opt-in via `synopsisDebounceSeconds`): a work-turn arms or
+		 *   resets a per-tab timer; a follow-up turn while one is pending extends
+		 *   it. When it fires, a single synopsis covers everything since the last
+		 *   recorded synopsis. A pure-Q&A turn with nothing pending arms nothing.
+		 */
+		const dispatchSynopsis = (data: SynopsisData, didWork: boolean): void => {
+			const debounceSec = useSettingsStore.getState().synopsisDebounceSeconds || 0;
+
+			if (debounceSec <= 0) {
+				if (didWork) void runExitSynopsis(data, runSynopsisDeps);
+				return;
+			}
+
+			const timers = debounceTimersRef.current;
+			const key = `${data.sessionId}:${data.tabId ?? ''}`;
+			const existing = timers.get(key);
+			const anyWork = (existing?.anyWork ?? false) || didWork;
+			// Don't arm a timer for a conversation that hasn't done any real work yet.
+			if (!anyWork) return;
+
+			if (existing) clearTimeout(existing.timer);
+			const timer = setTimeout(() => {
+				const entry = timers.get(key);
+				timers.delete(key);
+				if (entry?.anyWork) void runExitSynopsis(entry.data, runSynopsisDeps);
+			}, debounceSec * 1000);
+			// Always carry the latest turn's data so the synopsis resumes the most
+			// recent agent session and reports the freshest duration.
+			timers.set(key, { timer, data, anyWork: true });
+		};
 
 		const unsubscribe = window.maestro.process.onExit(async (sessionId: string, code: number) => {
 			if (sessionId.includes('-terminal-')) return;
@@ -130,6 +200,7 @@ export function useAgentExitListener(deps: UseAgentExitListenerDeps): void {
 			} | null = null;
 			let queuedItemToProcess: { sessionId: string; item: QueuedItem } | null = null;
 			let synopsisData: SynopsisData | null = null;
+			let synopsisDidWork = false;
 
 			if (isFromAi) {
 				const currentSession = getSessions().find((s) => s.id === actualSessionId);
@@ -231,6 +302,10 @@ export function useAgentExitListener(deps: UseAgentExitListenerDeps): void {
 					};
 
 					if (shouldRunSynopsisOnExit(currentSession, completedTab)) {
+						synopsisDidWork = turnDidMeaningfulWork(
+							logs,
+							!!currentSession.pendingAICommandForSynopsis
+						);
 						synopsisData = {
 							sessionId: actualSessionId,
 							cwd: currentSession.cwd,
@@ -610,30 +685,20 @@ export function useAgentExitListener(deps: UseAgentExitListenerDeps): void {
 			}
 
 			if (synopsisData) {
-				void runExitSynopsis(synopsisData, {
-					spawnBackgroundSynopsisRef: deps.spawnBackgroundSynopsisRef,
-					addHistoryEntryRef: deps.addHistoryEntryRef,
-					rightPanelRef: deps.rightPanelRef,
-					getAutorunSynopsisPrompt,
-					updateLastSynopsisTime: (sId, tId, time) => {
-						setSessions((prev) =>
-							prev.map((s) => {
-								if (s.id !== sId) return s;
-								return {
-									...s,
-									aiTabs: s.aiTabs.map((tab) =>
-										tab.id !== tId ? tab : { ...tab, lastSynopsisTime: time }
-									),
-								};
-							})
-						);
-					},
-				});
+				dispatchSynopsis(synopsisData, synopsisDidWork);
 			}
 		});
 
 		return () => {
 			unsubscribe();
+			// Flush any pending debounced synopses so finished work still reaches
+			// History when the listener tears down (navigation, reload, quit).
+			const timers = debounceTimersRef.current;
+			for (const entry of timers.values()) {
+				clearTimeout(entry.timer);
+				if (entry.anyWork) void runExitSynopsis(entry.data, runSynopsisDeps);
+			}
+			timers.clear();
 		};
 	}, [
 		deps.activeHiddenToolRef,

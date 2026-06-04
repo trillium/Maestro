@@ -138,7 +138,7 @@ export const CodeFence = memo(function CodeFence({
 		// language badge (top-right) and copy button (bottom-right) so the first
 		// and last lines never render underneath them. This also keeps short
 		// blocks tall enough that the two buttons can't overlap each other. Kept
-		// in sync with the Shiki path in index.css (.shiki-host pre.shiki).
+		// in sync with the Shiki path in index.css (.code-fence .shiki-host pre.shiki).
 		padding: '2.75em 1em',
 		background: 'transparent',
 		color: theme.colors.textMain,

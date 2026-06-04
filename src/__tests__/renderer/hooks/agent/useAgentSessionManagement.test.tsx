@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useAgentSessionManagement } from '../../../../renderer/hooks/agent/useAgentSessionManagement';
+import {
+	useAgentSessionManagement,
+	isSynopsisRequest,
+} from '../../../../renderer/hooks/agent/useAgentSessionManagement';
 import type { UseAgentSessionManagementDeps } from '../../../../renderer/hooks/agent/useAgentSessionManagement';
 import { useSessionStore } from '../../../../renderer/stores/sessionStore';
 import { createMockSession } from '../../../helpers/mockSession';
@@ -117,5 +120,58 @@ describe('useAgentSessionManagement - history token source capture', () => {
 		const entry = lastAddedEntry();
 		expect(entry.tokenSource).toBe('api');
 		expect(entry.tokenSourceReason).toBe('limit');
+	});
+});
+
+describe('isSynopsisRequest', () => {
+	it('matches the current "Provide a brief synopsis" wording', () => {
+		expect(
+			isSynopsisRequest({
+				type: 'user',
+				content:
+					'Provide a brief synopsis of what you just accomplished in this task using this exact format:',
+			})
+		).toBe(true);
+	});
+
+	it('matches the older "Give a brief synopsis" wording', () => {
+		expect(
+			isSynopsisRequest({
+				type: 'user',
+				content: 'Give a brief synopsis of what you just accomplished, in exactly this format:',
+			})
+		).toBe(true);
+	});
+
+	it('matches on role when type is absent', () => {
+		expect(
+			isSynopsisRequest({
+				role: 'user',
+				content: 'Provide a brief synopsis of what you just accomplished here',
+			})
+		).toBe(true);
+	});
+
+	it('does not match an assistant message that quotes the phrase', () => {
+		expect(
+			isSynopsisRequest({
+				type: 'assistant',
+				content: 'You asked me to provide a brief synopsis of what you just accomplished.',
+			})
+		).toBe(false);
+	});
+
+	it('does not match a user message that only mentions the phrase mid-sentence', () => {
+		expect(
+			isSynopsisRequest({
+				type: 'user',
+				content:
+					'Earlier you gave a brief synopsis of what you just accomplished - can you expand?',
+			})
+		).toBe(false);
+	});
+
+	it('does not match unrelated user messages', () => {
+		expect(isSynopsisRequest({ type: 'user', content: 'fix the layout bug' })).toBe(false);
 	});
 });
