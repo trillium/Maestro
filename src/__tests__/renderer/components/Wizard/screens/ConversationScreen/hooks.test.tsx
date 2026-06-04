@@ -18,6 +18,10 @@ const conversationMocks = vi.hoisted(() => ({
 	isConversationActive: vi.fn(),
 }));
 
+const sentryMocks = vi.hoisted(() => ({
+	captureException: vi.fn(),
+}));
+
 vi.mock(
 	'../../../../../../renderer/components/Wizard/services/conversationManager',
 	async (importOriginal) => {
@@ -32,6 +36,8 @@ vi.mock(
 		};
 	}
 );
+
+vi.mock('../../../../../../renderer/utils/sentry', () => sentryMocks);
 
 function createState(overrides: Partial<WizardConversationState> = {}): WizardConversationState {
 	return {
@@ -290,7 +296,8 @@ describe('ConversationScreen hooks', () => {
 		});
 
 		it('surfaces initialization failures', async () => {
-			conversationMocks.startConversation.mockRejectedValueOnce(new Error('spawn failed'));
+			const error = new Error('spawn failed');
+			conversationMocks.startConversation.mockRejectedValueOnce(error);
 			const setConversationError = vi.fn();
 
 			renderHook(() =>
@@ -309,6 +316,20 @@ describe('ConversationScreen hooks', () => {
 					'Failed to initialize conversation. Please try again.'
 				)
 			);
+			expect(sentryMocks.captureException).toHaveBeenCalledWith(error, {
+				level: 'error',
+				tags: { area: 'conversation_bootstrap' },
+				extra: {
+					mounted: true,
+					selectedAgent: 'claude-code',
+					directoryPath: '/project',
+					agentName: 'Project',
+					existingDocsChoice: null,
+					conversationHistoryLength: 0,
+					hasSshRemoteConfig: false,
+					sshRemoteId: null,
+				},
+			});
 		});
 	});
 
@@ -430,6 +451,7 @@ describe('ConversationScreen hooks', () => {
 
 			expect(hook.setConversationError).toHaveBeenCalledWith('Callback failed');
 			expect(hook.announce).toHaveBeenCalledWith('Error: Callback failed. Please try again.');
+			expect(hook.setters.setErrorRetryCount).toHaveBeenCalledTimes(1);
 		});
 
 		it('ignores thinking and tool callbacks while thinking display is off', async () => {

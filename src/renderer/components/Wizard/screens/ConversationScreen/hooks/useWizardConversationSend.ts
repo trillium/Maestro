@@ -79,6 +79,7 @@ function createSendCallbacks({
 	setConversationError,
 	announce,
 	scheduleAutoContinue,
+	markErrorHandled,
 }: {
 	mode: 'message' | 'continue';
 	setters: SendStateSetters;
@@ -89,6 +90,7 @@ function createSendCallbacks({
 	setConversationError: (error: string | null) => void;
 	announce: (message: string) => void;
 	scheduleAutoContinue: (message: string) => void;
+	markErrorHandled?: () => void;
 }): ConversationCallbacks {
 	return {
 		onSending: () => {
@@ -166,6 +168,7 @@ function createSendCallbacks({
 			}
 		},
 		onError: (error) => {
+			markErrorHandled?.();
 			logger.error('Conversation error:', undefined, error);
 			setConversationError(error);
 			setters.setDetectedError(null);
@@ -178,8 +181,13 @@ function createSendCallbacks({
 function applySendFailure(
 	result: SendMessageResult,
 	setConversationError: (error: string | null) => void,
-	setters: SendStateSetters
+	setters: SendStateSetters,
+	alreadyHandled: boolean
 ): void {
+	if (alreadyHandled) {
+		return;
+	}
+
 	if (!result.success && result.error) {
 		setConversationError(result.error);
 		if (result.detectedError) {
@@ -262,6 +270,7 @@ export function useWizardConversationSend({
 				});
 			}
 
+			let handledByOnError = false;
 			const result = await conversationManager.sendMessage(
 				trimmedInput,
 				state.conversationHistory,
@@ -275,10 +284,13 @@ export function useWizardConversationSend({
 					setConversationError,
 					announce,
 					scheduleAutoContinue,
+					markErrorHandled: () => {
+						handledByOnError = true;
+					},
 				})
 			);
 
-			applySendFailure(result, setConversationError, setters);
+			applySendFailure(result, setConversationError, setters, handledByOnError);
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
 			setConversationError(errorMessage);
@@ -347,6 +359,7 @@ export function useWizardConversationSend({
 				});
 			}
 
+			let handledByOnError = false;
 			const result = await conversationManager.sendMessage(
 				continueMessage,
 				[],
@@ -360,10 +373,13 @@ export function useWizardConversationSend({
 					setConversationError,
 					announce,
 					scheduleAutoContinue,
+					markErrorHandled: () => {
+						handledByOnError = true;
+					},
 				})
 			);
 
-			applySendFailure(result, setConversationError, setters);
+			applySendFailure(result, setConversationError, setters, handledByOnError);
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
 			setConversationError(errorMessage);

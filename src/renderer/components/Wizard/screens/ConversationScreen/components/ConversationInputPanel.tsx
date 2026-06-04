@@ -11,6 +11,8 @@ import { READY_CONFIDENCE_THRESHOLD } from '../../../services/wizardPrompts';
 import type { WizardMessage } from '../../../WizardContext';
 import { formatShortcutKeys } from '../../../../../utils/shortcutFormatter';
 
+const MAX_TEXTAREA_HEIGHT = 120;
+
 export function ConversationInputPanel({
 	theme,
 	inputRef,
@@ -84,14 +86,14 @@ export function ConversationInputPanel({
 							backgroundColor: theme.colors.bgMain,
 							borderColor: theme.colors.border,
 							color: theme.colors.textMain,
-							maxHeight: '120px',
+							maxHeight: `${MAX_TEXTAREA_HEIGHT}px`,
 							lineHeight: '1.5',
 							minHeight: '48px',
 						}}
 						onInput={(e) => {
 							const target = e.target as HTMLTextAreaElement;
 							target.style.height = 'auto';
-							target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
+							target.style.height = `${Math.min(target.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
 						}}
 					/>
 				</div>

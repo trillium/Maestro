@@ -2,6 +2,7 @@ import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } 
 import type { WizardMessage } from '../../../WizardContext';
 import { conversationManager } from '../../../services/conversationManager';
 import { logger } from '../../../../../utils/logger';
+import { captureException } from '../../../../../utils/sentry';
 import { fetchExistingDocsForWizard } from '../utils/existingDocs';
 import type { WizardConversationState } from '../types';
 
@@ -47,6 +48,20 @@ export function useConversationBootstrap({
 				}
 			} catch (error) {
 				logger.error('Failed to initialize conversation:', undefined, error);
+				captureException(error, {
+					level: 'error',
+					tags: { area: 'conversation_bootstrap' },
+					extra: {
+						mounted,
+						selectedAgent: state.selectedAgent,
+						directoryPath: state.directoryPath,
+						agentName: state.agentName,
+						existingDocsChoice: state.existingDocsChoice,
+						conversationHistoryLength: state.conversationHistory.length,
+						hasSshRemoteConfig: !!state.sessionSshRemoteConfig,
+						sshRemoteId: state.sessionSshRemoteConfig?.remoteId ?? null,
+					},
+				});
 				if (mounted) {
 					setConversationError('Failed to initialize conversation. Please try again.');
 				}
