@@ -310,6 +310,7 @@ function FileExplorerPanelInner(props: FileExplorerPanelProps) {
 		contextMenuRef,
 		contextMenuPos,
 		openContextMenu,
+		openRootContextMenu,
 		handleCopyPath,
 		handleOpenInDefaultApp,
 		handleOpenInMaestroBrowser,
@@ -708,7 +709,10 @@ function FileExplorerPanelInner(props: FileExplorerPanelProps) {
 					{!session.fileTreeLoading &&
 						(!session.fileTree || session.fileTree.length === 0) &&
 						!fileTreeFilter && (
-							<div className="flex flex-col items-center justify-center gap-2 py-8">
+							<div
+								className="flex flex-col items-center justify-center gap-2 py-8"
+								onContextMenu={openRootContextMenu}
+							>
 								<Folder className="w-8 h-8 opacity-30" style={{ color: theme.colors.textDim }} />
 								<div
 									className="text-xs opacity-50 text-center"
@@ -719,7 +723,12 @@ function FileExplorerPanelInner(props: FileExplorerPanelProps) {
 							</div>
 						)}
 					{flattenedTree.length > 0 && (
-						<div ref={parentRef} data-file-list-scroll className="flex-1 min-h-0 overflow-auto">
+						<div
+							ref={parentRef}
+							data-file-list-scroll
+							className="flex-1 min-h-0 overflow-auto"
+							onContextMenu={openRootContextMenu}
+						>
 							<div
 								style={{
 									height: `${virtualizer.getTotalSize()}px`,
