@@ -20,6 +20,7 @@ import {
 	CreateHandlerOptions,
 } from '../../utils/ipcHandler';
 import { buildAgentArgs, applyAgentConfigOverrides } from '../../utils/agent-args';
+import { createOutputParser } from '../../parsers/parser-factory';
 import {
 	resolveClaudeSpawnMode,
 	applyClaudeSpawnDecision,
@@ -334,7 +335,7 @@ export function registerTabNamingHandlers(deps: TabNamingHandlerDependencies): v
 						// without waiting for the full process to exit.
 						const earlyExtractIntervalId = setInterval(() => {
 							if (resolved || !output.trim()) return;
-							const earlyResult = extractTabName(output);
+							const earlyResult = extractTabNameFromOutput(config.agentType, output);
 							if (earlyResult.name) {
 								resolveWith(earlyResult.name, 'resolved early from partial output');
 							}
@@ -366,7 +367,7 @@ export function registerTabNamingHandlers(deps: TabNamingHandlerDependencies): v
 								});
 							}
 
-							const extraction = extractTabName(output);
+							const extraction = extractTabNameFromOutput(config.agentType, output);
 							if (!extraction.name) {
 								logger.warn('Tab naming extraction failed', LOG_CONTEXT, {
 									sessionId,
@@ -433,6 +434,69 @@ interface TabNameExtractionResult {
 	name: string | null;
 	/** Human-readable reason for the outcome (useful for debugging failures) */
 	reason: string;
+}
+
+/**
+ * Pull the agent's actual response text out of its raw process output before
+ * extracting a tab name.
+ *
+ * Tab naming inherits the agent's default args, which for Claude (and other
+ * stream-json agents) include `--output-format stream-json`. That means the
+ * generated name arrives buried inside JSON envelopes
+ * (`{"type":"result","result":"My Tab Name"}`), and every line is far longer
+ * than extractTabName's 40-char line filter - so plain-text extraction always
+ * discards it and returns null. We reuse the agent's own output parser to
+ * normalize the stream and lift out the final `result` text (or, mid-stream,
+ * the accumulated assistant text) before the plain-text cleanup runs.
+ *
+ * Returns null when the output isn't structured JSON at all (e.g. the
+ * maestro-p TUI emits plain terminal text), so the caller falls back to
+ * running extractTabName over the raw output exactly as before.
+ */
+function extractAgentResponseText(agentType: string, output: string): string | null {
+	const parser = createOutputParser(agentType);
+	if (!parser) return null;
+
+	let sawJson = false;
+	let resultText = '';
+	let assistantText = '';
+	for (const line of output.split('\n')) {
+		const trimmed = line.trim();
+		if (!trimmed) continue;
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(trimmed);
+		} catch {
+			// Non-JSON line (e.g. maestro-p TUI text) - not stream-json output.
+			continue;
+		}
+		if (!parsed || typeof parsed !== 'object') continue;
+		sawJson = true;
+		const event = parser.parseJsonObject(parsed);
+		if (!event?.text) continue;
+		if (event.type === 'result') {
+			// The final result carries the complete response; last one wins.
+			resultText = event.text;
+		} else if (event.type === 'text') {
+			// Streaming assistant chunks - accumulate so early extraction can
+			// resolve before the terminating result event arrives.
+			assistantText += event.text;
+		}
+	}
+
+	if (!sawJson) return null;
+	const text = (resultText || assistantText).trim();
+	return text.length > 0 ? text : null;
+}
+
+/**
+ * Extract a tab name from raw agent process output, normalizing structured
+ * (stream-json) output via the agent's parser first and falling back to
+ * plain-text extraction over the raw output.
+ */
+function extractTabNameFromOutput(agentType: string, output: string): TabNameExtractionResult {
+	const responseText = extractAgentResponseText(agentType, output);
+	return extractTabName(responseText ?? output);
 }
 
 /**

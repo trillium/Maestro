@@ -418,6 +418,102 @@ describe('Tab Naming IPC Handlers', () => {
 			expect(result).toBe('Dark Mode Toggle');
 		});
 
+		it('extracts the tab name from Claude stream-json output (the real-world path)', async () => {
+			// Regression: tab naming inherits the agent's default args, which include
+			// `--output-format stream-json`. The generated name therefore arrives buried
+			// inside JSON envelopes, and every line is far longer than extractTabName's
+			// 40-char filter. Without parsing the stream-json first, extraction always
+			// returns null and tabs never get named. We must lift the `result` text out.
+			let onDataCallback: ((sessionId: string, data: string) => void) | undefined;
+			let onExitCallback: ((sessionId: string, code?: number) => void) | undefined;
+
+			mockProcessManager.on.mockImplementation(
+				(event: string, callback: (...args: any[]) => void) => {
+					if (event === 'data') onDataCallback = callback;
+					if (event === 'exit') onExitCallback = callback;
+				}
+			);
+
+			const resultPromise = invokeHandler('tabNaming:generateTabName', {
+				userMessage: 'Help me build a Rick and Morty side scroller game',
+				agentType: 'claude-code',
+				cwd: '/test/project',
+			});
+
+			await vi.waitFor(() => {
+				expect(mockProcessManager.spawn).toHaveBeenCalled();
+			});
+
+			// A representative slice of real `claude --output-format stream-json` output:
+			// a long init line, an assistant message, and the terminating result.
+			const streamJson = [
+				JSON.stringify({
+					type: 'system',
+					subtype: 'init',
+					session_id: 'abc',
+					tools: ['Bash', 'Read', 'Grep'],
+					slash_commands: ['/help', '/compact'],
+				}),
+				JSON.stringify({
+					type: 'assistant',
+					message: { role: 'assistant', content: [{ type: 'text', text: 'Side-Scroller Game' }] },
+					session_id: 'abc',
+				}),
+				JSON.stringify({
+					type: 'result',
+					subtype: 'success',
+					is_error: false,
+					result: 'Side-Scroller Game',
+					session_id: 'abc',
+				}),
+			].join('\n');
+
+			onDataCallback?.('tab-naming-mock-uuid-1234', streamJson);
+			onExitCallback?.('tab-naming-mock-uuid-1234', 0);
+
+			const result = await resultPromise;
+			expect(result).toBe('Side-Scroller Game');
+		});
+
+		it('extracts from streaming assistant text when no result event arrives (early extraction)', async () => {
+			// Early extraction resolves before the process exits, so only assistant
+			// (streaming) events are present - no terminating result line yet.
+			let onDataCallback: ((sessionId: string, data: string) => void) | undefined;
+			let onExitCallback: ((sessionId: string, code?: number) => void) | undefined;
+
+			mockProcessManager.on.mockImplementation(
+				(event: string, callback: (...args: any[]) => void) => {
+					if (event === 'data') onDataCallback = callback;
+					if (event === 'exit') onExitCallback = callback;
+				}
+			);
+
+			const resultPromise = invokeHandler('tabNaming:generateTabName', {
+				userMessage: 'Add a leaderboard endpoint',
+				agentType: 'claude-code',
+				cwd: '/test/project',
+			});
+
+			await vi.waitFor(() => {
+				expect(mockProcessManager.spawn).toHaveBeenCalled();
+			});
+
+			const streamJson = [
+				JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc' }),
+				JSON.stringify({
+					type: 'assistant',
+					message: { role: 'assistant', content: [{ type: 'text', text: 'Leaderboard Endpoint' }] },
+					session_id: 'abc',
+				}),
+			].join('\n');
+
+			onDataCallback?.('tab-naming-mock-uuid-1234', streamJson);
+			onExitCallback?.('tab-naming-mock-uuid-1234', 0);
+
+			const result = await resultPromise;
+			expect(result).toBe('Leaderboard Endpoint');
+		});
+
 		it('returns null for empty output', async () => {
 			let onDataCallback: ((sessionId: string, data: string) => void) | undefined;
 			let onExitCallback: ((sessionId: string) => void) | undefined;
