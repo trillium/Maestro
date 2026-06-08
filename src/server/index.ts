@@ -4,12 +4,16 @@
  * Runs Maestro's existing Fastify+WebSocket server (`src/main/web-server/WebServer`)
  * as a vanilla Node process. NO electron import, NO BrowserWindow.
  *
- * Layer 0a — boot-only. The READ callbacks (sessions, themes, history, custom
- * commands) are wired to file-backed stores so an existing Maestro data
- * directory can be browsed read-only. The WRITE callbacks
- * (`executeCommand`, `interruptSession`, `switchMode`, tab ops, etc.)
- * currently log a warning and return false — server-side write paths are
- * Layer 0b work (see `WEB_PORT_ORDER.md`).
+ * Layer 0a — boot-only. READ callbacks wired to file-backed stores.
+ * Layer 0b — WRITE callbacks that need a real pty: writeToSession,
+ *            executeCommand, interruptSession via ServerProcessManagerAdapter.
+ * Layer 0c — WRITE callbacks that are pure store mutations + broadcast:
+ *            switchMode, closeTab, renameTab, starTab, reorderTab,
+ *            toggleBookmark via sessions-mutator + WebServer broadcast*.
+ *            Plus selectSession / selectTab as headless no-ops (each browser
+ *            tab owns its view state in web mode).
+ *
+ * Deferred: newTab (needs spawn pipeline — L0d scope).
  *
  * Launch:
  *   node dist/server/index.js
@@ -31,6 +35,7 @@ import { getThemeById } from '../main/themes';
 import { FileStore } from '../shared/file-store';
 import { getDataDir } from '../shared/data-dir';
 import { ServerProcessManagerAdapter } from './process-manager-adapter';
+import * as mutator from './sessions-mutator';
 
 type StoredSession = {
 	id: string;
@@ -226,18 +231,92 @@ server.setGetHistoryCallback(() => {
 
 // ============ WRITE callbacks ============
 //
-// Layer 0b: writeToSession, executeCommand, and interruptSession are wired
-// through ServerProcessManagerAdapter. The other 7 callbacks (switchMode,
-// tab ops, bookmark) remain stubbed — they need write-back to the sessions
-// store and broadcast plumbing, which is the Layer 0c scope.
+// Layer 0b wired writeToSession, executeCommand, and interruptSession through
+// ServerProcessManagerAdapter (pty-side, no sessions-store mutation).
+//
+// Layer 0c wires 8 more callbacks through the sessions store. The strategic
+// framing per callback (decided in the parent brief and recorded in ISA.md):
+//
+//   (A) Persist + broadcast — the op IS state. Mutate sessions store, write
+//       back, broadcast via WebServer.broadcast* so other connected web
+//       clients see the change.
+//          switchMode, closeTab, renameTab, starTab, reorderTab, toggleBookmark
+//
+//   (C) Defer to UI-orchestration layer — the op is a "drive the desktop
+//       window" call that has no equivalent in headless mode. Each browser
+//       tab manages its own view state. Log + return true so the WS round-
+//       trips cleanly without breaking the client.
+//          selectSession, selectTab
+//
+//   Out of scope for L0c (deferred): newTab. It has to actually spawn a
+//   process (not just mutate store), which needs a server-side session-
+//   creation pipeline that is L0d scope. Kept as a stub returning null.
 
 const notImplementedWrite = (op: string) => (..._args: unknown[]): false | null => {
 	console.warn(
-		`[maestro-server] WRITE op "${op}" called but not implemented yet. ` +
-			`Layer 0c will add server-side implementations for store + broadcast.`
+		`[maestro-server] WRITE op "${op}" not implemented; deferred to a later layer.`
 	);
 	return false;
 };
+
+// Helper: read sessions, apply a mutator, persist, broadcast. Returns true
+// iff the mutator produced a non-null result (i.e. the session existed and
+// the mutation was applicable).
+function applyMutation(
+	op: string,
+	mutate: (sessions: StoredSession[]) => mutator.MutationResult<StoredSession> | null,
+	onSuccess: (session: StoredSession) => void
+): boolean {
+	const sessions = sessionsStore.get<StoredSession[]>('sessions', []);
+	const result = mutate(sessions);
+	if (!result) {
+		console.warn(`[maestro-server] ${op}: session not found or no-op; skipping`);
+		return false;
+	}
+	try {
+		sessionsStore.set('sessions', result.sessions);
+	} catch (err) {
+		console.error(`[maestro-server] ${op}: failed to persist sessions`, err);
+		return false;
+	}
+	try {
+		onSuccess(result.session);
+	} catch (err) {
+		console.error(`[maestro-server] ${op}: broadcast threw (mutation already persisted)`, err);
+	}
+	return true;
+}
+
+// AITabData shape required by broadcastTabsChange. Mirrors src/main/web-server/types.ts.
+function tabsForBroadcast(session: StoredSession): {
+	aiTabs: Array<{
+		id: string;
+		agentSessionId: string | null;
+		name: string | null;
+		starred: boolean;
+		inputValue: string;
+		usageStats?: unknown;
+		createdAt: number;
+		state: 'idle' | 'busy';
+		thinkingStartTime?: number | null;
+	}>;
+	activeTabId: string;
+} {
+	const aiTabs = (session.aiTabs ?? []).map((tab) => ({
+		id: tab.id as string,
+		agentSessionId: (tab.agentSessionId as string | null | undefined) ?? null,
+		name: (tab.name as string | null | undefined) ?? null,
+		starred: Boolean(tab.starred),
+		inputValue: (tab.inputValue as string | undefined) ?? '',
+		usageStats: (tab.usageStats as unknown) ?? null,
+		createdAt: (tab.createdAt as number | undefined) ?? Date.now(),
+		state: ((tab.state as 'idle' | 'busy' | undefined) ?? 'idle') as 'idle' | 'busy',
+		thinkingStartTime: (tab.thinkingStartTime as number | null | undefined) ?? null,
+	}));
+	const activeTabId =
+		session.activeTabId ?? (aiTabs.length > 0 ? aiTabs[0].id : '');
+	return { aiTabs, activeTabId };
+}
 
 // writeToSession — direct write to ProcessManager. The route at
 // POST /:token/api/session/:id/send already appends '\n' before calling this.
@@ -271,18 +350,137 @@ server.setInterruptSessionCallback(async (sessionId: string): Promise<boolean> =
 	return result;
 });
 
-server.setSwitchModeCallback(notImplementedWrite('switchMode') as any);
-server.setSelectSessionCallback(notImplementedWrite('selectSession') as any);
-server.setSelectTabCallback(notImplementedWrite('selectTab') as any);
-server.setNewTabCallback((async () => {
-	console.warn('[maestro-server] WRITE op "newTab" not implemented in Layer 0a');
+// switchMode — (A) mutate inputMode, broadcast as a session_state_change
+// carrying the new inputMode (matches desktop persistence handler's existing
+// broadcast contract; renderer side already special-cases inputMode here).
+server.setSwitchModeCallback(async (sessionId: string, mode: 'ai' | 'terminal'): Promise<boolean> => {
+	const ok = applyMutation(
+		'switchMode',
+		(sessions) => mutator.switchMode(sessions, sessionId, mode),
+		(session) => {
+			server.broadcastSessionStateChange(sessionId, session.state ?? 'idle', {
+				name: session.name,
+				toolType: session.toolType,
+				inputMode: session.inputMode,
+				cwd: session.cwd,
+			});
+		}
+	);
+	console.log(`[maestro-server] switchMode ${sessionId} -> ${mode}: ${ok}`);
+	return ok;
+});
+
+// selectSession — (C) headless has no global "visible session"; each browser
+// tab manages its own view state. Acknowledge the call so the WS handler does
+// not surface a generic error to the client.
+server.setSelectSessionCallback(async (sessionId: string, tabId?: string): Promise<boolean> => {
+	console.log(
+		`[maestro-server] selectSession ${sessionId}${tabId ? ` tab=${tabId}` : ''} — ` +
+			`no-op in headless mode (web clients manage their own view)`
+	);
+	return true;
+});
+
+// selectTab — (C) same rationale as selectSession; renderer-only concept.
+server.setSelectTabCallback(async (sessionId: string, tabId: string): Promise<boolean> => {
+	console.log(
+		`[maestro-server] selectTab ${sessionId}/${tabId} — no-op in headless mode`
+	);
+	return true;
+});
+
+// newTab — DEFERRED. Spawning is a real side effect, not a store mutation
+// (needs ProcessManager.spawn + the renderer's session-creation pipeline).
+// Out of scope for L0c; tracked in ISA.md.
+server.setNewTabCallback((async (sessionId: string) => {
+	console.warn(
+		`[maestro-server] newTab ${sessionId}: deferred — spawn pipeline is L0d scope`
+	);
 	return null;
 }) as any);
-server.setCloseTabCallback(notImplementedWrite('closeTab') as any);
-server.setRenameTabCallback(notImplementedWrite('renameTab') as any);
-server.setStarTabCallback(notImplementedWrite('starTab') as any);
-server.setReorderTabCallback(notImplementedWrite('reorderTab') as any);
-server.setToggleBookmarkCallback(notImplementedWrite('toggleBookmark') as any);
+
+// closeTab — (A) drop the tab from aiTabs, broadcast new tab array.
+server.setCloseTabCallback(async (sessionId: string, tabId: string): Promise<boolean> => {
+	const ok = applyMutation(
+		'closeTab',
+		(sessions) => mutator.closeTab(sessions, sessionId, tabId),
+		(session) => {
+			const { aiTabs, activeTabId } = tabsForBroadcast(session);
+			server.broadcastTabsChange(sessionId, aiTabs, activeTabId);
+		}
+	);
+	console.log(`[maestro-server] closeTab ${sessionId}/${tabId}: ${ok}`);
+	return ok;
+});
+
+// renameTab — (A) mutate tab name, broadcast new tab array.
+server.setRenameTabCallback(
+	async (sessionId: string, tabId: string, newName: string): Promise<boolean> => {
+		const ok = applyMutation(
+			'renameTab',
+			(sessions) => mutator.renameTab(sessions, sessionId, tabId, newName),
+			(session) => {
+				const { aiTabs, activeTabId } = tabsForBroadcast(session);
+				server.broadcastTabsChange(sessionId, aiTabs, activeTabId);
+			}
+		);
+		console.log(`[maestro-server] renameTab ${sessionId}/${tabId} -> "${newName}": ${ok}`);
+		return ok;
+	}
+);
+
+// starTab — (A) flip starred flag on tab, broadcast new tab array.
+server.setStarTabCallback(
+	async (sessionId: string, tabId: string, starred: boolean): Promise<boolean> => {
+		const ok = applyMutation(
+			'starTab',
+			(sessions) => mutator.starTab(sessions, sessionId, tabId, starred),
+			(session) => {
+				const { aiTabs, activeTabId } = tabsForBroadcast(session);
+				server.broadcastTabsChange(sessionId, aiTabs, activeTabId);
+			}
+		);
+		console.log(`[maestro-server] starTab ${sessionId}/${tabId} -> ${starred}: ${ok}`);
+		return ok;
+	}
+);
+
+// reorderTab — (A) splice the aiTabs array, broadcast new order.
+server.setReorderTabCallback(
+	async (sessionId: string, fromIndex: number, toIndex: number): Promise<boolean> => {
+		const ok = applyMutation(
+			'reorderTab',
+			(sessions) => mutator.reorderTab(sessions, sessionId, fromIndex, toIndex),
+			(session) => {
+				const { aiTabs, activeTabId } = tabsForBroadcast(session);
+				server.broadcastTabsChange(sessionId, aiTabs, activeTabId);
+			}
+		);
+		console.log(`[maestro-server] reorderTab ${sessionId} ${fromIndex}->${toIndex}: ${ok}`);
+		return ok;
+	}
+);
+
+// toggleBookmark — (A) flip bookmarked flag. No dedicated broadcast channel
+// exists for bookmark in the WebServer surface (the desktop renderer only
+// updates Zustand locally), so we mirror the desktop renderer's behavior and
+// skip broadcast on this op. Web clients pick up the new state on next
+// getSessions read or sessions_list broadcast.
+server.setToggleBookmarkCallback(async (sessionId: string): Promise<boolean> => {
+	const ok = applyMutation(
+		'toggleBookmark',
+		(sessions) => mutator.toggleBookmark(sessions, sessionId),
+		() => {
+			/* no dedicated broadcast — same as desktop renderer */
+		}
+	);
+	console.log(`[maestro-server] toggleBookmark ${sessionId}: ${ok}`);
+	return ok;
+});
+
+// notImplementedWrite is kept around because newTab's signature differs
+// (returns `null` not `false`). Suppressed-unused below.
+void notImplementedWrite;
 
 // ============ Lifecycle ============
 
@@ -292,9 +490,12 @@ async function main() {
 	console.log(`[maestro-server] data directory: ${dataDir}`);
 	console.log(`[maestro-server] sessions visible: ${sessionsStore.get<StoredSession[]>('sessions', []).length}`);
 	console.log(
-		'[maestro-server] Layer 0b: 3/10 WRITE callbacks active ' +
-			'(writeToSession, executeCommand, interruptSession via ProcessManager). ' +
-			'switchMode, tab ops, bookmark still stubbed.'
+		'[maestro-server] Layer 0c: 9/10 WRITE callbacks active ' +
+			'(L0b: writeToSession, executeCommand, interruptSession via ProcessManager; ' +
+			'L0c-A: switchMode, closeTab, renameTab, starTab, reorderTab, toggleBookmark ' +
+			'via sessions store + broadcast; ' +
+			'L0c-C: selectSession, selectTab as headless no-ops). ' +
+			'newTab deferred to L0d (requires server-side spawn pipeline).'
 	);
 }
 
