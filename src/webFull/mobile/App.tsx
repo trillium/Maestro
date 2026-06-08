@@ -39,12 +39,13 @@ import { OfflineQueueBanner } from './OfflineQueueBanner';
 import { MessageHistory } from './MessageHistory';
 import { Terminal, usePtyMessageRouter } from '../components/Terminal';
 import { AutoRunIndicator } from './AutoRunIndicator';
-import { TabBar } from './TabBar';
+import { TabBar } from '../components/TabBar';
 import { TabSearchModal } from './TabSearchModal';
 import type { Session, LastResponsePreview } from '../hooks/useSessions';
 // View state utilities are now accessed through useMobileViewState hook
 // Keeping import for TypeScript types only if needed
 import { useMobileKeyboardHandler } from '../hooks/useMobileKeyboardHandler';
+import { useTabKeyboardShortcuts } from '../hooks/useTabKeyboardShortcuts';
 import { useMobileViewState } from '../hooks/useMobileViewState';
 import { useMobileAutoReconnect } from '../hooks/useMobileAutoReconnect';
 
@@ -983,6 +984,14 @@ export default function MobileApp() {
 		activeSessionId,
 		activeSession,
 		handleModeToggle,
+		handleSelectTab,
+	});
+
+	// Layer 4.2 — renderer-aligned tab shortcuts (Cmd+Shift+[/], Cmd+1..9, Cmd+0).
+	// Additive to useMobileKeyboardHandler above so the mobile-original Cmd+[/]
+	// (no Shift) keeps working for muscle memory.
+	useTabKeyboardShortcuts({
+		activeSession,
 		handleSelectTab,
 	});
 

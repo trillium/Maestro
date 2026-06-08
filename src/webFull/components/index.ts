@@ -51,6 +51,13 @@ export { SessionList } from './SessionList';
 export type { SessionListProps } from './SessionList';
 
 // ============================================================================
+// Layer 4.2 lifted surface — AI tab navigation (TabBar)
+// ============================================================================
+
+export { TabBar } from './TabBar';
+export type { TabBarProps } from './TabBar';
+
+// ============================================================================
 // Layer 2.5 leaf-parade primitives (verbatim from renderer with relative-path adapts)
 // ============================================================================
 

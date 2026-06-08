@@ -151,6 +151,14 @@ export type {
 	UseMobileKeyboardHandlerDeps,
 } from './useMobileKeyboardHandler';
 
+// Layer 4.2 — renderer-aligned AI-tab keyboard shortcuts
+export {
+	useTabKeyboardShortcuts,
+	default as useTabKeyboardShortcutsDefault,
+} from './useTabKeyboardShortcuts';
+
+export type { TabShortcutSession, UseTabKeyboardShortcutsDeps } from './useTabKeyboardShortcuts';
+
 export {
 	useMobileSessionManagement,
 	default as useMobileSessionManagementDefault,
