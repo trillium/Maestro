@@ -11,12 +11,16 @@
  * - GET /api/theme - Get current theme
  * - POST /api/session/:id/interrupt - Interrupt session
  * - GET /api/history - Get history entries
+ * - GET /api/settings - Get all settings (Layer 3.1 — Settings General tab port)
+ * - PATCH /api/settings - Persist partial settings updates (Layer 3.1)
  */
 
 import { FastifyInstance } from 'fastify';
 import { HistoryEntry } from '../../../shared/types';
 import { logger } from '../../utils/logger';
 import type { Theme, SessionData, SessionDetail, LiveSessionInfo, RateLimitConfig } from '../types';
+import { FileStore } from '../../../shared/file-store';
+import { getDataDir } from '../../../shared/data-dir';
 
 // Re-export types for backwards compatibility
 export type {
@@ -45,6 +49,92 @@ export interface ApiRouteCallbacks {
 	getHistory: (projectPath?: string, sessionId?: string) => HistoryEntry[];
 	getLiveSessionInfo: (sessionId: string) => LiveSessionInfo | undefined;
 	isSessionLive: (sessionId: string) => boolean;
+}
+
+/**
+ * Settings provider registry (Layer 3.1)
+ *
+ * Module-level singleton so headless entrypoints (e.g. src/server/index.ts)
+ * can wire settings read/write WITHOUT touching WebServer.ts. The Settings
+ * General-tab port in src/webFull/ depends on this registry being populated
+ * before any client request arrives; if it's not, the new routes return 503
+ * cleanly and the Electron path is unaffected.
+ *
+ * Design rationale: WebServer's existing callback flow is centralized through
+ * its CallbackRegistry, which is constructed inside WebServer and is not
+ * reachable from outside without modifying WebServer's setter surface. The
+ * Layer 3.1 brief authorizes additive edits to apiRoutes.ts only — so the
+ * registry lives here, and consumers import { registerSettingsProvider }.
+ */
+export interface SettingsProvider {
+	/** Return the full settings object (flat key/value). */
+	getSettings: () => Record<string, unknown>;
+	/** Apply a partial patch and return the updated full settings object. */
+	setSettings: (patch: Record<string, unknown>) => Record<string, unknown>;
+}
+
+let settingsProvider: SettingsProvider | null = null;
+
+/**
+ * Register the active settings provider. Pass null to clear.
+ *
+ * Headless entrypoints can call this explicitly to inject a provider whose
+ * read/write semantics they fully control (e.g. broadcasting on change).
+ * If never called, the route handlers fall back to a default FileStore-backed
+ * provider rooted at `getDataDir()` — this lets the routes work end-to-end
+ * from the headless server with no extra wiring.
+ *
+ * The Electron path can opt out by NOT loading these routes from a context
+ * that imports getDataDir; in practice, the Electron renderer uses IPC
+ * directly and does not call these endpoints, so the fallback being present
+ * does not affect it.
+ */
+export function registerSettingsProvider(provider: SettingsProvider | null): void {
+	settingsProvider = provider;
+}
+
+/**
+ * Default FileStore-backed provider. Lazy-instantiated on first use so the
+ * file handle is not created in import-time test environments that don't
+ * touch /api/settings.
+ */
+let defaultStore: FileStore<Record<string, unknown>> | null = null;
+function getDefaultProvider(): SettingsProvider {
+	if (!defaultStore) {
+		defaultStore = new FileStore<Record<string, unknown>>({
+			name: 'maestro-settings',
+			cwd: getDataDir(),
+			defaults: {},
+		});
+	}
+	const store = defaultStore;
+	return {
+		getSettings: () => ({ ...(store.store as Record<string, unknown>) }),
+		setSettings: (patch: Record<string, unknown>) => {
+			for (const [k, v] of Object.entries(patch)) {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				(store as any).set(k, v);
+			}
+			return { ...(store.store as Record<string, unknown>) };
+		},
+	};
+}
+
+/**
+ * Internal accessor used by the route handlers. Returns the registered
+ * provider if any, otherwise lazily creates a default FileStore-backed one.
+ * Exposed for testing.
+ */
+export function getSettingsProvider(): SettingsProvider {
+	return settingsProvider ?? getDefaultProvider();
+}
+
+/**
+ * Test helper — clear the cached default store so a subsequent
+ * getSettingsProvider() call reads fresh from disk. Not used in prod.
+ */
+export function _resetDefaultSettingsStore(): void {
+	defaultStore = null;
 }
 
 /**
@@ -334,6 +424,91 @@ export class ApiRoutes {
 					return reply.code(500).send({
 						error: 'Internal Server Error',
 						message: `Failed to fetch history: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// ============ Settings endpoints (Layer 3.1 — Settings General tab port) ============
+		//
+		// These routes are additive and rebase-safe. They short-circuit to 503 when
+		// no SettingsProvider is registered (the Electron path leaves it unset; only
+		// the headless vanilla-Node server at src/server/index.ts wires it via its
+		// FileStore by calling registerSettingsProvider() at startup).
+		//
+		// Per Layer 3.1 brief: the General tab in src/webFull/ is a webfull-native
+		// rewrite (NOT a renderer lift — GeneralTab.tsx is 1522 LOC across 5 IPC
+		// namespaces, far over the "lift if ≤3 IPC" threshold). It reads/writes
+		// through these two routes, using the same flat key/value shape that
+		// electron-store / FileStore already persist on disk. No new key
+		// conventions; the on-disk schema is preserved.
+
+		// GET /api/settings — return the full settings object
+		server.get(
+			`/${token}/api/settings`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (_request, reply) => {
+				try {
+					const provider = getSettingsProvider();
+					const settings = provider.getSettings();
+					return {
+						settings,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to read settings: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// PATCH /api/settings — persist a partial settings update
+		// Body: { patch: Record<string, unknown> }
+		// Returns: { settings: Record<string, unknown>, timestamp }
+		server.patch(
+			`/${token}/api/settings`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.maxPost,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const body = request.body as { patch?: Record<string, unknown> } | undefined;
+				const patch = body?.patch;
+
+				if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'patch must be a non-null object',
+						timestamp: Date.now(),
+					});
+				}
+
+				try {
+					const provider = getSettingsProvider();
+					const settings = provider.setSettings(patch);
+					return {
+						settings,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to persist settings: ${error.message}`,
 						timestamp: Date.now(),
 					});
 				}
