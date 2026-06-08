@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    com.maestro.server — launchd LaunchAgent for the headless Maestro server.
+
+    This is a LaunchAgent, not a LaunchDaemon — runs as the logged-in user,
+    not as root. That matches our Vision: single-user, Tailscale-as-perimeter,
+    no privileged listener. The agent loads at login (KeepAlive=true) and
+    restarts node on crash.
+
+    LOAD:
+      ln -sf "$(pwd)/infra/com.maestro.server.plist" \
+              "$HOME/Library/LaunchAgents/com.maestro.server.plist"
+      launchctl bootstrap "gui/$(id -u)" \
+              "$HOME/Library/LaunchAgents/com.maestro.server.plist"
+
+    UNLOAD:
+      launchctl bootout "gui/$(id -u)/com.maestro.server"
+
+    STATUS:
+      launchctl print "gui/$(id -u)/com.maestro.server" | head -40
+
+    LOGS:
+      tail -f "$HOME/Library/Logs/maestro/server.out.log"
+      tail -f "$HOME/Library/Logs/maestro/server.err.log"
+
+    TODO ON MINI2 (verify before first bootstrap):
+      1. ProgramArguments[0] — the absolute path to `node`. Default below
+         assumes fnm at v22.22.1. Run `which node` and `node --version` on
+         mini2 after `fnm use 22.22.1` and update this path if it differs.
+         A symlinked path (e.g. ~/.local/bin/node) will NOT work because
+         launchd does not expand $HOME in ProgramArguments — must be the
+         resolved absolute path.
+      2. WorkingDirectory — assumes the repo lives at /Users/trillium/code/maestro.
+         Update if cloned elsewhere.
+      3. MAESTRO_DATA_DIR — defaults to /Users/trillium/.config/maestro per
+         `src/shared/data-dir.ts`. If migrating data from an existing
+         Electron install on mini2, point this at
+         /Users/trillium/Library/Application Support/maestro (or maestro-dev).
+      4. MAESTRO_WEB_PORT — 45678 matches upstream Maestro's documented
+         web-server port. Change in lockstep with deploy.sh's PORT default.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+        "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.maestro.server</string>
+
+    <!--
+        ProgramArguments — the literal argv launchd will exec. First element
+        is the absolute path to node; subsequent elements are arguments to
+        node. The path below is the fnm-installed Node 22.22.1 location.
+        TODO on mini2: verify with `command -v node` under the fnm-activated
+        shell and update if the installation prefix differs.
+    -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/trillium/.local/share/fnm/node-versions/v22.22.1/installation/bin/node</string>
+        <string>/Users/trillium/code/maestro/dist/server/index.js</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/trillium/code/maestro</string>
+
+    <!--
+        EnvironmentVariables — every var the server reads at boot.
+        MAESTRO_DATA_DIR — per src/shared/data-dir.ts (defaults to
+            ~/.config/maestro when neither Electron nor the env var resolve).
+        MAESTRO_WEB_PORT — per src/server/index.ts (45678 = upstream default;
+            0 = OS-assigned, do NOT use under launchd because the bound port
+            is required for the health probe and any documented URL).
+        PATH — minimum needed for child processes (node-pty spawns shells;
+            git is invoked by GitStatusContext-equivalent server routes).
+    -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MAESTRO_DATA_DIR</key>
+        <string>/Users/trillium/.config/maestro</string>
+        <key>MAESTRO_WEB_PORT</key>
+        <string>45678</string>
+        <key>NODE_ENV</key>
+        <string>production</string>
+        <key>PATH</key>
+        <string>/Users/trillium/.local/share/fnm/node-versions/v22.22.1/installation/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!--
+        KeepAlive=true so launchd respawns node on any non-zero exit.
+        RunAtLoad=true so the service comes up at bootstrap/login without
+        an explicit `launchctl kickstart`.
+    -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!--
+        ProcessType=Background tells the macOS scheduler this is not an
+        interactive app — keeps it out of App Nap and gives it the
+        long-running-server scheduling profile.
+    -->
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <!--
+        Logs land under ~/Library/Logs/maestro/. Create the directory once
+        at first deploy: `mkdir -p ~/Library/Logs/maestro`. launchd will
+        not create the parent directory for you — it silently drops logs
+        if the directory is missing.
+    -->
+    <key>StandardOutPath</key>
+    <string>/Users/trillium/Library/Logs/maestro/server.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/trillium/Library/Logs/maestro/server.err.log</string>
+
+    <!--
+        Throttle respawn to once every 10 seconds. Without this, a crash
+        loop floods the logs and pegs CPU.
+    -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>
