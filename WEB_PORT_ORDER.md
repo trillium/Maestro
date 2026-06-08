@@ -1,8 +1,34 @@
 # WEB_PORT_ORDER.md
 
-> Logical, dependency-ordered plan for porting Maestro's Electron desktop UX into the browser, landing in `src/webFull/`. No time estimates — order is by dependency, not duration. Pairs with `ISA.md` (constraints, ISCs, decisions), `WEB_CONVERSION_ASSESSMENT.md` (server-side IPC inventory), `WEB_PARITY_VERIFICATION.md` (the parity-catalog spec), and `WEB_FEATURE_PARITY_SCOPE.md` (per-surface scope deltas).
+> Logical, dependency-ordered plan for porting Maestro's Electron desktop UX into the browser, landing in `src/webFull/`. No time estimates — order is by dependency, not duration. Pairs with `ISA.md` (constraints, ISCs, decisions), `WEB_CONVERSION_ASSESSMENT.md` (server-side IPC inventory), `WEB_PARITY_VERIFICATION.md` (the parity-catalog spec), `WEB_FEATURE_PARITY_SCOPE.md` (per-surface scope deltas), and `MERGE_PROTOCOL.md` (how branches land).
 >
 > **Working rule:** every layer item is built in `src/webFull/`, never in `src/web/` (which stays a verbatim mirror of upstream per anti-criterion ISC-43). Most items in Layer 3+ **COMPOSE the primitives lifted in Layer 2** rather than re-lifting renderer components. Each layer item ships with a parity catalog per `WEB_PARITY_VERIFICATION.md`. Each item is delegate-able to a worktree-isolated agent that drives Electron-as-oracle at `localhost:9222` and webFull at `localhost:5176` side-by-side.
+
+---
+
+## Currently in flight
+
+Live agents at the time of this refresh (`2026-06-07`):
+
+- **`layer-4.1-session-list`** — Layer 4.1 session-list lift (Engineer, webFull renderer lane). First "real feature" port off Layer 4.
+- **`w2-fonts-server-port`** — W2 fonts server-half (Engineer, src/server lane). Closes ISC-44.general.fonts server-side.
+- **`chore/format-cleanup`** chain — prettier debt cleanup, deploy infra lane.
+- **`docs/merge-protocol-and-port-order`** — this doc + new `MERGE_PROTOCOL.md` (plan-reeval-2 START bundle).
+
+See `.orchestrator-scratch.md` "Active background agents" block for the always-current list.
+
+---
+
+## Next-wave queue
+
+Pulled from `.orchestrator-scratch.md` "Wave queue" and the plan-reeval-2 START directives. Roughly in priority order:
+
+- **W2 remaining:** sync (server-side port, mirrors stats / fonts / wakatime / settings-broadcast shape).
+- **Layer 4.2** — tab switch / close / rename / star (WS handlers landed in L0c; webFull subscription remaining).
+- **Leaf parade L2.5+** — ~96 candidates remain in the lift-vs-rewrite pool. Continues fanning out Layer 2 primitives.
+- **Layer 4.3 + 4.4** — new-session creation (rewrite, deepest L4 surface) and Maestro-mode URL routing.
+
+Doc-only items landing alongside (this branch): `MERGE_PROTOCOL.md` capturing the merge discipline.
 
 ---
 
@@ -12,7 +38,8 @@ Goal: produce a vanilla-Node entrypoint that boots the existing Fastify+WebSocke
 
 - **L0a — bootable headless server, read-only callbacks.** New `src/server/index.ts` wires READ callbacks (`getSessions`, `getSessionDetail`, `getTheme`, `getBionifyReadingMode`, `getCustomCommands`, `getHistory`) to file-backed stores. WRITE callbacks log a warning and return `false`. New files: `src/server/index.ts`, `src/shared/data-dir.ts`, `src/shared/file-store.ts`, `tsconfig.server.json`. Two-line `package.json` scripts addition (`build:server`, `start:web`). Covers ISC-28/29/33/36 at the bootstrap path. **Status: shipped (`2f2262cfa`).**
 - **L0b — write/interrupt/execute callbacks via ProcessManager.** New `src/server/process-manager-adapter.ts` (~108 LOC) instantiates one `ProcessManager` at server startup; `setWriteToSessionCallback` / `setExecuteCommandCallback` / `setInterruptSessionCallback` route through it. Suffix logic mirrors `web-server-factory.ts:248-272` verbatim. **Status: shipped (`0cbd4df5c`).**
-- **L0c — remaining writes.** `switchMode`, `selectSession`, `selectTab`, `newTab`, `closeTab`, `renameTab`, `starTab`, `reorderTab`, `toggleBookmark`. These need write-back to the sessions store plus WebSocket broadcast. `executeCommand`'s spawn-new-session semantics also lands here. **Status: in flight (branch `layer-0c-remaining-writes`).**
+- **L0c — remaining writes.** `switchMode`, `selectSession`, `selectTab`, `newTab`, `closeTab`, `renameTab`, `starTab`, `reorderTab`, `toggleBookmark`. These need write-back to the sessions store plus WebSocket broadcast. `executeCommand`'s spawn-new-session semantics also lands here. **Status: shipped (`6ca9b4c41`).**
+- **L0d / L0e / L0f / L0g / L0h — followups (Sentry split, newTab strategy, webFull sentry init, HistoryManager port).** Shipped per the L0e/L0f/L0g/L0h merge commits and ISA Decisions 2026-06-08. ISC-33 graduated from partial PASS to full PASS server-side.
 
 **Depends on:** nothing.
 **Blocks:** every other layer.
@@ -24,7 +51,7 @@ Goal: produce a vanilla-Node entrypoint that boots the existing Fastify+WebSocke
 Goal: `src/webFull/` builds and dev-runs as its own bundle without touching `vite.config.web.mts` or anything under `src/web/`. This is the build target Layer 2+ agents land against.
 
 - **L1.1 — `vite.config.webfull.mts` + dev/build scripts.** Sibling-config pattern: parallel Vite config drives `src/webFull/`. `root` and `publicDir` repointed to `src/webFull/` + `src/webFull/public/`; `outDir` → `dist/webfull/`; dev port 5176 (web stays on 5174), preview 5177; `@web` alias re-pointed at `src/webFull` so any future alias-using import stays self-contained. `manualChunks`, `optimizeDeps`, proxy config copied verbatim from `vite.config.web.mts`. NEW files only: `vite.config.webfull.mts`, two `package.json` script lines (`dev:webfull`, `build:webfull`). Not added to the aggregate `build` script — upstream `npm run build` stays compatible. **Status: shipped (`3963a6bc0`).**
-- **L1.2 — Tailwind glob fix.** One-line change to `tailwind.config.mjs:3`: add `'./src/webFull/**/*.{js,ts,jsx,tsx}'` to the content glob. Without it, every Tailwind class introduced in webFull-only code is purged by the production build and dev mode silently masks the bug via HMR. Cited as the "single most likely failure mode" by the lift audit. **Prerequisite for Layer 2 — block all primitives-lift work until this lands.**
+- **L1.2 — Tailwind glob fix.** One-line change to `tailwind.config.mjs:3`: add `'./src/webFull/**/*.{js,ts,jsx,tsx}'` to the content glob. Without it, every Tailwind class introduced in webFull-only code is purged by the production build and dev mode silently masks the bug via HMR. **Status: shipped (bundled into L2.1 `652829239`).**
 
 **Depends on:** L0 (so dev-server has an `/api` and `/ws` proxy target).
 **Blocks:** Layer 2.
@@ -41,12 +68,15 @@ Goal: lift the visually-shared atoms and leaf modals from `src/renderer/` into `
 
 **Candidates** (audit §B1, §B4):
 
-- `src/renderer/components/ui/Modal.tsx` — Modal primitive (~200 LOC). Drags `LayerStackContext.tsx`, `useModalLayer`, `useLayerStack`, and the `MODAL_PRIORITIES` constant with it. All pure logic.
-- `src/renderer/components/ui/FormInput.tsx` — pure, 0 IPC, 0 Electron API.
-- `src/renderer/components/ui/EmojiPickerField.tsx` — pure, 0 IPC, 0 Electron API.
-- `src/renderer/components/ConfirmModal.tsx` — 75 LOC, fixed 450px width, accepts `theme` as prop. Composes `<Modal>`. **Best first lift after Modal lands.**
+- `src/renderer/components/ui/Modal.tsx` — Modal primitive (~200 LOC). Drags `LayerStackContext.tsx`, `useModalLayer`, `useLayerStack`, and the `MODAL_PRIORITIES` constant with it. All pure logic. **Status: shipped in L2.1 (`652829239`).**
+- `src/renderer/components/ui/FormInput.tsx` — pure, 0 IPC, 0 Electron API. **Status: shipped in L2.1 (`652829239`).**
+- `src/renderer/components/ui/EmojiPickerField.tsx` — pure, 0 IPC, 0 Electron API. **Status: shipped in L2.2 (`9d97e9068` / merge `72ccbd2e4`).**
+- `src/renderer/components/ConfirmModal.tsx` — 75 LOC, fixed 450px width, accepts `theme` as prop. Composes `<Modal>`. **Status: shipped in L2.1 (`652829239`).**
 - `src/renderer/components/GitStatusWidget.tsx` — 244 LOC, pure widget reading from `GitStatusContext`. Lift the widget verbatim; the context itself is L4/L5 work (wraps `useGitStatusPolling` which hits 3 git IPCs).
 - `src/renderer/components/ui/index.ts` — barrel.
+- **L2.3** — platform shim + `RenameTabModal` + `historyConstants` re-export + `EmptyState`. **Status: shipped (`6ffb407ff` / merge `3d33507f9`).**
+- **L2.4** — `ResetTasksConfirmModal` + `PlaybookNameModal` + `CreateGroupModal`. **Status: shipped (`53651ed00` / merge `898eeaecc`).**
+- **L2.5+** — leaf parade continuation (~96 candidates remain in pool per plan-reeval-2 audit).
 
 **Lift policy for primitives:**
 - Preserve the renderer's `theme: Theme` prop interface (audit §A3). Each consumer can opt into `useTheme()` at composition time; primitives don't dictate.
@@ -66,10 +96,10 @@ Goal: lift the visually-shared atoms and leaf modals from `src/renderer/` into `
 
 Goal: a logged-in browser user can see their identity (active theme, font, name where applicable) and can read/write settings through webFull. This is the first composition layer — every feature after Layer 3 assumes a settings surface exists.
 
-- **L3.1 — settings read path.** Wire `useSettings()` in webFull to `GET /:token/api/settings` (new server route). Compose `<FormInput>` (lifted in Layer 2) for the read-only display. No write callbacks yet.
-- **L3.2 — settings write path.** `POST /:token/api/settings/:key` for write. Settings broadcast on change via new WS message type so a second browser sees the update without reload (covers ISC-14).
+- **L3.1 — settings read path.** Wire `useSettings()` in webFull to `GET /:token/api/settings` (new server route). Compose `<FormInput>` (lifted in Layer 2) for the read-only display. No write callbacks yet. **Status: shipped (preceded W2 broadcast work).**
+- **L3.2 — settings write path + broadcast.** `PATCH /api/settings` for write + `settings_changed` WS broadcast so a second browser sees the update without reload (covers ISC-14 unit/wire prereq). **Status: shipped via `w2-isc14-settings-broadcast` (`7e432985d` / merge `89fd6f797`); closed ISC-44.global.settings_broadcast.**
 - **L3.3 — theme picker.** Theme selection lives in settings; on save, server broadcasts the new theme and `useTheme()` propagates. CSS custom properties re-inject per audit §A3.
-- **L3.4 — General tab parity.** `GeneralTab.tsx` (1522 LOC, 17 IPC, 1 Electron-only). Per the decision rule below, this is **rewrite-with-lifted-primitives** — compose `<Modal>`, `<FormInput>`, `<ConfirmModal>` from Layer 2, write fresh hooks against new server endpoints. Do NOT literal-lift.
+- **L3.4 — General tab parity.** `GeneralTab.tsx` (1522 LOC, 17 IPC, 1 Electron-only). Per the decision rule below, this is **rewrite-with-lifted-primitives** — compose `<Modal>`, `<FormInput>`, `<ConfirmModal>` from Layer 2, write fresh hooks against new server endpoints. Do NOT literal-lift. **Status: shipped (`cbb950c8f` initial port; L3.2 Display + Shortcuts tabs shipped in `573b1dd72` / merge `85c8e7bce`).**
 
 **Depends on:** Layer 2 (uses `<FormInput>`, `<Modal>`, `<ConfirmModal>`).
 **Blocks:** Layer 4 (Auto Run UI reads settings; agent config reads settings).
@@ -78,14 +108,14 @@ Goal: a logged-in browser user can see their identity (active theme, font, name 
 
 ## Layer 4 — Create + Navigate
 
-Goal: a browser user can create a new session, see the session list, switch tabs, close tabs.
+Goal: a browser user can create a new session, see the session list, switch tabs, close tabs. **Layer 4 is now unblocked** — Layer 2 + Layer 3 prerequisites have landed.
 
-- **L4.1 — session list.** `GET /:token/api/sessions` already exists. Compose into a webFull session-list view. Reads `useSessions()` (already exists on web side as a sample — audit §C6). No write IPC.
-- **L4.2 — tab switch / close / rename / star.** WS message types `select_tab`, `close_tab`, `rename_tab`, `star_tab` already exist; L0c lands the server-side handlers. webFull subscribes via `useWebSocket()`.
+- **L4.1 — session list.** `GET /:token/api/sessions` already exists. Compose into a webFull session-list view. Reads `useSessions()` (already exists on web side as a sample — audit §C6). No write IPC. **Status: IN FLIGHT (branch `layer-4.1-session-list`, Engineer).**
+- **L4.2 — tab switch / close / rename / star.** WS message types `select_tab`, `close_tab`, `rename_tab`, `star_tab` already exist; L0c handlers shipped. webFull subscribes via `useWebSocket()`. **Status: pending (next after L4.1).**
 - **L4.3 — new session creation.** This is the deepest L4 surface — `NewInstanceModal.tsx` is 1822 LOC across 18 IPC calls plus `dialog.selectFolder` (no browser equivalent). Per the decision rule below, this is **rewrite-with-lifted-primitives** with the directory-picker decision deferred to a Decisions entry (typed text input + server-side validation vs server-rendered directory tree picker). Composes `<Modal>` from Layer 2.
 - **L4.4 — Maestro-mode URL routing.** Renderer uses Zustand `activeSessionId`; webFull uses URL `${origin}/${token}/session/${sessionId}?tabId=${tabId}` parsed by `createMaestroModeContextValue` (audit §D2). When porting renderer code that reads `activeSessionId`, the adapter calls `useMaestroMode().sessionId`.
 
-**Depends on:** Layer 3 (settings needed for default cwd, default agent), Layer 2 (modal primitives).
+**Depends on:** Layer 3 (settings needed for default cwd, default agent), Layer 2 (modal primitives). **Both green.**
 **Blocks:** Layer 5 (every subsequent surface assumes "I'm in session X tab Y").
 
 ---
@@ -103,17 +133,18 @@ Goal: a browser user can see structured/parsed output from a running session and
 
 ---
 
-## Layer 6 — xterm.js + raw-byte WS multiplex (SCOPE-GATED)
+## Layer 6 — xterm.js + raw-byte WS multiplex (SHIPPED)
 
-Goal: a browser user can interact with a real terminal pty as if they were on the desktop. **Principal-decision-gated by ISC-42.** If the decision is "accept no raw PTY in browser; only parsed/structured output," this layer is **skipped** and Layer 5's MessageHistory render is the terminal surface.
+Goal: a browser user can interact with a real terminal pty as if they were on the desktop. **Scope decision: SCOPED IN.** ISC-42 was resolved in favor of shipping the raw-PTY surface; all three L6 phases landed.
 
-If scoped in:
-- Add `xterm.js` to webFull.
-- Add a raw-byte WS multiplex (new WS message type carrying byte chunks per session ID).
-- Survive disconnects: re-attach to the live pty on reconnect, replay scrollback from `ProcessManager` ring buffer (covers ISC-13).
+- **L6.1 — `RawPtyMultiplexer` + `pty_*` WS protocol (server side).** **Status: shipped (`18538de6b` / merge `1e4b90e75`).**
+- **L6.2 — xterm.js client renderer + `pty_*` WS subscription.** **Status: shipped (`de7a4f2b0` / merge `4278bbe9a`).**
+- **L6.3 — disk-backed PTY scrollback + ISC-45 falsification probe (PASS local).** Survives disconnect: re-attach to live pty on reconnect, replays scrollback from disk. Covers ISC-13 + ISC-45. **Status: shipped (`e39c9b929` / merge `e8816abe5`).**
 
-**Depends on:** Layer 5 (MessageHistory is the fallback if scope-gate denies this layer).
-**Blocks:** nothing below requires this layer if it's skipped.
+**Pending principal action (plan-reeval-2 STOP directive):** more Layer 6 polish is gated on mini2 running the probe (multi-machine verification). No further L6 work lands until that experiment runs.
+
+**Depends on:** Layer 5 (MessageHistory was the fallback path).
+**Blocks:** nothing below requires this layer.
 
 *Note: prior to the 2026-06-08 doc restructure this surface was Layer 4. ISA.md line 129 references "Layer 4 in `WEB_PORT_ORDER.md`" for the xterm scope decision — that reference now resolves to this layer (Layer 6) under the primitives-first ordering. Updated cross-reference noted in ISA Decisions.*
 
@@ -244,4 +275,6 @@ For an agent about to take the next port turn:
 - Server-side IPC inventory: `WEB_CONVERSION_ASSESSMENT.md`
 - Parity-catalog spec + assertion vocabulary: `WEB_PARITY_VERIFICATION.md`
 - Per-surface scope deltas (what's in / what's deferred): `WEB_FEATURE_PARITY_SCOPE.md`
+- Merge discipline + scope-guard canonical list: `MERGE_PROTOCOL.md`
 - Lift audit (this doc's source for the lift-vs-rewrite rule): `/tmp/web-ui-lift-scope.md`
+- Orchestrator parallelism posture + active agents: `.orchestrator-scratch.md`
