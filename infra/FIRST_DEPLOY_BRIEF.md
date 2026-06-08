@@ -26,7 +26,9 @@ move on.
 tailscale status | head -3
 tailscale ip -4        # records mini2's tailnet IPv4
 
-# Node 22 via fnm (the launchd plist hardcodes the fnm node path)
+# Node 22 via fnm — the launchd plist resolves the node path from
+# `command -v node` at deploy time, so whatever fnm pins here is what
+# launchd will exec.
 fnm use 22.22.1
 node --version         # → v22.22.1
 command -v node        # records the absolute path
@@ -42,10 +44,41 @@ xcode-select -p        # any path = CLT installed
 ls ~/code/maestro/package.json && echo "repo present"
 ```
 
-If `command -v node` resolves to something OTHER than
-`/Users/trillium/.local/share/fnm/node-versions/v22.22.1/installation/bin/node`,
-**stop and edit `infra/com.maestro.server.plist`** before proceeding — see
-§6 below.
+No manual plist edit is required regardless of where `command -v node`
+resolves — the deploy script's plist-templating step (see "Plist
+templating" below, before §1) resolves NODE_BIN, HOME, and REPO from the
+current host. See §6 only if you want to override `MAESTRO_DATA_DIR` for
+an Electron data-dir migration.
+
+---
+
+## Plist templating (what the deploy script does at runtime)
+
+The launchd LaunchAgent definition lives at
+`infra/com.maestro.server.plist.template`. It carries placeholder tokens
+(`__HOME__`, `__NODE_BIN__`, `__NODE_BIN_DIR__`, `__REPO__`) where
+absolute paths used to live, so the file in git is host-portable. At
+deploy time, `infra/deploy.sh` runs a `sed` pass that resolves those
+tokens against the CURRENT host — `$HOME`, `command -v node`,
+`dirname "$(command -v node)"`, and the repo root that contains the
+script — and writes the result to
+`infra/com.maestro.server.plist.generated`. The LaunchAgent symlink
+points at the generated file; launchd never sees the template directly.
+
+`infra/com.maestro.server.plist.generated` is `.gitignore`d. The
+generated file is host-specific and re-materialized on every deploy, so
+it never needs to be committed and never causes a rebase conflict with
+upstream. If you want to verify the templating without bootstrapping
+launchd, run `bash infra/deploy.sh --plist-probe` — it sed-materializes
+the plist, prints the resolved values, and exits 0 without touching the
+service.
+
+Why this exists: the previous plist hardcoded `/Users/trillium/...`
+paths. On any macOS host whose username is NOT exactly `trillium`,
+launchd accepted the file but the spawned `node` process exited
+EX_CONFIG (78) because the binary path didn't exist. Templating closes
+that gap so the same plist file works on mini2 (`trillium`), the laptop
+(`trilliumsmith`), or anywhere else.
 
 ---
 
@@ -167,23 +200,26 @@ forensics. Treat this as a `STOP` in your terminology; do not proceed to
 
 ## 5. launchd registration (the service goes live)
 
+`infra/deploy.sh` already handles plist materialization + symlink +
+bootstrap end-to-end. If you ran `./infra/deploy.sh` in §1, the service
+is already loaded and §5 is just verification. The steps below are the
+manual equivalents in case you want to drive it by hand.
+
 ```bash
 cd ~/code/maestro
 
-# Verify the node path the plist hardcodes matches your actual node.
-# This is the #1 reason launchd can't start the service.
-PLIST_NODE="$(grep -A1 ProgramArguments infra/com.maestro.server.plist | grep -o '/Users/.*node')"
-ACTUAL_NODE="$(readlink -f "$(command -v node)")"
-echo "plist:  $PLIST_NODE"
-echo "actual: $ACTUAL_NODE"
-# If these differ, edit infra/com.maestro.server.plist ProgramArguments[0]
-# AND the PATH entry's prefix before continuing. See §6.
+# Optional: sanity-check the plist template materializes to real paths
+# on this host without touching launchd. Prints HOME / NODE_BIN / REPO
+# and writes infra/com.maestro.server.plist.generated.
+bash infra/deploy.sh --plist-probe
+cat infra/com.maestro.server.plist.generated | head -40
 
 # Create the log directory — launchd silently drops logs if missing.
+# (deploy.sh also does this; safe to repeat.)
 mkdir -p ~/Library/Logs/maestro
 
-# Symlink the plist and bootstrap.
-ln -sf "$(pwd)/infra/com.maestro.server.plist" \
+# Symlink the GENERATED plist (NOT the template) and bootstrap.
+ln -sf "$(pwd)/infra/com.maestro.server.plist.generated" \
        ~/Library/LaunchAgents/com.maestro.server.plist
 launchctl bootstrap "gui/$(id -u)" \
        ~/Library/LaunchAgents/com.maestro.server.plist
@@ -202,24 +238,30 @@ tail -40 ~/Library/Logs/maestro/server.out.log
 ```
 
 `launchctl bootstrap` returning exit code 5 is the most common silent
-failure mode — it usually means the plist node path is wrong or the
-working directory does not exist. Re-read §6 below.
+failure mode. Common causes now that the plist is templated: the
+generated plist's `NODE_BIN` doesn't point at a real binary (re-run
+`fnm use 22.22.1` and re-deploy), or the working directory
+(`$REPO/dist/server/index.js`) doesn't exist (run `npm run build:server`
+in the repo and re-deploy). Re-read §6 below.
 
 ---
 
-## 6. Likely plist edits before first bootstrap
+## 6. Likely plist overrides before first bootstrap
 
-The plist is checked in with hard-coded paths that assume Trillium's
-specific install layout. Verify and edit **before** §5's `bootstrap`.
+The plist is now host-portable — the deploy script materializes
+`HOME`, `NODE_BIN`, `NODE_BIN_DIR`, and `REPO` from the current host, so
+the four fields that previously needed manual edits no longer do. The
+two settings you might still want to override are runtime environment
+variables, not paths.
 
-| Field                                       | Plist default                                                                   | How to verify                                              | If different                               |
-| ------------------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------ |
-| `ProgramArguments[0]`                       | `/Users/trillium/.local/share/fnm/node-versions/v22.22.1/installation/bin/node` | `readlink -f "$(command -v node)"` under `fnm use 22.22.1` | Replace with the resolved path.            |
-| `ProgramArguments[1]`                       | `/Users/trillium/code/maestro/dist/server/index.js`                             | `echo "$(pwd)/dist/server/index.js"` from repo root        | Replace if cloned elsewhere.               |
-| `WorkingDirectory`                          | `/Users/trillium/code/maestro`                                                  | `pwd` from repo root                                       | Replace if cloned elsewhere.               |
-| `EnvironmentVariables → PATH` (first entry) | `/Users/trillium/.local/share/fnm/node-versions/v22.22.1/installation/bin`      | Same prefix as `ProgramArguments[0]`                       | Replace prefix if fnm install differs.     |
-| `MAESTRO_DATA_DIR`                          | `/Users/trillium/.config/maestro`                                               | See data-dir migration question below                      | Override if migrating from Electron.       |
-| `MAESTRO_WEB_PORT`                          | `45678`                                                                         | none                                                       | Only change if the port is taken on mini2. |
+| Field                                       | Default (materialized)                            | How to override                                                                                                                                                                                                                 |
+| ------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ProgramArguments[0]` (node)                | `command -v node` on the deploy host              | re-run `fnm use <version>` and re-run `infra/deploy.sh`                                                                                                                                                                         |
+| `ProgramArguments[1]` (script)              | `$REPO/dist/server/index.js`                      | none — runs from the repo where `deploy.sh` lives                                                                                                                                                                               |
+| `WorkingDirectory`                          | `$REPO`                                           | none — same as above                                                                                                                                                                                                            |
+| `EnvironmentVariables → PATH` (first entry) | `dirname "$(command -v node)"` on the deploy host | re-run `infra/deploy.sh` after a node version change                                                                                                                                                                            |
+| `MAESTRO_DATA_DIR`                          | `$HOME/.config/maestro`                           | edit `infra/com.maestro.server.plist.generated` AFTER deploy.sh's templating step and BEFORE its bootstrap step — OR set `MAESTRO_DATA_DIR` in the parent shell and let `src/shared/data-dir.ts`'s env-var precedence take over |
+| `MAESTRO_WEB_PORT`                          | `45678`                                           | edit `infra/com.maestro.server.plist.template` (it's not templated — change the integer in place)                                                                                                                               |
 
 ### Data-dir question (read this BEFORE first bootstrap)
 
@@ -227,12 +269,14 @@ If you already have a Maestro Electron install on mini2 with sessions you
 care about, the headless server's default `~/.config/maestro` is **empty**
 and you'll see "no sessions" on the first browser load. Two options:
 
-- **(a) Point at the Electron data dir.** Edit the plist's
-  `MAESTRO_DATA_DIR` to
-  `/Users/trillium/Library/Application Support/maestro` (or
-  `/Users/.../maestro-dev`). Only safe if Electron Maestro is NOT running
-  concurrently — same data dir + two writers = race.
-- **(b) Copy then point.** Once, before bootstrap:
+- **(a) Point at the Electron data dir.** After `deploy.sh` materializes
+  the plist (`infra/com.maestro.server.plist.generated`), edit the
+  `MAESTRO_DATA_DIR` value there to
+  `$HOME/Library/Application Support/maestro` (or
+  `.../maestro-dev`) before the `launchctl bootstrap` step runs. Only
+  safe if Electron Maestro is NOT running concurrently — same data dir
+  - two writers = race.
+- **(b) Copy then point.** Once, before deploy:
   ```bash
   cp -R ~/Library/Application\ Support/maestro ~/.config/maestro
   ```
@@ -247,10 +291,12 @@ Also check `customSyncPath` if you've ever set it in Electron:
 jq '.customSyncPath' ~/Library/Application\ Support/maestro/maestro-settings.json 2>/dev/null
 ```
 
-If the result is a non-null path, set `MAESTRO_DATA_DIR` in the plist to
-that path — `src/shared/data-dir.ts` does NOT consult `customSyncPath`,
-so the server will read the wrong directory and look like a fresh
-install otherwise.
+If the result is a non-null path, set `MAESTRO_DATA_DIR` in the
+generated plist (or in the deploy shell, since `src/shared/data-dir.ts`
+honors the env var) to that path — `src/shared/data-dir.ts` consults
+`customSyncPath` from `maestro-bootstrap.json` but that file lives in
+the headless dataDir; if the Electron install is using a different
+bootstrap path you need to point at it explicitly.
 
 ---
 
@@ -281,18 +327,19 @@ invalidates the value claim for the decouple-from-Electron work.
 
 ## 8. Likely failures and fixes
 
-| Symptom                                                                              | Likely cause                                                                                                            | Fix                                                                                                                                                                                                                      |
-| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `npm ci` aborts with `electron-rebuild` errors                                       | `MAESTRO_HEADLESS=1` was NOT exported before `npm ci`                                                                   | `export MAESTRO_HEADLESS=1 && rm -rf node_modules && npm ci`                                                                                                                                                             |
-| `npm ci` warns `"electron-rebuild not found"` even with the guard                    | npm parsed the postinstall line but it didn't run the guard?                                                            | Re-confirm the postinstall line in `package.json` starts with `if [ "${MAESTRO_HEADLESS:-0}" = "1" ]; then`.                                                                                                             |
-| Server boots locally but `launchctl bootstrap` exits 5                               | Plist node path is wrong                                                                                                | §6 — replace `ProgramArguments[0]` with `readlink -f "$(command -v node)"`.                                                                                                                                              |
-| Server boots foreground but launchd `state = exited` immediately                     | Working directory in plist doesn't exist OR `MAESTRO_DATA_DIR` parent doesn't exist                                     | `mkdir -p ~/.config/maestro` and verify `WorkingDirectory` in the plist.                                                                                                                                                 |
-| Boot log says `Web assets not found. Web interface will not be served.`              | `dist/webfull/` (or `dist/web/`) is missing                                                                             | `npm run build:webfull` then restart the service (`launchctl kickstart -k gui/$(id -u)/com.maestro.server`).                                                                                                             |
-| Boot crash: `Cannot find module '@sentry/electron'`                                  | Unexpected — `src/server/sentry.ts` uses lazy `require('@sentry/node')` inside a try/catch, so absence should be silent | Check `src/server/sentry.ts` is the file being imported (not a stale dist). Rebuild: `rm -rf dist && npm run build:server`. If reproducible, the lazy guard is broken and needs a follow-up patch.                       |
-| `tailscale ping mini2` works but `curl http://mini2.<tailnet>.ts.net:45678/` refuses | Server not actually listening on the tailnet interface                                                                  | `lsof -nP -iTCP:45678 -sTCP:LISTEN` on mini2 — expect `*:45678` (Fastify default `0.0.0.0`). If the line is missing, the server isn't running on that port.                                                              |
-| iPhone Safari can't load the URL but laptop curl works                               | MagicDNS not resolved on phone, or tailnet ACL filtering iOS device                                                     | Try the tailnet IPv4 from `tailscale ip -4` instead of the MagicDNS hostname. Verify the iPhone is on the tailnet via the Tailscale iOS app's status screen.                                                             |
-| iPhone connects but UI is blank / "missing assets"                                   | `dist/webfull/` not built                                                                                               | `npm run build:webfull` on mini2; service auto-serves on next request.                                                                                                                                                   |
-| 401 on first browser load                                                            | Token mismatch                                                                                                          | The token is logged at boot (`[maestro-server] listening at http://<ip>:45678/<token>`) and persisted in `<dataDir>/maestro-settings.json` under `webAuthToken`. Use the logged token; copy from logs once and bookmark. |
+| Symptom                                                                              | Likely cause                                                                                                                                                                                  | Fix                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `npm ci` aborts with `electron-rebuild` errors                                       | `MAESTRO_HEADLESS=1` was NOT exported before `npm ci`                                                                                                                                         | `export MAESTRO_HEADLESS=1 && rm -rf node_modules && npm ci`                                                                                                                                                             |
+| `npm ci` warns `"electron-rebuild not found"` even with the guard                    | npm parsed the postinstall line but it didn't run the guard?                                                                                                                                  | Re-confirm the postinstall line in `package.json` starts with `if [ "${MAESTRO_HEADLESS:-0}" = "1" ]; then`.                                                                                                             |
+| Server boots locally but `launchctl bootstrap` exits 5                               | Generated plist's NODE_BIN doesn't point at a real binary, OR the symlink at `~/Library/LaunchAgents/com.maestro.server.plist` points at the (old) template instead of `.generated`           | Re-run `fnm use 22.22.1 && bash infra/deploy.sh --plist-probe` then `cat infra/com.maestro.server.plist.generated \| head -40` and confirm the node path resolves. Re-run `infra/deploy.sh` to re-symlink.               |
+| Server spawns then immediately exits with EX_CONFIG (78) under launchd               | The symlink at `~/Library/LaunchAgents/com.maestro.server.plist` points at the OLD pre-template plist (with `/Users/trillium/...` hardcoded paths) on a host whose username is not `trillium` | `launchctl bootout "gui/$(id -u)/com.maestro.server"`, `rm ~/Library/LaunchAgents/com.maestro.server.plist`, re-run `infra/deploy.sh`.                                                                                   |
+| Server boots foreground but launchd `state = exited` immediately                     | Working directory in generated plist doesn't exist (e.g. repo was moved) OR `MAESTRO_DATA_DIR` parent doesn't exist                                                                           | `mkdir -p ~/.config/maestro` and re-run `infra/deploy.sh` from inside the repo.                                                                                                                                          |
+| Boot log says `Web assets not found. Web interface will not be served.`              | `dist/webfull/` (or `dist/web/`) is missing                                                                                                                                                   | `npm run build:webfull` then restart the service (`launchctl kickstart -k gui/$(id -u)/com.maestro.server`).                                                                                                             |
+| Boot crash: `Cannot find module '@sentry/electron'`                                  | Unexpected — `src/server/sentry.ts` uses lazy `require('@sentry/node')` inside a try/catch, so absence should be silent                                                                       | Check `src/server/sentry.ts` is the file being imported (not a stale dist). Rebuild: `rm -rf dist && npm run build:server`. If reproducible, the lazy guard is broken and needs a follow-up patch.                       |
+| `tailscale ping mini2` works but `curl http://mini2.<tailnet>.ts.net:45678/` refuses | Server not actually listening on the tailnet interface                                                                                                                                        | `lsof -nP -iTCP:45678 -sTCP:LISTEN` on mini2 — expect `*:45678` (Fastify default `0.0.0.0`). If the line is missing, the server isn't running on that port.                                                              |
+| iPhone Safari can't load the URL but laptop curl works                               | MagicDNS not resolved on phone, or tailnet ACL filtering iOS device                                                                                                                           | Try the tailnet IPv4 from `tailscale ip -4` instead of the MagicDNS hostname. Verify the iPhone is on the tailnet via the Tailscale iOS app's status screen.                                                             |
+| iPhone connects but UI is blank / "missing assets"                                   | `dist/webfull/` not built                                                                                                                                                                     | `npm run build:webfull` on mini2; service auto-serves on next request.                                                                                                                                                   |
+| 401 on first browser load                                                            | Token mismatch                                                                                                                                                                                | The token is logged at boot (`[maestro-server] listening at http://<ip>:45678/<token>`) and persisted in `<dataDir>/maestro-settings.json` under `webAuthToken`. Use the logged token; copy from logs once and bookmark. |
 
 ---
 
@@ -306,8 +353,12 @@ in `ISA.md` that names:
 - Which step in §0–§7 actually surprised you (took longer / didn't work as
   written / needed an undocumented workaround).
 - Whether you used data-dir option (a), (b), or default in §6.
-- Whether the plist needed any of the §6 edits and what the actual values
-  were on mini2.
+- Whether the plist materialization produced the expected
+  `HOME` / `NODE_BIN` / `REPO` values (look at the
+  `[deploy] materializing ...` block from `infra/deploy.sh`'s output, or
+  run `bash infra/deploy.sh --plist-probe` and paste the values).
+- Whether you had to override `MAESTRO_DATA_DIR` or `MAESTRO_WEB_PORT`
+  in the generated plist post-materialization, and why.
 - Whether step 8 of §7 passed — `PASS` / `FAIL` + screenshot reference.
 - Whether the server survived a full mini2 reboot
   (`sudo shutdown -r now` from laptop SSH, wait, re-verify §3 + §7).
@@ -336,11 +387,10 @@ MAESTRO_WEB_PORT=45678 node dist/server/index.js   # Ctrl-C after curl OK
 # Local probe (must PASS before launchd)
 bash infra/probe-pty-survival.sh
 
-# Plist install
-ln -sf "$(pwd)/infra/com.maestro.server.plist" \
-       ~/Library/LaunchAgents/com.maestro.server.plist
-launchctl bootstrap "gui/$(id -u)" \
-       ~/Library/LaunchAgents/com.maestro.server.plist
+# Plist install — deploy.sh materializes the template + symlinks +
+# bootstraps end-to-end. Re-running is idempotent and re-materializes
+# the generated plist if HOME / NODE_BIN / REPO changed.
+bash infra/deploy.sh
 launchctl print "gui/$(id -u)/com.maestro.server" | head -40
 
 # From laptop

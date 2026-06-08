@@ -61,3 +61,9 @@ yarn-error.log*
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Maestro infra: host-resolved plist materialized by infra/deploy.sh from
+# infra/com.maestro.server.plist.template. The template is host-portable
+# (placeholder tokens); the .generated artifact is host-specific and MUST
+# NOT be committed — see Decision 2026-06-08 in ISA.md.
+infra/com.maestro.server.plist.generated

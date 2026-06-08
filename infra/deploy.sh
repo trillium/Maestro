@@ -11,26 +11,42 @@
 #   - Tailscale running and joined to the tailnet.
 #   - Node 22.x installed (via fnm or system). This script assumes fnm.
 #   - Repo cloned at $HOME/code/maestro (working directory = repo root).
-#   - infra/com.maestro.server.plist's NODE_PATH placeholder verified
-#     against the actual node binary on mini2 (see runbook §Prerequisites).
+#   - infra/com.maestro.server.plist.template's placeholder tokens
+#     (__HOME__, __NODE_BIN__, __NODE_BIN_DIR__, __REPO__) are materialized
+#     at deploy time by this script — see the "Plist templating" block
+#     below. No manual edit required for host portability.
 #
 # Idempotent: re-running after a no-op `git pull` still rebuilds and reloads.
 # Exit code 0 = server responding on the configured port; non-zero = inspect
 # logs.
 #
 # Modes:
-#   ./infra/deploy.sh              — full deploy + basic curl health check
-#                                    (default; original behavior).
-#   ./infra/deploy.sh --probe      — SKIP deploy; only run the falsification
-#                                    probe against the on-disk scrollback
-#                                    layer. Use to verify L6.3 persistence
-#                                    on the running mini2 without touching
-#                                    the launchd service or the running
-#                                    server.
-#   ./infra/deploy.sh --auto-probe — full deploy + curl health check, then
-#                                    run infra/probe-pty-survival.sh to
-#                                    confirm PTY scrollback survives a
-#                                    simulated kill -9 + restart.
+#   ./infra/deploy.sh                — full deploy + basic curl health check
+#                                      (default; original behavior).
+#   ./infra/deploy.sh --probe        — SKIP deploy; only run the PTY
+#                                      falsification probe against the
+#                                      on-disk scrollback layer. Use to
+#                                      verify L6.3 persistence on the
+#                                      running mini2 without touching the
+#                                      launchd service or the running
+#                                      server.
+#   ./infra/deploy.sh --plist-probe  — SKIP deploy; only sed-materialize
+#                                      com.maestro.server.plist.template
+#                                      into
+#                                      com.maestro.server.plist.generated
+#                                      and print the resolved HOME /
+#                                      NODE_BIN / REPO values. Use to
+#                                      sanity-check host portability of
+#                                      the template without touching
+#                                      launchd or the running server. Does
+#                                      NOT require node, npm, or fnm on
+#                                      PATH (skipped before the Node-pin
+#                                      block).
+#   ./infra/deploy.sh --auto-probe   — full deploy + curl health check,
+#                                      then run
+#                                      infra/probe-pty-survival.sh to
+#                                      confirm PTY scrollback survives a
+#                                      simulated kill -9 + restart.
 #
 # MAESTRO_HEADLESS=1 is exported automatically by this script so the
 # postinstall hook in package.json skips `electron-rebuild` (broken on a
@@ -47,6 +63,9 @@ case "${1:-}" in
   --probe)
     MODE="probe-only"
     ;;
+  --plist-probe)
+    MODE="plist-probe-only"
+    ;;
   --auto-probe)
     MODE="deploy-and-probe"
     ;;
@@ -55,7 +74,7 @@ case "${1:-}" in
     ;;
   *)
     echo "[deploy] unknown argument: $1"
-    echo "[deploy] usage: $0 [--probe | --auto-probe]"
+    echo "[deploy] usage: $0 [--probe | --plist-probe | --auto-probe]"
     exit 2
     ;;
 esac
@@ -72,11 +91,86 @@ echo "[deploy] mode: $MODE"
 # `postinstall` script and triggers on MAESTRO_HEADLESS=1.
 export MAESTRO_HEADLESS=1
 
-# ─── --probe shortcut: skip deploy, just run the falsification probe ────
+# ─── Plist templating ────────────────────────────────────────────────────
+# `infra/com.maestro.server.plist.template` carries placeholder tokens
+# (__HOME__, __NODE_BIN__, __NODE_BIN_DIR__, __REPO__) so the file in git
+# is host-portable. At deploy time we resolve those tokens against the
+# CURRENT host (whichever user/path is running this script) and write the
+# materialized plist to `infra/com.maestro.server.plist.generated`. The
+# `.generated` file is gitignored and is what the LaunchAgent symlink
+# points at — launchd never sees the template directly.
+#
+# Resolution order for NODE_BIN: prefer `command -v node` after the fnm
+# pin block runs (so the version this script chose is what launchd uses).
+# For `--plist-probe` we materialize without requiring fnm/node so the
+# template can be validated on hosts where Node isn't installed yet — in
+# that case we fall back to `command -v node` if present, else a stub.
+#
+# History: see Decision 2026-06-08 "plist template paths for host
+# portability" in ISA.md.
+PLIST_TEMPLATE="$REPO_ROOT/infra/com.maestro.server.plist.template"
+PLIST_GENERATED="$REPO_ROOT/infra/com.maestro.server.plist.generated"
+
+materialize_plist() {
+  local node_bin="$1"
+  local node_bin_dir
+  node_bin_dir="$(dirname "$node_bin")"
+
+  if [ ! -f "$PLIST_TEMPLATE" ]; then
+    echo "[deploy] FAIL: plist template not found at $PLIST_TEMPLATE"
+    exit 1
+  fi
+
+  echo "[deploy] materializing $PLIST_GENERATED from template"
+  echo "[deploy]   HOME=$HOME"
+  echo "[deploy]   NODE_BIN=$node_bin"
+  echo "[deploy]   NODE_BIN_DIR=$node_bin_dir"
+  echo "[deploy]   REPO=$REPO_ROOT"
+
+  # Use `|` as the sed delimiter so absolute paths (which contain `/`)
+  # don't need escaping. None of the values legitimately contain `|`.
+  sed \
+    -e "s|__HOME__|$HOME|g" \
+    -e "s|__NODE_BIN_DIR__|$node_bin_dir|g" \
+    -e "s|__NODE_BIN__|$node_bin|g" \
+    -e "s|__REPO__|$REPO_ROOT|g" \
+    "$PLIST_TEMPLATE" > "$PLIST_GENERATED"
+
+  # Sanity-check: no placeholder tokens should survive in the generated
+  # plist. If any do, the deploy is broken and we bail loudly rather
+  # than handing launchd a malformed file.
+  if grep -q '__HOME__\|__NODE_BIN__\|__NODE_BIN_DIR__\|__REPO__' "$PLIST_GENERATED"; then
+    echo "[deploy] FAIL: unresolved placeholder tokens in $PLIST_GENERATED:"
+    grep -n '__HOME__\|__NODE_BIN__\|__NODE_BIN_DIR__\|__REPO__' "$PLIST_GENERATED"
+    exit 1
+  fi
+}
+
+# ─── --probe shortcut: skip deploy, just run the PTY falsification probe
 if [ "$MODE" = "probe-only" ]; then
   echo "[deploy] --probe: skipping pull/install/build/launchctl"
   echo "[deploy] running infra/probe-pty-survival.sh"
   exec bash "$REPO_ROOT/infra/probe-pty-survival.sh"
+fi
+
+# ─── --plist-probe shortcut: skip deploy, only materialize the plist ────
+# Used to validate the template's host-portability without touching
+# launchd or the running server. Does NOT require fnm/node — we resolve
+# NODE_BIN via `command -v node` if present, else fall back to a
+# placeholder that's obviously wrong so the operator notices.
+if [ "$MODE" = "plist-probe-only" ]; then
+  echo "[deploy] --plist-probe: skipping pull/install/build/launchctl"
+  if command -v node >/dev/null 2>&1; then
+    PROBE_NODE_BIN="$(command -v node)"
+  else
+    PROBE_NODE_BIN="/usr/local/bin/node"
+    echo "[deploy] WARN: node not on PATH — using placeholder $PROBE_NODE_BIN"
+    echo "[deploy] WARN: install Node before a real deploy or the LaunchAgent will exit 78"
+  fi
+  materialize_plist "$PROBE_NODE_BIN"
+  echo "[deploy] OK: plist materialized at $PLIST_GENERATED"
+  echo "[deploy] no launchd changes made (--plist-probe is read-only wrt launchd)"
+  exit 0
 fi
 
 # ─── Pin Node version ────────────────────────────────────────────────────
@@ -124,11 +218,26 @@ if [ ! -f "dist/server/index.js" ]; then
   exit 1
 fi
 
+# ─── Materialize the plist from the template ─────────────────────────────
+# Resolve NODE_BIN against the node this script is using (so launchd uses
+# the same node the build did). The fnm pin block above guarantees
+# `node` is on PATH at this point.
+NODE_BIN="$(command -v node)"
+if [ -z "$NODE_BIN" ]; then
+  echo "[deploy] FAIL: node not on PATH after fnm pin — cannot materialize plist"
+  exit 1
+fi
+materialize_plist "$NODE_BIN"
+
 # ─── Wire (or re-wire) the launchd LaunchAgent ───────────────────────────
-PLIST_SRC="$REPO_ROOT/infra/com.maestro.server.plist"
+PLIST_SRC="$PLIST_GENERATED"
 PLIST_DST="$HOME/Library/LaunchAgents/com.maestro.server.plist"
 
 mkdir -p "$HOME/Library/LaunchAgents"
+
+# Ensure the log directory exists — launchd silently drops logs if the
+# parent isn't there.
+mkdir -p "$HOME/Library/Logs/maestro"
 
 if [ ! -e "$PLIST_DST" ]; then
   echo "[deploy] first-time setup: linking $PLIST_SRC → $PLIST_DST"
