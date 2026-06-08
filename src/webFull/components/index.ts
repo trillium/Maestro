@@ -333,3 +333,18 @@ export { PeakHoursChart } from './UsageDashboard/PeakHoursChart';
 export { WeekdayComparisonChart } from './UsageDashboard/WeekdayComparisonChart';
 export { SessionStats } from './UsageDashboard/SessionStats';
 export { SummaryCards } from './UsageDashboard/SummaryCards';
+// Wizard Phase-1 — close the 2 leaves previously blocked by
+// `createWizardBubbleMarkdownComponents` in `src/renderer/utils/markdownConfig.ts`.
+// The renderer factory hardcodes `window.maestro.shell.openExternal(href)`;
+// `src/webFull/utils/markdownConfig.ts` surgically re-implements the factory
+// with an injected `onExternalLinkClick` callback (default: `window.open`).
+// ============================================================================
+
+export { WizardMessageBubble } from './InlineWizard/WizardMessageBubble';
+export type {
+	WizardMessageBubbleMessage,
+	WizardMessageBubbleProps,
+} from './InlineWizard/WizardMessageBubble';
+
+export { WizardConversationView } from './InlineWizard/WizardConversationView';
+export type { WizardConversationViewProps } from './InlineWizard/WizardConversationView';
