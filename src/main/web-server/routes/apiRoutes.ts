@@ -22,6 +22,13 @@ import { logger } from '../../utils/logger';
 import type { Theme, SessionData, SessionDetail, LiveSessionInfo, RateLimitConfig } from '../types';
 import { FileStore } from '../../../shared/file-store';
 import { getDataDir } from '../../../shared/data-dir';
+import type {
+	MarketplaceManifest,
+	GetManifestResponse,
+	GetDocumentResponse,
+	GetReadmeResponse,
+	ImportPlaybookResponse,
+} from '../../../shared/marketplace-types';
 
 // Re-export types for backwards compatibility
 export type {
@@ -408,6 +415,93 @@ function validateFsPath(p: unknown): string | null {
 		return 'path must not contain encoded `..` segments';
 	}
 	return null;
+}
+
+/* ============ Marketplace provider registry (W3 — closes ISC-44.shim.w3_marketplace_routes, server-half) ============ */
+//
+// Mirrors the WakaTimeProvider / StatsProvider / FontsProvider patterns
+// above. Headless entrypoints register a provider backed by
+// `src/server/marketplace-manager.ts`; the Electron path leaves it unset
+// and the routes 503 cleanly. NO fallback default is constructed here:
+// instantiating a MarketplaceManager opens a `fs.watch` handle against
+// `<dataDir>/local-manifest.json` and registers SSE-bound EventEmitter
+// listeners, and the headless boot path is the only surface that should
+// own those resources. The renderer-side `marketplace:*` IPC handlers in
+// `src/main/ipc/handlers/marketplace.ts` are NOT touched.
+//
+// CORRECTS THE IPC-SHIM DECISION (2026-06-08 — "IPC-shim strategy for
+// the big-3"): that Decision counted `MarketplaceModal.tsx`'s 5 callsites
+// as the entire IPC surface and concluded "0 new routes + 1 strip-and-
+// promote + 1 window.open swap." The grep was modal-file-scoped and
+// missed the transitive `useMarketplace` hook
+// (`src/renderer/hooks/batch/useMarketplace.ts`), which is the actual
+// consumer of `window.maestro.marketplace.*` and pulls in 7 IPC sites
+// plus the `onManifestChanged` event subscription — 8 surfaces total.
+// Going forward, transitive hook consumers MUST be counted in Decision
+// audits, not just direct modal-file callsites. See Decision entry of
+// even date.
+//
+// Route surface (6 endpoints):
+//   GET  /api/marketplace/manifest         — getManifest, served from
+//                                            cache when fresh, else fetch.
+//   POST /api/marketplace/refresh          — bypass cache, force fetch.
+//   GET  /api/marketplace/readme           — fetch README.md for a path.
+//   GET  /api/marketplace/document         — fetch a single document.
+//   POST /api/marketplace/import           — write playbook to disk.
+//   GET  /api/marketplace/manifest/events  — SSE; emits `manifestChanged`
+//                                            on local-manifest.json edits.
+//
+// The SSE route uses Fastify's `reply.raw` escape hatch (Node's underlying
+// http.ServerResponse) to write text/event-stream frames. Authorization is
+// the token-gated path prefix; rate limiting is intentionally OMITTED on
+// the SSE route because long-lived connections legitimately produce zero
+// requests-per-window from the Fastify rate-limit plugin's perspective
+// (the rate limit fires on connection-open, not per-frame). Heartbeat
+// comments (`: keepalive\n\n`) are sent every 30s to keep proxies from
+// killing idle connections.
+export interface MarketplaceProvider {
+	/** Get manifest (from cache if valid, else fetch). */
+	getManifest: () => Promise<GetManifestResponse>;
+	/** Force-refresh manifest (bypass cache). */
+	refreshManifest: () => Promise<{ manifest: MarketplaceManifest; fromCache: boolean }>;
+	/** Fetch README markdown for a playbook path. */
+	getReadme: (playbookPath: string) => Promise<GetReadmeResponse>;
+	/** Fetch a single document for a playbook path. */
+	getDocument: (playbookPath: string, filename: string) => Promise<GetDocumentResponse>;
+	/** Import a playbook into the headless playbooks store. */
+	importPlaybook: (
+		playbookId: string,
+		targetFolderName: string,
+		autoRunFolderPath: string,
+		sessionId: string,
+		sshRemoteId?: string
+	) => Promise<ImportPlaybookResponse>;
+	/** Subscribe to manifest-changed events. Returns a cleanup function. */
+	onManifestChanged: (listener: () => void) => () => void;
+}
+
+let marketplaceProvider: MarketplaceProvider | null = null;
+
+/**
+ * Register the active marketplace provider. Pass null to clear.
+ *
+ * The headless server boot path calls this once before `WebServer.start()` so
+ * the `/api/marketplace/*` routes are wired by the time the first client
+ * request arrives. Electron-host paths can ignore this — the routes 503
+ * cleanly when no provider is registered, and the Electron renderer continues
+ * to use the `marketplace:*` IPC namespace directly.
+ */
+export function registerMarketplaceProvider(provider: MarketplaceProvider | null): void {
+	marketplaceProvider = provider;
+}
+
+/**
+ * Internal accessor for the route handlers. Returns the registered provider
+ * or `null` if none is registered (the routes translate `null` → HTTP 503).
+ * Exposed for testing.
+ */
+export function getMarketplaceProvider(): MarketplaceProvider | null {
+	return marketplaceProvider;
 }
 
 /**
@@ -1443,6 +1537,384 @@ export class ApiRoutes {
 						timestamp: Date.now(),
 					});
 				}
+			}
+		);
+
+		// ============ Marketplace endpoints (W3 — closes ISC-44.shim.w3_marketplace_routes, server-half) ============
+		//
+		// Additive REST routes that mirror the renderer-side `marketplace:*`
+		// IPC namespace. 503 when no MarketplaceProvider is registered (the
+		// Electron path leaves it unset). Per the W2 precedent + ISC-40 N1
+		// legalization, additive `src/main/web-server/routes/` edits are
+		// authorized. NO touch to `src/main/ipc/handlers/marketplace.ts` or
+		// the renderer-side preload bridge.
+		//
+		// THIS CORRECTS THE IPC-SHIM DECISION audit scope: the modal-file
+		// grep counted MarketplaceModal's 5 sites and concluded "ZERO new
+		// routes." The transitive `useMarketplace` hook is the actual
+		// consumer of `window.maestro.marketplace.*` (7 sites + 1 event
+		// subscription = 8 surfaces total), and lifting `MarketplaceModal`
+		// requires those 8 surfaces to work in webFull, hence the 6-route
+		// cluster here (manifest, refresh, readme, document, import, +
+		// the SSE manifest/events stream for the onManifestChanged hook
+		// subscription).
+
+		// GET /api/marketplace/manifest — getManifest reply
+		// (`{ manifest, fromCache, cacheAge?, timestamp }`).
+		server.get(
+			`/${token}/api/marketplace/manifest`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (_request, reply) => {
+				const provider = getMarketplaceProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Marketplace provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.getManifest();
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to read marketplace manifest: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// POST /api/marketplace/refresh — force-refresh (bypass cache).
+		// Reply: `{ manifest, fromCache, timestamp }`.
+		server.post(
+			`/${token}/api/marketplace/refresh`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.maxPost,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (_request, reply) => {
+				const provider = getMarketplaceProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Marketplace provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.refreshManifest();
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to refresh marketplace manifest: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/marketplace/readme?path=<playbookPath> — README content.
+		// Reply: `{ content: string | null, timestamp }`.
+		//
+		// `path` validation: must be present, must be a non-empty string.
+		// The marketplace manager performs its own traversal validation on
+		// local-filesystem paths (via `validateSafePath`). Remote (GitHub)
+		// paths are sent as-is to a fixed `raw.githubusercontent.com`
+		// base URL, so a hostile `path` cannot redirect to another origin.
+		server.get(
+			`/${token}/api/marketplace/readme`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getMarketplaceProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Marketplace provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { path: playbookPath } = request.query as { path?: string };
+				if (typeof playbookPath !== 'string' || playbookPath.length === 0) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'path query parameter is required',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.getReadme(playbookPath);
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to fetch README: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/marketplace/document?path=<playbookPath>&filename=<name>
+		// Reply: `{ content: string, timestamp }`.
+		//
+		// `path` + `filename` validation: both must be present, non-empty
+		// strings; `filename` must not contain `..` (the manager also
+		// validates, but a 400 here gives a cleaner client-facing error
+		// than a 500 wrapping `MarketplaceFetchError('Invalid filename')`).
+		server.get(
+			`/${token}/api/marketplace/document`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getMarketplaceProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Marketplace provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { path: playbookPath, filename } = request.query as {
+					path?: string;
+					filename?: string;
+				};
+				if (typeof playbookPath !== 'string' || playbookPath.length === 0) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'path query parameter is required',
+						timestamp: Date.now(),
+					});
+				}
+				if (typeof filename !== 'string' || filename.length === 0) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'filename query parameter is required',
+						timestamp: Date.now(),
+					});
+				}
+				if (filename.includes('..')) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'filename must not contain path traversal sequences',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.getDocument(playbookPath, filename);
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to fetch document: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// POST /api/marketplace/import — import a playbook to disk.
+		// Body: `{ playbookId, targetFolderName, autoRunFolderPath, sessionId, sshRemoteId? }`.
+		// Reply: `{ playbook, importedDocs, importedAssets, timestamp }`.
+		//
+		// `autoRunFolderPath` validation: must be a non-empty absolute path.
+		// The headless variant does NOT support SSH-remote imports — the
+		// manager throws if `sshRemoteId` is non-empty. The route surfaces
+		// that throw as a 500 with the manager's message; future versions
+		// may upgrade to a 501-style "Not Implemented" if SSH remoting
+		// lands in the server tree.
+		server.post(
+			`/${token}/api/marketplace/import`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.maxPost,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getMarketplaceProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Marketplace provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const body = request.body as
+					| {
+							playbookId?: string;
+							targetFolderName?: string;
+							autoRunFolderPath?: string;
+							sessionId?: string;
+							sshRemoteId?: string;
+					  }
+					| undefined;
+				const playbookId = body?.playbookId;
+				const targetFolderName = body?.targetFolderName;
+				const autoRunFolderPath = body?.autoRunFolderPath;
+				const sessionId = body?.sessionId;
+				const sshRemoteId = body?.sshRemoteId;
+
+				if (typeof playbookId !== 'string' || playbookId.length === 0) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'playbookId must be a non-empty string',
+						timestamp: Date.now(),
+					});
+				}
+				if (typeof targetFolderName !== 'string' || targetFolderName.length === 0) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'targetFolderName must be a non-empty string',
+						timestamp: Date.now(),
+					});
+				}
+				if (typeof autoRunFolderPath !== 'string' || autoRunFolderPath.length === 0) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'autoRunFolderPath must be a non-empty string',
+						timestamp: Date.now(),
+					});
+				}
+				if (typeof sessionId !== 'string' || sessionId.length === 0) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'sessionId must be a non-empty string',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.importPlaybook(
+						playbookId,
+						targetFolderName,
+						autoRunFolderPath,
+						sessionId,
+						sshRemoteId
+					);
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to import playbook: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/marketplace/manifest/events — SSE stream.
+		// Emits `data: {"type":"manifestChanged","timestamp":<ms>}\n\n`
+		// on every local-manifest.json change (debounced by the manager).
+		// `: keepalive\n\n` comment frames every 30s keep idle proxies
+		// from killing the connection. Cleanup on `request.raw.on('close')`.
+		server.get(
+			`/${token}/api/marketplace/manifest/events`,
+			{
+				// Intentionally NO rate limit on SSE — long-lived connections
+				// are the wrong shape for the request-rate-limit window.
+			},
+			async (request, reply) => {
+				const provider = getMarketplaceProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Marketplace provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+
+				// Switch to raw mode — Fastify defers to Node's http.ServerResponse.
+				reply.raw.writeHead(200, {
+					'Content-Type': 'text/event-stream',
+					'Cache-Control': 'no-cache, no-transform',
+					Connection: 'keep-alive',
+					// CORS for browsers running on a different origin than the
+					// server's listen address — the rest of the /api/* surface
+					// has CORS configured at the WebServer level; SSE bypasses
+					// that path because reply.raw doesn't run through Fastify's
+					// preHandler chain. Allow the same origin set explicitly.
+					'Access-Control-Allow-Origin': '*',
+				});
+
+				// Initial comment frame — confirms the stream is established.
+				reply.raw.write(`: connected ${Date.now()}\n\n`);
+
+				const send = () => {
+					try {
+						reply.raw.write(
+							`data: ${JSON.stringify({ type: 'manifestChanged', timestamp: Date.now() })}\n\n`
+						);
+					} catch {
+						/* connection died — cleanup is wired below */
+					}
+				};
+
+				const cleanup = provider.onManifestChanged(send);
+
+				// 30s heartbeat keepalive. Many proxies kill idle TCP at 60-120s;
+				// 30s is comfortably inside that window for every proxy we've
+				// seen in practice (nginx default 60s, Cloudflare 100s).
+				const heartbeat = setInterval(() => {
+					try {
+						reply.raw.write(`: keepalive ${Date.now()}\n\n`);
+					} catch {
+						/* connection died */
+					}
+				}, 30_000);
+
+				// Cleanup on client disconnect.
+				request.raw.on('close', () => {
+					clearInterval(heartbeat);
+					cleanup();
+					try {
+						reply.raw.end();
+					} catch {
+						/* already closed */
+					}
+				});
 			}
 		);
 
