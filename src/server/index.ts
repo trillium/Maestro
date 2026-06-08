@@ -330,6 +330,7 @@ registerAutorunProvider({
 		autorunManager.saveImage(folderPath, docFilename, dataUrl, extension),
 	deleteImage: (folderPath: string, relativePath: string) =>
 		autorunManager.deleteImage(folderPath, relativePath),
+	deleteFolder: (folderPath: string) => autorunManager.deleteFolder(folderPath),
 });
 
 // W3 — Marketplace manager. Server-side port of

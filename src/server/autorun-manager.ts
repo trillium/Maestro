@@ -247,6 +247,19 @@ export interface ListImagesResult {
 	images: ListedImage[];
 }
 
+export interface DeleteFolderResult {
+	removed: boolean;
+}
+
+/**
+ * The literal AutoRun Docs folder name — must match
+ * `AUTO_RUN_FOLDER_NAME` at `src/renderer/utils/existingDocsDetector.ts:11` and
+ * the IPC handler's safety check at `src/main/ipc/handlers/autorun.ts:786`.
+ * Inlined here (rather than imported from the renderer tree) because
+ * `src/server/` deliberately does not depend on `src/renderer/`.
+ */
+const AUTO_RUN_FOLDER_NAME = 'Auto Run Docs';
+
 /* ============ AutorunManager (server-side) ============ */
 
 export class AutorunManager {
@@ -426,6 +439,54 @@ export class AutorunManager {
 		images.sort((a, b) => (a.modifiedAt < b.modifiedAt ? 1 : -1));
 
 		return { images };
+	}
+
+	/**
+	 * Recursively delete the AutoRun Docs folder. Backs the Wizard "start
+	 * fresh" / ExistingDocsModal flow (lift Phase 2). Mirrors the renderer-side
+	 * `autorun:deleteFolder` IPC handler at
+	 * `src/main/ipc/handlers/autorun.ts:754-797` — same safety check (basename
+	 * must equal `'Auto Run Docs'`), same ENOENT-tolerant semantics.
+	 *
+	 * Returns `{ removed: true }` when the folder existed and was deleted;
+	 * `{ removed: false }` when the folder was already absent (ENOENT or
+	 * `fs.stat` failed). Other failures (permission, EBUSY, EROFS) throw so the
+	 * route layer surfaces a 500.
+	 *
+	 * Defense-in-depth: the route layer pre-validates the basename, but this
+	 * method re-checks. Both validators MUST stay in sync.
+	 */
+	async deleteFolder(folderPath: string): Promise<DeleteFolderResult> {
+		const folderReason = isValidAutorunFolderPath(folderPath);
+		if (folderReason) throw new Error(folderReason);
+
+		// Safety check: only allow deletion of folders named `Auto Run Docs`.
+		// Mirrors the IPC handler at `src/main/ipc/handlers/autorun.ts:786-789`.
+		if (path.basename(folderPath) !== AUTO_RUN_FOLDER_NAME) {
+			throw new Error(`folder basename must be '${AUTO_RUN_FOLDER_NAME}'`);
+		}
+
+		// Verify the path exists and is a directory before deleting. If
+		// `fs.stat` throws ENOENT, the folder is already gone — return
+		// `{ removed: false }` so callers can invoke idempotently. Other
+		// stat failures (permission) bubble up.
+		let stat;
+		try {
+			stat = await fsp.stat(folderPath);
+		} catch (err: any) {
+			if (err?.code === 'ENOENT') {
+				console.log(`${LOG_CONTEXT} deleteFolder ${folderPath} (already absent)`);
+				return { removed: false };
+			}
+			throw err;
+		}
+		if (!stat.isDirectory()) {
+			throw new Error('folder path is not a directory');
+		}
+
+		await fsp.rm(folderPath, { recursive: true, force: true });
+		console.log(`${LOG_CONTEXT} deleteFolder ${folderPath} (removed)`);
+		return { removed: true };
 	}
 }
 
