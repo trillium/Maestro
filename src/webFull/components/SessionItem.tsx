@@ -1,0 +1,448 @@
+/**
+ * SessionItem — webFull Left Bar unified row component
+ *
+ * Layer 2.5 leaf-parade lift. Verbatim port of
+ * `src/renderer/components/SessionItem.tsx` (360 LOC) into the webFull tree
+ * with the standard L2.5 import-path adapts. **Closes**
+ * `ISC-44.layer-2.5.session_item`.
+ *
+ * This is the renderer's unified per-agent row primitive used inside the Left
+ * Bar (`SessionList`) for ALL list contexts — bookmarks, group children,
+ * flat list, ungrouped folder, and worktree-child rows. The renderer file
+ * encodes 4 previously-separate row implementations behind a `variant`
+ * discriminant; this lift preserves that contract verbatim so the webFull
+ * Left Bar can consume the same one-row-fits-all component.
+ *
+ * **Not a replacement for `SessionListItem` (L2.5 sibling).** That lift was a
+ * narrower, render-shape-oriented row component built for the webFull L4.1
+ * SessionList catalog (status dot + name + AI/⌘ pill, status-color via
+ * `<StatusDot>`). It IS the Left Bar row the L4.1 catalog asserts against.
+ * `SessionItem` is the FULL renderer surface (worktree variant, bookmark
+ * variant, group badge, jump-number badge, git-dirty indicator, location
+ * pills, AUTO-mode pill, error pill, bookmark toggle, unread indicator,
+ * inline rename input, drag-and-drop affordances) — the rendererfeature
+ * set that hasn't yet been re-asserted in the webFull SessionList catalog.
+ * Shipping it here lets a downstream `SessionList` re-architecture swap the
+ * lighter `SessionListItem` shape for this richer one without re-lifting
+ * code.
+ *
+ * **Pre-flight grep:** `grep -nE "window\.maestro\.|window\.electron|ipcRenderer|
+ * from ['\"]electron['\"]|shell\.openExternal|shell\.openPath|window\.api"
+ * src/renderer/components/SessionItem.tsx` → empty (exit 1). 0 IPC namespaces
+ * touched at module load OR runtime. All side effects flow through the
+ * caller-owned prop callbacks (`onSelect`, `onDragStart`, `onDragOver`,
+ * `onDrop`, `onContextMenu`, `onFinishRename`, `onStartRename`,
+ * `onToggleBookmark`). The component is purely presentational — no
+ * `useEffect`, no `useState`, no DOM-level side effects of its own.
+ *
+ * **Import-path adapts (two, matching the L2.5 cross-fork precedent set by
+ * `ParticipantCard` / `GroupChatPanel` / `MergeProgressOverlay`):**
+ *   - `Session`, `Group`, `Theme` from `'../types'` → `'../../renderer/types'`
+ *     (cross-fork transitive type import; the renderer barrel is canonical for
+ *     the `Session` / `Group` shapes which are large discriminated structures
+ *     not yet replicated into `src/shared/`. Pulling from
+ *     `src/renderer/types/index.ts` matches the `GroupChatHeader` /
+ *     `GroupChatPanel` / `ParticipantCard` precedent of importing
+ *     renderer-aggregator types directly rather than copying them; the types
+ *     are pure data shapes with no transitive `window.maestro` references).
+ *     `Theme` could route through `'../../shared/theme-types'` directly per the
+ *     L2.5 swap, but keeping all three on the same `'../../renderer/types'`
+ *     line preserves source fidelity to the original single-line import.
+ *   - `getStatusColor` from `'../utils/theme'` → `'../../renderer/utils/theme'`
+ *     (pure renderer helper that maps `SessionState → ThemeColor` — same
+ *     cross-fork transitive-import shape used by `ParticipantCard`).
+ *
+ * The rest of the import set (`react`, `lucide-react` icons) resolves
+ * identically in both trees — already webFull-tree deps used by every L2.5
+ * sibling.
+ *
+ * **What's IN this lift (verbatim from the renderer source):**
+ *   - `SessionItemVariant` discriminant (`bookmark` / `group` / `flat` /
+ *     `ungrouped` / `worktree`) + `SessionItemProps` interface.
+ *   - Container className branching per variant (worktree pads left + shrinks
+ *     font, flat uses `mx-3` + rounded, others use `px-4`).
+ *   - Drag-and-drop affordances (`draggable`, `onDragStart`, `onDragOver`,
+ *     `onDrop`).
+ *   - Inline rename input (auto-focused on `isEditing`).
+ *   - Bookmark icon (filled in `bookmark` variant; toggle-on-hover for the
+ *     other variants).
+ *   - Branch icon for the worktree variant.
+ *   - Session-jump-number badge (Opt+Cmd+NUMBER).
+ *   - Activity icon + tool-type label + `(SSH)` suffix.
+ *   - Group badge (bookmark variant only when the session belongs to a group).
+ *   - Git-dirty indicator (`leftSidebarOpen && session.isGitRepo &&
+ *     gitFileCount > 0`).
+ *   - GIT / LOCAL / REMOTE location pills (suppressed in bookmark + worktree
+ *     variants and for terminal sessions).
+ *   - AUTO Mode pill (`isInBatch`).
+ *   - Agent-error pill (`session.agentError`).
+ *   - Bookmark toggle button (hidden for worktree children).
+ *   - AI status dot (with `claude-code`-no-session hollow-ring branch) +
+ *     unread badge (`session.aiTabs?.some(tab => tab.hasUnread)`).
+ *
+ * 0 IPC namespaces touched. 0 Electron-only APIs touched. 0 `src/main/`
+ * touches. 0 `src/web/` touches. 0 `src/renderer/` touches. Additive only.
+ *
+ * @module webFull/components/SessionItem
+ */
+
+import { memo } from 'react';
+import type { DragEvent, MouseEvent } from 'react';
+import { Activity, GitBranch, Bot, Bookmark, AlertCircle, Server } from 'lucide-react';
+import type { Session, Group, Theme } from '../../renderer/types';
+import { getStatusColor } from '../../renderer/utils/theme';
+
+// ============================================================================
+// SessionItem - Unified session item component for all list contexts
+// ============================================================================
+
+/**
+ * Variant determines the context in which the session item is rendered:
+ * - 'bookmark': Session in the Bookmarks folder (shows group badge if session belongs to a group)
+ * - 'group': Session inside a group folder
+ * - 'flat': Session in flat list (when no groups exist)
+ * - 'ungrouped': Session in the Ungrouped folder (when groups exist)
+ * - 'worktree': Worktree child session nested under parent (shows branch name)
+ */
+export type SessionItemVariant = 'bookmark' | 'group' | 'flat' | 'ungrouped' | 'worktree';
+
+export interface SessionItemProps {
+	session: Session;
+	variant: SessionItemVariant;
+	theme: Theme;
+
+	// State
+	isActive: boolean;
+	isKeyboardSelected: boolean;
+	isDragging: boolean;
+	isEditing: boolean;
+	leftSidebarOpen: boolean;
+
+	// Optional data
+	group?: Group; // The group this session belongs to (for bookmark variant to show group badge)
+	groupId?: string; // The group ID context for generating editing key
+	gitFileCount?: number;
+	isInBatch?: boolean;
+	jumpNumber?: string | null; // Session jump shortcut number (1-9, 0)
+
+	// Handlers
+	onSelect: () => void;
+	onDragStart: () => void;
+	onDragOver?: (e: DragEvent) => void;
+	onDrop?: () => void;
+	onContextMenu: (e: MouseEvent) => void;
+	onFinishRename: (newName: string) => void;
+	onStartRename: () => void;
+	onToggleBookmark: () => void;
+}
+
+/**
+ * SessionItem renders a single session in the sidebar list.
+ *
+ * This component unifies 4 previously separate implementations:
+ * 1. Bookmark items - sessions pinned to the Bookmarks folder
+ * 2. Group items - sessions inside a group folder
+ * 3. Flat items - sessions in a flat list (no groups)
+ * 4. Ungrouped items - sessions in the Ungrouped folder
+ *
+ * Key differences between variants are handled via props:
+ * - Bookmark variant shows group badge and always shows filled bookmark icon
+ * - Group/Flat/Ungrouped variants show bookmark icon on hover (unless bookmarked)
+ * - Flat variant has slightly different styling (mx-3 vs ml-4)
+ */
+export const SessionItem = memo(function SessionItem({
+	session,
+	variant,
+	theme,
+	isActive,
+	isKeyboardSelected,
+	isDragging,
+	isEditing,
+	leftSidebarOpen,
+	group,
+	groupId,
+	gitFileCount,
+	isInBatch = false,
+	jumpNumber,
+	onSelect,
+	onDragStart,
+	onDragOver,
+	onDrop,
+	onContextMenu,
+	onFinishRename,
+	onStartRename,
+	onToggleBookmark,
+}: SessionItemProps) {
+	// Determine if we show the GIT/LOCAL badge (not shown in bookmark variant, terminal sessions, or worktree variant)
+	const showGitLocalBadge =
+		variant !== 'bookmark' && variant !== 'worktree' && session.toolType !== 'terminal';
+
+	// Determine container styling based on variant
+	const getContainerClassName = () => {
+		const base = `cursor-move flex items-center justify-between group border-l-2 transition-all hover:bg-opacity-50 ${isDragging ? 'opacity-50' : ''}`;
+
+		if (variant === 'flat') {
+			return `mx-3 px-3 py-2 rounded mb-1 ${base}`;
+		}
+		if (variant === 'worktree') {
+			// Worktree children have extra left padding and smaller text
+			return `pl-8 pr-4 py-1.5 ${base}`;
+		}
+		return `px-4 py-2 ${base}`;
+	};
+
+	return (
+		<div
+			key={`${variant}-${groupId || ''}-${session.id}`}
+			draggable
+			onDragStart={onDragStart}
+			onDragOver={onDragOver}
+			onDrop={onDrop}
+			onClick={onSelect}
+			onContextMenu={onContextMenu}
+			className={getContainerClassName()}
+			style={{
+				borderColor: isActive || isKeyboardSelected ? theme.colors.accent : 'transparent',
+				backgroundColor: isActive
+					? theme.colors.bgActivity
+					: isKeyboardSelected
+						? theme.colors.bgActivity + '40'
+						: 'transparent',
+			}}
+		>
+			{/* Left side: Session name and metadata */}
+			<div className="min-w-0 flex-1">
+				{isEditing ? (
+					<input
+						autoFocus
+						className="bg-transparent text-sm font-medium outline-none w-full border-b"
+						style={{ borderColor: theme.colors.accent }}
+						defaultValue={session.name}
+						onClick={(e) => e.stopPropagation()}
+						onBlur={(e) => onFinishRename(e.target.value)}
+						onKeyDown={(e) => {
+							e.stopPropagation();
+							if (e.key === 'Enter') onFinishRename(e.currentTarget.value);
+						}}
+					/>
+				) : (
+					<div className="flex items-center gap-1.5" onDoubleClick={onStartRename}>
+						{/* Bookmark icon (only in bookmark variant, always filled) */}
+						{variant === 'bookmark' && session.bookmarked && (
+							<Bookmark
+								className="w-3 h-3 shrink-0"
+								style={{ color: theme.colors.accent }}
+								fill={theme.colors.accent}
+							/>
+						)}
+						{/* Branch icon for worktree children */}
+						{variant === 'worktree' && (
+							<GitBranch className="w-3 h-3 shrink-0" style={{ color: theme.colors.accent }} />
+						)}
+						<span
+							className={`font-medium truncate ${variant === 'worktree' ? 'text-xs' : 'text-sm'}`}
+							style={{ color: theme.colors.textMain }}
+						>
+							{session.name}
+						</span>
+					</div>
+				)}
+
+				{/* Session metadata row (hidden for compact worktree variant) */}
+				{variant !== 'worktree' && (
+					<div className="flex items-center gap-2 text-[10px] mt-0.5 opacity-70">
+						{/* Session Jump Number Badge (Opt+Cmd+NUMBER) */}
+						{jumpNumber && (
+							<div
+								className="w-4 h-4 rounded flex items-center justify-center text-[10px] font-bold shrink-0"
+								style={{
+									backgroundColor: theme.colors.accent,
+									color: theme.colors.bgMain,
+								}}
+							>
+								{jumpNumber}
+							</div>
+						)}
+						<Activity className="w-3 h-3" /> {session.toolType}
+						{session.sessionSshRemoteConfig?.enabled ? ' (SSH)' : ''}
+						{/* Group badge (only in bookmark variant when session belongs to a group) */}
+						{variant === 'bookmark' && group && (
+							<span
+								className="text-[9px] px-1 py-0.5 rounded"
+								style={{ backgroundColor: theme.colors.bgActivity, color: theme.colors.textDim }}
+							>
+								{group.name}
+							</span>
+						)}
+					</div>
+				)}
+			</div>
+
+			{/* Right side: Indicators and actions */}
+			<div className="flex items-center gap-2 ml-2">
+				{/* Git Dirty Indicator (only in wide mode) - placed before GIT/LOCAL for vertical alignment */}
+				{leftSidebarOpen && session.isGitRepo && gitFileCount !== undefined && gitFileCount > 0 && (
+					<div
+						className="flex items-center gap-0.5 text-[10px]"
+						style={{ color: theme.colors.warning }}
+					>
+						<GitBranch className="w-2.5 h-2.5" />
+						<span>{gitFileCount}</span>
+					</div>
+				)}
+
+				{/* Location Indicator Pills */}
+				{showGitLocalBadge &&
+					(session.isGitRepo ? (
+						/* Git repo: Show server icon pill (if remote) + GIT pill */
+						<>
+							{session.sessionSshRemoteConfig?.enabled && (
+								<div
+									className="px-1.5 py-0.5 rounded text-[9px] font-bold flex items-center"
+									style={{
+										backgroundColor: theme.colors.warning + '30',
+										color: theme.colors.warning,
+									}}
+									title="Running on remote host via SSH"
+								>
+									<Server className="w-3 h-3" />
+								</div>
+							)}
+							<div
+								className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase"
+								style={{
+									backgroundColor: theme.colors.accent + '30',
+									color: theme.colors.accent,
+								}}
+								title="Git repository"
+							>
+								GIT
+							</div>
+						</>
+					) : (
+						/* Plain directory: Show REMOTE or LOCAL (not both) */
+						<div
+							className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase"
+							style={{
+								backgroundColor: session.sessionSshRemoteConfig?.enabled
+									? theme.colors.warning + '30'
+									: theme.colors.textDim + '20',
+								color: session.sessionSshRemoteConfig?.enabled
+									? theme.colors.warning
+									: theme.colors.textDim,
+							}}
+							title={
+								session.sessionSshRemoteConfig?.enabled
+									? 'Running on remote host via SSH'
+									: 'Local directory (not a git repo)'
+							}
+						>
+							{session.sessionSshRemoteConfig?.enabled ? 'REMOTE' : 'LOCAL'}
+						</div>
+					))}
+
+				{/* AUTO Mode Indicator */}
+				{isInBatch && (
+					<div
+						className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase animate-pulse"
+						style={{
+							backgroundColor: theme.colors.warning + '30',
+							color: theme.colors.warning,
+						}}
+						title="Auto Run active"
+					>
+						<Bot className="w-2.5 h-2.5" />
+						AUTO
+					</div>
+				)}
+
+				{/* Agent Error Indicator */}
+				{session.agentError && (
+					<div
+						className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase"
+						style={{ backgroundColor: theme.colors.error + '30', color: theme.colors.error }}
+						title={`Error: ${session.agentError.message}`}
+					>
+						<AlertCircle className="w-2.5 h-2.5" />
+						ERR
+					</div>
+				)}
+
+				{/* Bookmark toggle - hidden for worktree children (they inherit from parent) */}
+				{!session.parentSessionId &&
+					(variant !== 'bookmark' ? (
+						<button
+							onClick={(e) => {
+								e.stopPropagation();
+								onToggleBookmark();
+							}}
+							className={`p-0.5 rounded hover:bg-white/10 transition-all ${session.bookmarked ? '' : 'opacity-0 group-hover:opacity-100'}`}
+							title={session.bookmarked ? 'Remove bookmark' : 'Add bookmark'}
+						>
+							<Bookmark
+								className="w-3 h-3"
+								style={{ color: theme.colors.accent }}
+								fill={session.bookmarked ? theme.colors.accent : 'none'}
+							/>
+						</button>
+					) : (
+						<button
+							onClick={(e) => {
+								e.stopPropagation();
+								onToggleBookmark();
+							}}
+							className="p-0.5 rounded hover:bg-white/10 transition-colors"
+							title="Remove bookmark"
+						>
+							<Bookmark
+								className="w-3 h-3"
+								style={{ color: theme.colors.accent }}
+								fill={theme.colors.accent}
+							/>
+						</button>
+					))}
+
+				{/* AI Status Indicator with Unread Badge - ml-auto ensures it aligns to right edge */}
+				<div className="relative ml-auto">
+					<div
+						className={`w-2 h-2 rounded-full ${session.state === 'connecting' ? 'animate-pulse' : session.state === 'busy' || isInBatch ? 'animate-pulse' : ''}`}
+						style={
+							session.toolType === 'claude-code' && !session.agentSessionId && !isInBatch
+								? { border: `1.5px solid ${theme.colors.textDim}`, backgroundColor: 'transparent' }
+								: {
+										backgroundColor: isInBatch
+											? theme.colors.warning
+											: getStatusColor(session.state, theme),
+									}
+						}
+						title={
+							session.toolType === 'claude-code' && !session.agentSessionId
+								? 'No active Claude session'
+								: session.state === 'idle'
+									? 'Ready and waiting'
+									: session.state === 'busy'
+										? session.cliActivity
+											? `CLI: Running playbook "${session.cliActivity.playbookName}"`
+											: 'Agent is thinking'
+										: session.state === 'connecting'
+											? 'Attempting to establish connection'
+											: session.state === 'error'
+												? 'No connection with agent'
+												: 'Waiting for input'
+						}
+					/>
+					{/* Unread Notification Badge */}
+					{!isActive && session.aiTabs?.some((tab) => tab.hasUnread) && (
+						<div
+							className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full"
+							style={{ backgroundColor: theme.colors.error }}
+							title="Unread messages"
+						/>
+					)}
+				</div>
+			</div>
+		</div>
+	);
+});
+
+export default SessionItem;

@@ -139,3 +139,5 @@ export { SessionActivityGraph, LOOKBACK_OPTIONS } from './SessionActivityGraph';
 export type { LookbackPeriod, ActivityEntry } from './SessionActivityGraph';
 export { GitDiffViewer } from './GitDiffViewer';
 export type { GitDiffViewerProps } from './GitDiffViewer';
+export { SessionItem } from './SessionItem';
+export type { SessionItemProps, SessionItemVariant } from './SessionItem';
