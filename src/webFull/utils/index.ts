@@ -36,3 +36,20 @@ export {
 	mentionMatches,
 } from './participantColors';
 export type { ParticipantColorInfo } from './participantColors';
+
+// Layer 2.5 leaf-parade: text processing (verbatim lift from renderer)
+export {
+	processCarriageReturns,
+	processLogTextHelper,
+	filterTextByLinesHelper,
+	getCachedAnsiHtml,
+	clearAnsiCache,
+	stripMarkdown,
+	ANSI_CACHE_MAX_SIZE,
+} from './textProcessing';
+
+// Layer 2.5 leaf-parade: clipboard (pure surface only — image helper not lifted)
+export { safeClipboardWrite, safeClipboardWriteBlob } from './clipboard';
+
+// Layer 2.5 leaf-parade: terminal prose styles (surgical extract from markdownConfig)
+export { generateTerminalProseStyles } from './terminalProseStyles';
