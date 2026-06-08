@@ -72,3 +72,4 @@ export { DeleteAgentConfirmModal } from './DeleteAgentConfirmModal';
 export { HistoryHelpModal } from './HistoryHelpModal';
 export { QuitConfirmModal } from './QuitConfirmModal';
 export { AutoRunnerHelpModal } from './AutoRunnerHelpModal';
+export { ShortcutsHelpModal } from './ShortcutsHelpModal';
