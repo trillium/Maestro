@@ -130,8 +130,10 @@ export const autoRunParityCatalog: ParityStory[] = [
 			'AutoRun mounts with folderPath="/some/folder", selectedFile="alpha", shortcuts={} — the help button is always visible regardless of shortcuts being empty.',
 		when: ['the component mounts'],
 		then: [
-			// Help button uses the HelpCircle icon and the title "Help".
-			{ verb: 'hasElement', target: 'button[title*="Help"]' },
+			// Help button uses the HelpCircle icon and the title
+			// "Learn about Auto Runner" (renderer source-of-truth:
+			// src/renderer/components/AutoRun.tsx:1823).
+			{ verb: 'hasElement', target: 'button[title*="Learn about Auto Runner"]' },
 		],
 		happyPath: true,
 	},
@@ -160,9 +162,13 @@ export const autoRunParityCatalog: ParityStory[] = [
 			// Edit/Preview toggle is also part of the suppressed bar — so the
 			// Edit affordance, while still functionally reachable through the
 			// modal-shell header, is NOT rendered inside the component itself.
+			// The Help button (title="Learn about Auto Runner") lives inside
+			// the gated top-controls block (renderer source-of-truth:
+			// src/renderer/components/AutoRun.tsx:1669,1823) and is absent
+			// whenever hideTopControls=true.
 			{
 				verb: 'hasElement',
-				target: 'body:not(:has(button[title*="Refresh document list"]))',
+				target: 'body:not(:has(button[title*="Learn about Auto Runner"]))',
 			},
 		],
 		happyPath: false,
@@ -187,10 +193,11 @@ export const autoRunParityCatalog: ParityStory[] = [
 		then: [
 			// Error banner is gated behind `isErrorPaused && batchError` — must
 			// be absent in the no-error state. The banner's signature copy is
-			// "Batch run paused due to error".
+			// "Auto Run Paused" (renderer source-of-truth:
+			// src/renderer/components/AutoRun.tsx:1870).
 			{
 				verb: 'hasElement',
-				target: 'body:not(:has(:has-text("Batch run paused due to error")))',
+				target: 'body:not(:has(:has-text("Auto Run Paused")))',
 			},
 		],
 		happyPath: false,
@@ -201,11 +208,14 @@ export const autoRunParityCatalog: ParityStory[] = [
 		when: ['the component mounts without a folder selected'],
 		then: [
 			// Without a folder, the user-facing setup CTA renders rather than
-			// the document selector. The selector's "Refresh document list"
-			// title is absent in this state.
+			// the top-controls bar. The Help button
+			// (title="Learn about Auto Runner") lives inside the
+			// folderPath-gated top-controls block (renderer source-of-truth:
+			// src/renderer/components/AutoRun.tsx:1669,1823) so it is absent
+			// whenever folderPath is null.
 			{
 				verb: 'hasElement',
-				target: 'body:not(:has(button[title="Refresh document list"]))',
+				target: 'body:not(:has(button[title*="Learn about Auto Runner"]))',
 			},
 		],
 		happyPath: false,

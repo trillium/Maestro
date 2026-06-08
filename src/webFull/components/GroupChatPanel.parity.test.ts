@@ -110,8 +110,12 @@ export const groupChatPanelParityCatalog: ParityStory[] = [
 		given: 'GroupChatPanel mounts with messages=[] (empty conversation) and state="idle".',
 		when: ['the panel composes its messages child'],
 		then: [
-			// The GroupChatMessages empty-state surfaces the Beta badge that the L2.5 sibling lift's catalog pins
-			{ verb: 'hasElement', target: '[data-testid="groupchat-empty-state"]' },
+			// The GroupChatMessages empty-state surfaces the .group-chat-messages
+			// container and the Beta badge — the same shape the L2.5
+			// GroupChatMessages sibling catalog pins (renderer source-of-truth:
+			// src/renderer/components/GroupChatMessages.tsx:182,198).
+			{ verb: 'hasElement', target: '.group-chat-messages' },
+			{ verb: 'hasText', target: '.group-chat-messages', value: 'Beta' },
 		],
 		happyPath: true,
 	},
