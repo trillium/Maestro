@@ -1331,3 +1331,71 @@ Branch `layer-2.3-platform-shim-and-3-lifts` off `main` at `d7bbd4b9f`. The L2.2
 - `grep -cE "^- \[ \] ISC-44\.(general|display|global)\." ISA.md` → `11` (all 11 sub-ISCs registered).
 - `grep -c "ISC-44.global.settings_broadcast" ISA.md` → `3` (sub-ISC registration + Decisions reference + this Verification entry); tracks N2's ISC-14 closure as MISSING / W2-target.
 - `grep -n "Principal-decision-gated" ISA.md` against ISC-42's line → `0 matches at the ISC-42 line` (gate language removed from the criterion at line ~130; sole remaining live match is at line ~129 for ISC-41's own gating, which is correct — ISC-41 remains principal-decision-gated).
+### 2026-06-07 — Layer 6.2 evidence (xterm.js client renderer + pty_* WS subscription — client side)
+
+#### Decisions
+
+- **Terminal component shape: single sessionId-keyed React component, NOT the brief's `{ sessionId; tabId }` pair.** The L6.1 server protocol (see `src/server/raw-pty-multiplexer.ts` and `src/main/web-server/handlers/messageHandlers.ts`) routes raw PTY by `sessionId` only — terminal sessions are 1:1 with PTYs on the server (per scoping doc §2.3). `tabId` is accepted on `TerminalProps` for forward-compat (the protocol reserves the field on `broadcastPtyData`) but currently unused for routing. The brief mentioned `tabId` in the props; the actual server contract is sessionId-only and that's what wins.
+- **PtyMessageRouter — minimal lift over the existing WS hook, not a redesign.** The existing `useWebSocket` hook holds a single set of handlers passed at the App root (via `sessionsHandlers`). Per the brief's "reject bailout" gate: extending the WS hook with `pty_data` / `pty_backfill` / `pty_dropped` cases and `onPty*` handler callbacks IS the right place for protocol-level dispatch — and that work lives entirely in `src/webFull/hooks/useWebSocket.ts`. But routing those events to specific `<Terminal>` instances by sessionId needed a registry. `PtyMessageRouter` is a tiny React context + ref-backed listener registry, sub-200 LOC: `register(sessionId, listener)` for Terminal consumers, three `dispatch*` methods the App wires into useWebSocket handlers. Listeners are stored in refs so dispatching never re-renders the provider (publish rate under heavy PTY is thousands of events/sec).
+- **Unconditional render for `toolType === 'terminal'`.** Per brief: just unconditionally render `<Terminal />` for PTY-backed sessions; the parsed `MessageHistory` stays available for non-terminal modes. Branch condition is `activeSession.toolType === 'terminal'`, NOT `inputMode === 'terminal'` (per scoping doc §4.4: AI sessions can enter terminal inputMode at runtime but are NOT PTY-backed). No user-facing toggle in L6.2 — a Settings switch for "use xterm vs parsed MessageHistory" is a future preference if real-world links prove too flaky.
+- **WS message-type extensions: six additions to `useWebSocket.ts`.** Three drive renderer behavior (`pty_data`, `pty_backfill`, `pty_dropped`); three are explicit no-op acks added to keep the switch's `default` arm silent (`pty_subscribed`, `pty_unsubscribed`, `pty_resize_result`). The ack types are needed because every L6.1 server-side handler sends an ack frame — without typed cases they'd land in the `default` branch and create noise in the WS logs. Renderer doesn't consume the acks for correctness.
+- **Base64 + Uint8Array decode path.** `decodeBase64ToBytes` produces a `Uint8Array` rather than a string; xterm's `write()` accepts both, but bytes preserve arbitrary control sequences (e.g. `\x1b`, `\x03`) without UTF-8 surrogate corruption. The encode path (`encodeStringToBase64`) uses `TextEncoder` so multi-byte chars round-trip correctly when users paste unicode into the terminal.
+- **Per-session seq persistence via sessionStorage.** Default `SeqStore` reads/writes `pty-seq-<sessionId>` keys. On Terminal mount, the component reads any persisted seq and includes it as `lastSeq` in the `pty_subscribe` frame — that's the L6.1 reconnect/backfill contract. Pluggable via `seqStore` prop so tests can substitute an in-memory store without touching real sessionStorage.
+- **Theme propagation: live, not mount-only.** xterm's `options.theme` supports runtime mutation, so a theme change from the WS (desktop sending a new theme) propagates into the xterm instance via a separate `useEffect` keyed on `xtermTheme` without remounting the entire xterm. The mapped palette is intentionally minimal — background, foreground, cursor, cursorAccent, selectionBackground — and xterm falls back to its built-in 16-color ANSI for the rest.
+- **Resize debounce: 60 ms.** ResizeObserver on the container fires the fit-and-send pair behind a 60 ms debounce so a continuous drag doesn't spam the WS. Short enough that vim/htop redraws stay snappy under window resize.
+- **Bundle delta: ~290 KB raw / ~73 KB gzip (larger than the brief's ~150 KB estimate).** xterm.js 5.3.0 + fit + web-links shipped at higher cost than the brief anticipated; the difference is xterm's renderer subsystem (canvas-based) and not the addons. Acceptable for L6.2 — the wire-size budget on the bundle is dominated by the existing 320 KB gzip mobile chunk; xterm is a one-time cost for the only browser-side feature that NEEDS a real terminal grid.
+- **Deprecation note on the dep choice.** npm flagged `xterm@5.3.0`, `xterm-addon-fit@0.8.0`, `xterm-addon-web-links@0.9.0` as deprecated in favor of the `@xterm/*` scoped names. The brief specified these exact versions, so they were used. A future bump to `@xterm/xterm@^5.5.0` / `@xterm/addon-fit@^0.10.0` / `@xterm/addon-web-links@^0.11.0` is a single package.json swap + import path rename — no API changes per the migration notes.
+
+#### Files added (new)
+
+- `src/webFull/components/Terminal/Terminal.tsx` (~280 LOC) — xterm.js host component. Lifecycle: instantiate XTerm + FitAddon + WebLinksAddon, register with PtyMessageRouter, send `pty_subscribe` (with optional `lastSeq`), send initial `pty_resize`, install `xterm.onData` → `pty_input`, install ResizeObserver with 60 ms debounce → `pty_resize`. Unmount: send `pty_unsubscribe`, dispose addons + xterm + observer + listener handle. Exports `defaultSeqStore`, `decodeBase64ToBytes`, `encodeStringToBase64`, `buildXtermTheme`, `buildDroppedMarker`, `DROPPED_MARKER_PREFIX`, `DROPPED_MARKER_SUFFIX`.
+- `src/webFull/components/Terminal/PtyMessageRouter.tsx` (~160 LOC) — Context + ref-backed registry that bridges App-level `useWebSocket` `onPty*` handlers to per-session `<Terminal>` instances. Public API: `<PtyMessageRouterProvider>`, `usePtyMessageRouter()`, `{ register, dispatchData, dispatchBackfill, dispatchDropped }`.
+- `src/webFull/components/Terminal/index.ts` — re-exports for the public surface.
+- `src/webFull/components/Terminal/Terminal.parity.test.ts` (~210 LOC) — parity catalog with 6 stories (4 happy / 2 negative) using the WEB_PARITY_VERIFICATION assertion vocabulary. Stories cover: mount-subscribe-render data; user keystroke as pty_input base64 frame; reconnect with `lastSeq`; unmount as pty_unsubscribe; pty_dropped renders visible marker; missing provider throws developer-time error. 7 vitest tests pass (the catalog tests plus shape guards).
+
+#### Files edited (additive)
+
+- `package.json` — three deps added under `dependencies`: `xterm@^5.3.0`, `xterm-addon-fit@^0.8.0`, `xterm-addon-web-links@^0.9.0`. No devDependencies / scripts changes.
+- `package-lock.json` — auto-updated by `npm install --no-audit --no-fund --ignore-scripts`.
+- `src/webFull/hooks/useWebSocket.ts` — six new entries in `ServerMessageType` (`pty_data`, `pty_backfill`, `pty_dropped`, `pty_subscribed`, `pty_unsubscribed`, `pty_resize_result`); six new message interfaces (`PtyDataMessage` etc.) added to `TypedServerMessage` union; three new optional handlers on `WebSocketEventHandlers` (`onPtyData`, `onPtyBackfill`, `onPtyDropped`); three new switch cases dispatching to those handlers; one combined no-op switch case for the three acks. Existing handlers, types, switch arms, and connection-state machinery untouched.
+- `src/webFull/App.tsx` — one import (`PtyMessageRouterProvider`); one wrapping component inserted between `LayerStackProvider` and the `Suspense` fallback. No other changes — existing context providers (`MaestroModeContext`, `OfflineContext`, `ThemeUpdateContext`, `ThemeProvider`, `LayerStackProvider`) and lifecycle effects untouched.
+- `src/webFull/mobile/App.tsx` — one import (`Terminal`, `usePtyMessageRouter`); one `usePtyMessageRouter()` call + memoized handler merge so `useWebSocket` receives `sessionsHandlers` + the three `onPty*` dispatch methods; one render branch inserted ABOVE the existing log-mode branch that renders `<Terminal sessionId={activeSession.id} send={send} />` when `activeSession.toolType === 'terminal'`. Existing `MessageHistory` render path untouched for non-terminal sessions.
+
+#### Files deferred (NOT touched this brief)
+
+- `src/main/`, `src/server/`, `src/web/`, `src/renderer/` — all out of scope per the standing brief guardrails. Server-side multiplexer + protocol already landed in L6.1.
+- User-facing Settings toggle for xterm-vs-MessageHistory — L6.3+ preference work.
+- Mobile / on-screen-keyboard input affordances — deferred per scoping doc §8.6.
+- `lastCommand` echo-filter mitigation (scoping doc §8.3) — server-side concern, still deferred from L6.1.
+- Disk-persistent scrollback across server restarts — L6.3 scope.
+
+#### Verification — npm install
+
+- `eval "$(/opt/homebrew/bin/fnm env --shell bash)" && fnm use 22.22.1 && npm install --no-audit --no-fund --ignore-scripts` → exit 0. 1430 packages installed; three xterm packages present at the expected versions. npm warned that `xterm@5.3.0` / `xterm-addon-fit@0.8.0` / `xterm-addon-web-links@0.9.0` are deprecated in favor of `@xterm/*` scoped names; deferred per Decisions above.
+
+#### Verification — vitest parity catalog
+
+- `npx vitest run src/webFull/components/Terminal/Terminal.parity.test.ts` → **7/7 PASS** in 2 ms (455 ms total inc. setup + environment). Suite covers: ≥1 happy-path, ≥1 negative-path, ≥3 stories total, allowed-verb-only, non-empty Given/When/Then per story, protocol-surface coverage (pty_subscribe / pty_input / pty_resize / pty_unsubscribe / dropped), and testid convention (`webfull-terminal-<sessionId>`).
+
+#### Verification — webfull build
+
+- `npm run build:webfull` → exit 0 (one Browserslist freshness notice, one CSS minifier warning on pre-existing content, no L6.2-related issues).
+- Bundle chunks emitted to `dist/webfull/assets/`:
+  - `mobile-CinBeel7.js` — 1,254.43 kB raw, 392.76 kB gzip (was 964.67 kB raw / 320.03 kB gzip pre-L6.2).
+  - **Mobile-chunk delta: +289.76 kB raw, +72.73 kB gzip** (xterm.js + addons + Terminal/router code).
+  - Other chunks (`react-*.js`, `index-*.js`, `main-*.js`, CSS) unchanged in size.
+- `grep '<div id="root">' dist/webfull/index.html` → exit 0 (index template intact).
+
+#### Verification — scope guards
+
+- `git diff main..HEAD -- src/web/ | wc -c` → `0`.
+- `git diff main..HEAD -- src/main/ | wc -c` → `0`.
+- `git diff main..HEAD -- src/renderer/ | wc -c` → `0`.
+- `git diff main..HEAD -- src/server/ | wc -c` → `0`.
+- Authorized edits this turn: NEW files under `src/webFull/components/Terminal/`, MODIFIED `src/webFull/App.tsx`, `src/webFull/hooks/useWebSocket.ts`, `src/webFull/mobile/App.tsx`, MODIFIED `package.json` (deps only), AUTO-UPDATED `package-lock.json`, APPENDED to `ISA.md` (this block). No other files touched.
+- `node_modules` is git-ignored and not in the commit.
+
+#### What this closes / leaves open
+
+- **ISC-42 (xterm scope gate):** client-side renderer half complete. The full happy path is now wired: server-side multiplexer (L6.1) emits raw bytes → WS protocol carries them → client Terminal component renders them. Remaining ISC-42 work: persistence across server restarts (L6.3), and any real-world mobile / Tailscale traffic shaping if bandwidth measurements show pressure.
+- **ISC-13 (PTY survives disconnect):** end-to-end path verifiable. L6.1 provided the ring buffer + `lastSeq` backfill; L6.2 wires the client's persisted seq into the `pty_subscribe` frame so a fresh mount after disconnect resumes from the right point. Cross-restart persistence is still L6.3.

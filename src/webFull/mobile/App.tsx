@@ -35,6 +35,7 @@ import { DEFAULT_SLASH_COMMANDS, type SlashCommand } from './SlashCommandAutocom
 import { ResponseViewer, type ResponseItem } from './ResponseViewer';
 import { OfflineQueueBanner } from './OfflineQueueBanner';
 import { MessageHistory } from './MessageHistory';
+import { Terminal, usePtyMessageRouter } from '../components/Terminal';
 import { AutoRunIndicator } from './AutoRunIndicator';
 import { TabBar } from './TabBar';
 import { TabSearchModal } from './TabSearchModal';
@@ -492,6 +493,22 @@ export default function MobileApp() {
 		persistSessionSelection({ activeSessionId, activeTabId });
 	}, [activeSessionId, activeTabId, persistSessionSelection]);
 
+	// Layer 6.2: bridge the App-level useWebSocket onPty* handlers to per-
+	// session <Terminal> instances. The router is mounted by webFull/App.tsx;
+	// here we just attach its dispatch methods alongside the existing
+	// sessionsHandlers. The router holds listeners in refs, so this merge
+	// is stable and doesn't re-render on PTY traffic.
+	const ptyRouter = usePtyMessageRouter();
+	const mergedHandlers = useMemo(
+		() => ({
+			...sessionsHandlers,
+			onPtyData: ptyRouter.dispatchData,
+			onPtyBackfill: ptyRouter.dispatchBackfill,
+			onPtyDropped: ptyRouter.dispatchDropped,
+		}),
+		[sessionsHandlers, ptyRouter]
+	);
+
 	const {
 		state: connectionState,
 		connect,
@@ -500,7 +517,7 @@ export default function MobileApp() {
 		reconnectAttempts,
 	} = useWebSocket({
 		autoReconnect: false, // Only retry manually via the retry button
-		handlers: sessionsHandlers,
+		handlers: mergedHandlers,
 	});
 
 	// Update wsSendRef after WebSocket is initialized (for session management hook)
@@ -1055,6 +1072,34 @@ export default function MobileApp() {
 					<p style={{ fontSize: '14px', color: colors.textDim }}>
 						Select a session above to get started
 					</p>
+				</div>
+			);
+		}
+
+		// Layer 6.2: terminal-mode sessions render through xterm.js instead
+		// of the parsed MessageHistory. Per scoping doc §6.1, the protocol
+		// trigger is `toolType === 'terminal'` (the PTY-backed session kind),
+		// NOT `inputMode === 'terminal'` (which AI sessions can also enter at
+		// runtime — those still go through the parsed-shell path). The L6.1
+		// server only emits raw bytes for PTY-backed sessions.
+		//
+		// No user-facing toggle yet — L6.2 ships unconditional render for
+		// the right session kind. Fallback to MessageHistory is a future
+		// preference if real-world links prove too flaky.
+		if (activeSession.toolType === 'terminal') {
+			return (
+				<div
+					style={{
+						width: '100%',
+						maxWidth: '100%',
+						display: 'flex',
+						flexDirection: 'column',
+						flex: 1,
+						minHeight: 0,
+						overflow: 'hidden',
+					}}
+				>
+					<Terminal sessionId={activeSession.id} send={send} />
 				</div>
 			);
 		}

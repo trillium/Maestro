@@ -105,6 +105,21 @@ export interface AutoRunState {
 
 /**
  * Message types sent by the server
+ *
+ * Layer 6.2 additions (raw PTY rendering):
+ *   - pty_data: server delivers a coalesced raw-byte chunk (base64) with a
+ *     monotonic per-session seq number. Consumed by xterm.js via Terminal.tsx.
+ *   - pty_backfill: server delivers retained scrollback after pty_subscribe.
+ *     Same shape as pty_data plus fromSeq/toSeq/isFinal. Wired identically on
+ *     the client renderer side — both end in terminal.write(bytes).
+ *   - pty_dropped: server notifies that the ring buffer rotated past the
+ *     client's lastSeq. The renderer surfaces this as a `[N bytes dropped]`
+ *     marker so the user sees the gap rather than getting silently-skipped
+ *     output.
+ *   - pty_subscribed / pty_unsubscribed / pty_resize_result: lightweight
+ *     acks from the server-side message handler; the renderer doesn't need
+ *     specific behavior on these but they appear in the typed union so the
+ *     `default` switch arm doesn't log them as unknown.
  */
 export type ServerMessageType =
 	| 'connected'
@@ -127,7 +142,13 @@ export type ServerMessageType =
 	| 'pong'
 	| 'subscribed'
 	| 'echo'
-	| 'error';
+	| 'error'
+	| 'pty_data'
+	| 'pty_backfill'
+	| 'pty_dropped'
+	| 'pty_subscribed'
+	| 'pty_unsubscribed'
+	| 'pty_resize_result';
 
 /**
  * Base server message structure
@@ -315,6 +336,82 @@ export interface ErrorMessage extends ServerMessage {
 }
 
 /**
+ * Layer 6.2: raw PTY data chunk from the server (multiplexer publish path).
+ *
+ * `bytes` is base64 over JSON per the protocol decision in the scoping doc
+ * §6.4 Option B (uniform single-protocol wire shape). The renderer decodes
+ * with `atob(bytes)` and pipes to `terminal.write(...)`. `seq` is monotonic
+ * per-session and the client should persist the latest value so a follow-up
+ * `pty_subscribe { lastSeq }` after reconnect resumes without gaps.
+ */
+export interface PtyDataMessage extends ServerMessage {
+	type: 'pty_data';
+	sessionId: string;
+	seq: number;
+	bytes: string;
+	tabId?: string;
+}
+
+/**
+ * Layer 6.2: backfill slice covering retained scrollback at subscribe time.
+ *
+ * Same byte-handling as pty_data — the renderer writes the bytes to xterm
+ * without any marker so the resumed view looks identical to "I never lost
+ * the connection". `fromSeq`/`toSeq` are advisory; `isFinal` indicates the
+ * last backfill slice (the L6.1 server always sends a single slice with
+ * `isFinal: true`, but the client tolerates split deliveries for L6.3+).
+ */
+export interface PtyBackfillMessage extends ServerMessage {
+	type: 'pty_backfill';
+	sessionId: string;
+	bytes: string;
+	fromSeq: number;
+	toSeq: number;
+	isFinal: boolean;
+}
+
+/**
+ * Layer 6.2: server tells the client some bytes were dropped before the
+ * surviving backfill slice (the ring buffer rotated past lastSeq).
+ *
+ * The Terminal renderer writes a visible marker so the user can see the
+ * gap rather than wondering why their `htop` view jumped. `droppedBytes`
+ * may be 0 when the server reports the gap by seq count only (the ring
+ * does not retain evicted byte counts post-rotation).
+ */
+export interface PtyDroppedMessage extends ServerMessage {
+	type: 'pty_dropped';
+	sessionId: string;
+	droppedBytes: number;
+	lastSeq: number;
+}
+
+/**
+ * Layer 6.2: acks from the server-side message handler. These are not
+ * routed to specific Terminal instances; they exist in the typed union to
+ * keep the `default` branch of the switch silent for known protocol traffic.
+ */
+export interface PtySubscribedMessage extends ServerMessage {
+	type: 'pty_subscribed';
+	sessionId: string;
+	success: boolean;
+	lastSeq?: number;
+}
+
+export interface PtyUnsubscribedMessage extends ServerMessage {
+	type: 'pty_unsubscribed';
+	sessionId: string;
+}
+
+export interface PtyResizeResultMessage extends ServerMessage {
+	type: 'pty_resize_result';
+	sessionId: string;
+	success: boolean;
+	cols: number;
+	rows: number;
+}
+
+/**
  * Union type of all possible server messages
  */
 export type TypedServerMessage =
@@ -336,6 +433,12 @@ export type TypedServerMessage =
 	| AutoRunStateMessage
 	| TabsChangedMessage
 	| ErrorMessage
+	| PtyDataMessage
+	| PtyBackfillMessage
+	| PtyDroppedMessage
+	| PtySubscribedMessage
+	| PtyUnsubscribedMessage
+	| PtyResizeResultMessage
 	| ServerMessage;
 
 /**
@@ -383,6 +486,32 @@ export interface WebSocketEventHandlers {
 	onError?: (error: string) => void;
 	/** Called for any message (for debugging or custom handling) */
 	onMessage?: (message: TypedServerMessage) => void;
+	/**
+	 * Layer 6.2: called when a coalesced raw PTY chunk arrives for a session.
+	 * The renderer wired to this is responsible for decoding `bytes` (base64)
+	 * and writing the result into its xterm.js instance. `tabId` is reserved
+	 * by the protocol but currently unused (terminal sessions are 1:1 with
+	 * PTYs at the server level).
+	 */
+	onPtyData?: (sessionId: string, bytes: string, seq: number, tabId?: string) => void;
+	/**
+	 * Layer 6.2: called when a backfill slice arrives after pty_subscribe.
+	 * Same bytes-handling as onPtyData; the renderer should NOT show a
+	 * dropped-marker — backfill is the resumed continuation of the stream.
+	 */
+	onPtyBackfill?: (
+		sessionId: string,
+		bytes: string,
+		fromSeq: number,
+		toSeq: number,
+		isFinal: boolean
+	) => void;
+	/**
+	 * Layer 6.2: called when the server reports that the ring buffer rotated
+	 * past the client's lastSeq. The renderer should write a visible marker
+	 * before the next bytes so the user sees the gap.
+	 */
+	onPtyDropped?: (sessionId: string, droppedBytes: number, lastSeq: number) => void;
 }
 
 /**
@@ -733,6 +862,53 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
 
 					case 'pong':
 						// Heartbeat response - no action needed
+						break;
+
+					// Layer 6.2: raw PTY protocol (server → client). Wired to per-
+					// session subscribers via the optional onPty* handlers; the
+					// PtyMessageRouter component bridges these to mounted Terminal
+					// instances. Acks (pty_subscribed / pty_unsubscribed /
+					// pty_resize_result) are intentionally no-op here — the Terminal
+					// component doesn't need them for correctness; they exist in the
+					// typed union so this switch's `default` arm doesn't log them.
+					case 'pty_data': {
+						const ptyDataMsg = message as PtyDataMessage;
+						handlersRef.current?.onPtyData?.(
+							ptyDataMsg.sessionId,
+							ptyDataMsg.bytes,
+							ptyDataMsg.seq,
+							ptyDataMsg.tabId
+						);
+						break;
+					}
+
+					case 'pty_backfill': {
+						const ptyBackfillMsg = message as PtyBackfillMessage;
+						handlersRef.current?.onPtyBackfill?.(
+							ptyBackfillMsg.sessionId,
+							ptyBackfillMsg.bytes,
+							ptyBackfillMsg.fromSeq,
+							ptyBackfillMsg.toSeq,
+							ptyBackfillMsg.isFinal
+						);
+						break;
+					}
+
+					case 'pty_dropped': {
+						const ptyDroppedMsg = message as PtyDroppedMessage;
+						handlersRef.current?.onPtyDropped?.(
+							ptyDroppedMsg.sessionId,
+							ptyDroppedMsg.droppedBytes,
+							ptyDroppedMsg.lastSeq
+						);
+						break;
+					}
+
+					case 'pty_subscribed':
+					case 'pty_unsubscribed':
+					case 'pty_resize_result':
+						// Acks — no-op. The Terminal component drives behavior off
+						// pty_data / pty_backfill / pty_dropped only.
 						break;
 
 					default:
