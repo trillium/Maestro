@@ -113,3 +113,5 @@ export { FontConfigurationPanel } from './FontConfigurationPanel';
 export type { FontConfigurationPanelProps } from './FontConfigurationPanel';
 export { GitStatusWidget } from './GitStatusWidget';
 export type { GitStatusWidgetProps, GitFileChange, GitFileDetails } from './GitStatusWidget';
+export { MaestroSilhouette, AnimatedMaestro } from './MaestroSilhouette';
+export { TemplateAutocompleteDropdown } from './TemplateAutocompleteDropdown';
