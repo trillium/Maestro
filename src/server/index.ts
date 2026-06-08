@@ -49,10 +49,12 @@ import { RawPtyMultiplexer } from './raw-pty-multiplexer';
 import { getWakaTimeManager } from './wakatime-manager';
 import { getStatsManager } from './stats-manager';
 import { getFontsManager } from './fonts-manager';
+import { getFsManager } from './fs-manager';
 import {
 	registerWakatimeProvider,
 	registerStatsProvider,
 	registerFontsProvider,
+	registerFsProvider,
 } from '../main/web-server/routes/apiRoutes';
 import type { StatsTimeRange } from '../shared/stats-types';
 
@@ -224,6 +226,36 @@ const fontsManager = getFontsManager();
 // called outside the headless server.
 registerFontsProvider({
 	detectFonts: () => fontsManager.detectFonts(),
+});
+
+// W3-fs — Fs manager. Server-side port of the `fs:*` IPC handlers at
+// `src/main/ipc/handlers/filesystem.ts` (plus the `autorun:writeDoc` IPC
+// channel at `src/main/ipc/handlers/autorun.ts:407`) that backs the new
+// `/api/fs/*` + `/api/autorun/write-doc` REST routes (closes
+// ISC-44.shim.fs_routes, server-half, under the umbrella
+// ISC-44.shim.big_3_ipc_strategy). The renderer-side IPC handlers are NOT
+// touched; both can run side-by-side in a hybrid Electron + headless-sidecar
+// deployment because the underlying filesystem is the cross-mode contract.
+//
+// Stateless — no DB handle, no network egress, no async initialization. Each
+// stat / readFile / writeDoc call shells out fresh to the Node fs APIs. No
+// SIGINT/SIGTERM shutdown hook needed (no resources to release). SSH remote
+// support is deliberately out of scope here; the route layer 501s when an
+// `sshRemoteId` query param is present so callers don't silently get a
+// local path when a remote was requested.
+const fsManager = getFsManager();
+
+// Register the manager as the default Fs provider for the REST routes.
+// MUST run before `server.start()` so the routes have a backing provider by
+// the time the first client request arrives. The renderer-side Electron
+// path does NOT register a provider — the `fs:*` / `autorun:writeDoc` IPC
+// channels continue to own that surface — and the routes correctly 503
+// when called outside the headless server.
+registerFsProvider({
+	getHomeDir: () => fsManager.getHomeDir(),
+	stat: (p: string) => fsManager.stat(p),
+	readFile: (p: string) => fsManager.readFile(p),
+	writeDoc: (p: string, content: string) => fsManager.writeDoc(p, content),
 });
 
 // Persistent token: stored in settings if present, otherwise ephemeral per boot.
