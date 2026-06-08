@@ -16,6 +16,7 @@ do-housekeeping.sh
 e2e-results/
 playwright-report/
 test-results/
+tests/parity/results/
 
 # Dependencies
 node_modules/

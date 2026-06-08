@@ -48,4 +48,16 @@ export const registry: Record<string, ComponentAdapter> = {
 	ContextWarningSash: {
 		load: () => import('./adapters/ContextWarningSash.adapter').then((m) => m.default),
 	},
+	MaestroSilhouette: {
+		load: () => import('./adapters/MaestroSilhouette.adapter').then((m) => m.default),
+	},
+	WelcomeContent: {
+		load: () => import('./adapters/WelcomeContent.adapter').then((m) => m.default),
+	},
+	FontConfigurationPanel: {
+		load: () => import('./adapters/FontConfigurationPanel.adapter').then((m) => m.default),
+	},
+	CollapsibleJsonViewer: {
+		load: () => import('./adapters/CollapsibleJsonViewer.adapter').then((m) => m.default),
+	},
 };

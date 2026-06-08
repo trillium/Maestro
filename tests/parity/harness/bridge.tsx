@@ -18,6 +18,14 @@
 
 import { createRoot, type Root } from 'react-dom/client';
 import { registry, type StorySpec } from './registry';
+// Side-effect import: pulls the three `@tailwind` directives through the
+// shared root-level PostCSS pipeline so utility classes used by lifted
+// components (e.g. SettingCheckbox's `translate-x-5`, ToggleButtonGroup's
+// `ring-2`, the dot-Badge's `animate-pulse`) actually emit CSS rules in
+// the harness bundle. Without this, empty inline Tailwind-styled spans
+// collapse to 0×0 and Playwright's `toBeVisible` correctly judges them
+// hidden — surfacing the gap as a false negative against the catalog.
+import './harness.css';
 
 declare global {
 	interface Window {

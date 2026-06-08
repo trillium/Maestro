@@ -1,0 +1,39 @@
+/**
+ * Parity harness CSS — minimum stylesheet so Tailwind utility classes used
+ * by lifted webFull components actually emit rules at harness mount time.
+ *
+ * The harness's PostCSS pipeline picks up `tailwind.config.mjs` from the
+ * repo root, which scopes content scanning to `src/webFull/**`. Without
+ * importing the `@tailwind` directives anywhere in the harness bundle,
+ * the JIT compiler emits nothing and class names like `translate-x-5`,
+ * `ring-2`, and `w-10 h-5` resolve to zero rules in chromium — empty
+ * `<span>`s end up 0×0 and Playwright's `toBeVisible` correctly judges
+ * them "hidden".
+ *
+ * This file is HARNESS-SCOPED. It contains only the three Tailwind
+ * directives plus a small reset for body sizing so the mounted
+ * component fills the viewport. No theme variables, no `@layer base`
+ * overrides — those belong to the real webFull bundle.
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Keep the harness-shell sizing the same the inline <style> in
+ * tests/parity/harness/index.html sets — Tailwind's preflight reset
+ * will zero out `body` padding and `* { box-sizing: border-box }`
+ * was already inlined. We re-state the height + dark background so
+ * the harness page stays readable under the executor.
+ */
+body {
+	min-height: 100vh;
+	background-color: #1a1a2e;
+	color: #eaeaea;
+	font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+	padding: 16px;
+}
+
+#root {
+	min-height: 100vh;
+}
