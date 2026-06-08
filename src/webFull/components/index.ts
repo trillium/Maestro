@@ -180,3 +180,11 @@ export type {
 	TransferErrorModalProps,
 } from './TransferErrorModal';
 export { HistoryDetailModal } from './HistoryDetailModal';
+export { SaveMarkdownModal } from './SaveMarkdownModal';
+export type { SaveMarkdownModalProps } from './SaveMarkdownModal';
+export {
+	TerminalOutput,
+	getTerminalScrollSnapshot,
+	addTerminalHighlightMarkers,
+} from './TerminalOutput';
+export type { TerminalScrollSnapshot } from './TerminalOutput';
