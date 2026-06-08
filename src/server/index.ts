@@ -50,11 +50,13 @@ import { getWakaTimeManager } from './wakatime-manager';
 import { getStatsManager } from './stats-manager';
 import { getFontsManager } from './fonts-manager';
 import { getFsManager } from './fs-manager';
+import { getMarketplaceManager } from './marketplace-manager';
 import {
 	registerWakatimeProvider,
 	registerStatsProvider,
 	registerFontsProvider,
 	registerFsProvider,
+	registerMarketplaceProvider,
 } from '../main/web-server/routes/apiRoutes';
 import type { StatsTimeRange } from '../shared/stats-types';
 
@@ -256,6 +258,52 @@ registerFsProvider({
 	stat: (p: string) => fsManager.stat(p),
 	readFile: (p: string) => fsManager.readFile(p),
 	writeDoc: (p: string, content: string) => fsManager.writeDoc(p, content),
+});
+
+// W3 — Marketplace manager. Server-side port of
+// `src/main/ipc/handlers/marketplace.ts` that backs the new
+// `/api/marketplace/*` REST cluster (closes
+// ISC-44.shim.w3_marketplace_routes, server-half). The renderer-side
+// IPC handlers are NOT touched; both can run side-by-side in a hybrid
+// Electron + headless-sidecar deployment because the on-disk
+// `<dataDir>/marketplace-cache.json` + `<dataDir>/local-manifest.json`
+// + `<dataDir>/playbooks/<sessionId>.json` files are the contract
+// between modes.
+//
+// This route cluster corrects the IPC-shim Decision (2026-06-08): that
+// audit was scoped to the modal-file grep
+// (`src/renderer/components/MarketplaceModal.tsx`, 5 sites) and
+// concluded "ZERO new routes." The transitive `useMarketplace` hook
+// (`src/renderer/hooks/batch/useMarketplace.ts`) is the real consumer of
+// `window.maestro.marketplace.*` — 7 sites + 1 event subscription = 8
+// surfaces total. Future Decisions must count transitive hook consumers,
+// not just direct modal-file callsites.
+const marketplaceManager = getMarketplaceManager(dataDir, settingsStore);
+
+// Register the manager as the default Marketplace provider for the REST
+// routes. MUST run before `server.start()` so the routes have a backing
+// provider by the time the first client request arrives.
+registerMarketplaceProvider({
+	getManifest: () => marketplaceManager.getManifest(),
+	refreshManifest: () => marketplaceManager.refreshManifest(),
+	getReadme: (playbookPath: string) => marketplaceManager.getReadme(playbookPath),
+	getDocument: (playbookPath: string, filename: string) =>
+		marketplaceManager.getDocument(playbookPath, filename),
+	importPlaybook: (
+		playbookId: string,
+		targetFolderName: string,
+		autoRunFolderPath: string,
+		sessionId: string,
+		sshRemoteId?: string
+	) =>
+		marketplaceManager.importPlaybook(
+			playbookId,
+			targetFolderName,
+			autoRunFolderPath,
+			sessionId,
+			sshRemoteId
+		),
+	onManifestChanged: (listener: () => void) => marketplaceManager.onManifestChanged(listener),
 });
 
 // Persistent token: stored in settings if present, otherwise ephemeral per boot.
@@ -913,6 +961,11 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 			statsManager.close();
 		} catch (err) {
 			console.error('[maestro-server] statsManager.close() threw', err);
+		}
+		try {
+			marketplaceManager.shutdown();
+		} catch (err) {
+			console.error('[maestro-server] marketplaceManager.shutdown() threw', err);
 		}
 		server.stop().finally(() => process.exit(0));
 	});
