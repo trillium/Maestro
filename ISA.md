@@ -1085,10 +1085,12 @@ All three paths return the seeded data correctly sorted. Status: **PASS** for en
 #### Decisions
 
 - **Pattern: rewrite-with-primitives for both tabs.** Per the L3.x lift-vs-rewrite rule.
+
   - **DisplayTab.** Renderer source is 715 LOC and fans out into ≥1 IPC namespace beyond `settings` (specifically `fonts:detect` for system font enumeration in `loadFonts()`). That puts it over the "lift if ≤ 1 IPC namespace beyond settings" threshold; rewrite-with-primitives, not verbatim lift.
   - **ShortcutsTab.** Renderer source is 212 LOC and uses ZERO `window.maestro.*` IPC. By the rule it is technically liftable, but rewriting keeps the L3.x catalog uniform and avoids a cross-tree import from `src/renderer/utils/shortcutFormatter.ts` (a utility not part of the L2.x lifted primitives). Inlined a ~20-line platform-aware key formatter in the webFull tab — pure function, no IPC.
 
 - **DisplayTab deferred IPC / Electron-only surface (surfaced inline, NOT silently dropped):**
+
   - `fontFamily` picker + custom-font management (`fonts:detect` — Electron-only system font enumeration).
   - "Window Chrome" toggles (`useNativeTitleBar`, `autoHideMenuBar`) — affect Electron's BrowserWindow chrome; no browser equivalent. Settings keys themselves still writable from a future port.
   - Bionify info modal (non-essential algorithm reference popup). Algorithm input itself stays editable.
@@ -1709,6 +1711,7 @@ Plan-reeval-2 flagged the mini2 deploy execution path as the HIGHEST open risk: 
 1. **`package.json` postinstall — guarded, not removed.** The `postinstall` script that runs `electron-rebuild -f -w node-pty,better-sqlite3` is now wrapped in a shell conditional on `MAESTRO_HEADLESS=1`. Desktop dev (`npm install` with the env var unset) keeps the original behavior — node-pty + better-sqlite3 rebuild against Electron's Node ABI. Headless deploys (`MAESTRO_HEADLESS=1 npm ci`, which `infra/deploy.sh` now exports automatically) print `[postinstall] MAESTRO_HEADLESS=1; skipping electron-rebuild` and proceed without invoking electron-rebuild at all. This avoids the "NODE_MODULE_VERSION mismatch" crash that would have hit `node dist/server/index.js` on first boot of mini2, because the headless server uses system Node's ABI, not Electron's. Choosing a guard over removal preserves the desktop dev workflow unchanged and lets the next plan-reeval consider whether removal is actually warranted now that the env-var gate exists.
 
 2. **`infra/deploy.sh` gains `--probe` and `--auto-probe` modes.** The script previously only had one mode (deploy + curl health check). It now accepts:
+
    - `./infra/deploy.sh` — original behavior (deploy + curl).
    - `./infra/deploy.sh --probe` — skip the deploy entirely; only execute `infra/probe-pty-survival.sh` against the running mini2 environment. Use to re-verify L6.3 persistence without churning the launchd service or rebuilding.
    - `./infra/deploy.sh --auto-probe` — full deploy + curl + run the falsification probe immediately after a green health check. The script propagates the probe's exit code, so a green `--auto-probe` run proves both "service is up on :45678" and "PTY scrollback round-trips through a simulated kill" in one invocation. This wires L6.3's falsification probe into the deploy pipeline rather than leaving it as a parallel manual step.
@@ -2031,3 +2034,33 @@ Branch `leaf-rename-groupchat` off `main @ a771a8540`. Continuation of the L2.3 
 #### Outcome
 
 ISC-44.layer-2.5.rename_groupchat flipped `[ ]` → `[x]` CLOSED. Sibling lift to L2.3's RenameTabModal completes the Rename-modal pair on the webFull side; both are now consumable by L2.6+ feature wires.
+
+### 2026-06-08 — ISC-44.general.sync — folder-picker portability decision
+
+**Status:** PENDING — awaiting Trillium ack. Surface only; not yet authorizing W2 sync lift.
+
+**Problem.** Electron's `dialog.showOpenDialog({ properties: ['openDirectory'] })` is the only API blocking W2 sync from being a pure mechanical lift from `src/renderer/` → `src/webFull/` + additive server route. The browser has no native folder-picker that exposes the absolute server-side path. (File System Access API's `showDirectoryPicker` returns a sandboxed `FileSystemDirectoryHandle`, not the absolute path the server needs to read/write the sync target. `<input type="file" webkitdirectory>` returns relative paths from the browser-side. Neither is what the existing sync flow consumes.)
+
+**Recommended approach.** Text-input + server-side path validation.
+
+- Browser side: webFull renders a labelled `<input type="text" placeholder="/absolute/path/to/sync-target">` plus a "Validate" button.
+- Server side: new route `POST /api/sync/validate-path` (~30 LOC), body `{ path: string }`. Validates that the path is:
+  - absolute (`path.isAbsolute(path)`),
+  - exists (`fs.access(path, fs.constants.F_OK)`),
+  - writable (`fs.access(path, fs.constants.W_OK)`),
+  - not a reserved system path (block `/`, `/bin`, `/etc`, `/System`, `/usr`, `/private/etc`, `/private/var`, `/Library/System`, plus the runtime's own data dir).
+- Response `{ ok: true }` or `{ ok: false, reason: 'not-absolute' | 'not-exists' | 'not-writable' | 'reserved' }`. Browser shows the reason inline; user retries.
+
+**Trade-off.** Users have to type or paste a path instead of clicking through a native picker. Reasonable for the multi-machine / Tailscale story (the path being chosen IS the server's path, not the browser's, so a native browser picker would always be wrong anyway). Loss of UX polish is bounded; the alternative (Electron-only sync) blocks the entire web target on a feature that has zero web-native equivalent.
+
+**Why not File System Access API?** Returns a handle, not a path. The server graph reads/writes at a path. Bridging the handle to a path requires either copy-into-server-data-dir (changes the sync semantic from "point at user-chosen location" to "we own the storage") or breaks the model entirely. Not viable for sync's specific shape.
+
+**Why not a separate native helper / Electron stub?** Reintroduces the Electron dependency we're shedding. ISC-43 anti-criterion.
+
+**Once acked.** W2 sync lifts as:
+
+1. Additive server route `src/server/web-server/handlers/sync.ts` adding `validate-path` + the existing sync ops.
+2. webFull port of the Settings → Sync subtab from `src/renderer/components/SettingsModal/sync/` (text input replacing the Electron picker; everything else mechanical).
+3. ISC-44.general.sync flips `[ ]` → `[x]` CLOSED on merge.
+
+**Open question for Trillium.** Is the text-input UX acceptable, or do you want to explore a third option (e.g. server-side filesystem browser endpoint that returns directory listings the browser renders as a clickable tree)? The latter is ~150 LOC server-side + a non-trivial browser component; significantly more work but closer to picker-feel. Default recommendation: go with text-input + validate, ship it, revisit if friction surfaces.
