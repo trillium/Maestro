@@ -145,3 +145,4 @@ export { CsvTableRenderer } from './CsvTableRenderer';
 export type { CsvTableRendererProps } from './CsvTableRenderer';
 export { GroupChatList } from './GroupChatList';
 export type { GroupChatListProps } from './GroupChatList';
+export { MermaidRenderer } from './MermaidRenderer';
