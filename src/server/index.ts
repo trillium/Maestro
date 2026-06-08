@@ -51,12 +51,14 @@ import { getStatsManager } from './stats-manager';
 import { getFontsManager } from './fonts-manager';
 import { getFsManager } from './fs-manager';
 import { getMarketplaceManager } from './marketplace-manager';
+import { getAgentsManager } from './agents-manager';
 import {
 	registerWakatimeProvider,
 	registerStatsProvider,
 	registerFontsProvider,
 	registerFsProvider,
 	registerMarketplaceProvider,
+	registerAgentsProvider,
 } from '../main/web-server/routes/apiRoutes';
 import type { StatsTimeRange } from '../shared/stats-types';
 
@@ -304,6 +306,46 @@ registerMarketplaceProvider({
 			sshRemoteId
 		),
 	onManifestChanged: (listener: () => void) => marketplaceManager.onManifestChanged(listener),
+});
+
+// W3-agents — Agents manager. Server-side port of the `agents:*` IPC handlers
+// at `src/main/ipc/handlers/agents.ts` (the detection + capabilities
+// sub-surface) that backs the new `/api/agents/*` REST routes (closes
+// ISC-44.shim.agents_routes, server-half, under the umbrella
+// ISC-44.shim.big_3_ipc_strategy). The renderer-side IPC handlers are NOT
+// touched; both can run side-by-side in a hybrid Electron + headless-sidecar
+// deployment because the underlying binary detection (probe known paths +
+// `which`/`where`) is the cross-mode contract.
+//
+// Stateless — no DB handle, no network egress, no async initialization. Each
+// detect call shells out fresh to `which`/`where` after the known-paths probe
+// (no detector cache yet; can land in a follow-up brief once a real consumer
+// benchmarks repeated detection). No SIGINT/SIGTERM shutdown hook needed
+// (no resources to release). SSH remote support is deliberately out of scope
+// here; the route layer 501s when an `sshRemoteId` query param is present so
+// callers don't silently get a local-host result when a remote was requested.
+//
+// Audit note (per the brief): NewInstanceModal at
+// `src/renderer/components/NewInstanceModal.tsx` calls `agents.detect`,
+// `agents.refresh`, `agents.getCapabilities`, `agents.getConfig`,
+// `agents.setConfig`, and `agents.getModels`. This brief lands the first
+// three — detection + capabilities. The remaining three (config CRUD + model
+// discovery) need follow-up briefs once their server-side state shape is
+// designed (config CRUD wants a FileStore equivalent; model discovery wants
+// per-agent subcommand fan-out).
+const agentsManager = getAgentsManager();
+
+// Register the manager as the default Agents provider for the REST routes.
+// MUST run before `server.start()` so the routes have a backing provider by
+// the time the first client request arrives. The renderer-side Electron path
+// does NOT register a provider — the `agents:*` IPC channels continue to own
+// that surface — and the routes correctly 503 when called outside the
+// headless server.
+registerAgentsProvider({
+	detectAgents: () => agentsManager.detectAgents(),
+	detectAgent: (agentId: string) => agentsManager.detectAgent(agentId),
+	getCapabilities: (agentId: string) =>
+		agentsManager.getCapabilities(agentId) as unknown as Record<string, unknown>,
 });
 
 // Persistent token: stored in settings if present, otherwise ephemeral per boot.
