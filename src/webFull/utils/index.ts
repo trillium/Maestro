@@ -24,3 +24,15 @@ export {
 	pingServiceWorker,
 } from './serviceWorker';
 export type { ServiceWorkerConfig } from './serviceWorker';
+
+// Layer 2.5 leaf-parade primitives (verbatim from renderer with relative-path adapts)
+export {
+	generateParticipantColor,
+	buildParticipantColorMap,
+	buildParticipantColorMapWithPreferences,
+	MODERATOR_COLOR_INDEX,
+	COLOR_PALETTE_SIZE,
+	normalizeMentionName,
+	mentionMatches,
+} from './participantColors';
+export type { ParticipantColorInfo } from './participantColors';

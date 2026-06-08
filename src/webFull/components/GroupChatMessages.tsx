@@ -67,10 +67,7 @@ import type {
 } from '../../shared/group-chat-types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { stripMarkdown } from '../../renderer/utils/textProcessing';
-import {
-	generateParticipantColor,
-	buildParticipantColorMap,
-} from '../../renderer/utils/participantColors';
+import { generateParticipantColor, buildParticipantColorMap } from '../utils/participantColors';
 import { generateTerminalProseStyles } from '../../renderer/utils/markdownConfig';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
 import { safeClipboardWrite } from '../../renderer/utils/clipboard';
