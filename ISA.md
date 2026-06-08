@@ -2324,6 +2324,7 @@ Branch `leaf-toggle-button-group` off `main @ 891d179a7`. Smallest L2.5 leaf-par
 - **0-IPC + 0-Electron-API confirmation:** the single pre-flight command from the brief — `grep -E "window\.maestro\.|from ['\"]electron['\"]|shell\.openExternal|shell\.openPath|ipcRenderer" src/renderer/components/ToggleButtonGroup.tsx` → empty (exit code 1).
 - **Lint:** `MAESTRO_HEADLESS=1 npm run lint` → clean per `tsconfig.json` / `tsconfig.lint.json` after `npm run build:prompts` materialises the pre-existing `src/generated/prompts.ts`. No new lint diagnostics introduced.
 - **Parity test:** `MAESTRO_HEADLESS=1 npx vitest run src/webFull/components/ToggleButtonGroup.parity.test.ts` → PASS. Catalog ships 10 stories (5 happy + 5 negative), uses only the allowed assertion vocabulary, passes the IPC-leakage guard, and passes the render-shape pin.
+
 ### 2026-06-08 — Layer 2.5 evidence (leaf-parade — `ExecutionQueueIndicator` lift)
 
 Pure presentational indicator lifted from `src/renderer/components/ExecutionQueueIndicator.tsx` (191 LOC, 0 IPC, 0 Electron-only API per audit) into `src/webFull/components/ExecutionQueueIndicator.tsx`. Sibling of the L2.5 leaf-parade batches.
@@ -2386,6 +2387,7 @@ Pure presentational indicator lifted from `src/renderer/components/ExecutionQueu
   - `?? src/webFull/components/ExecutionQueueIndicator.parity.test.ts`
   - `M  src/webFull/components/index.ts`
   - `M  ISA.md` (this block + the new `ISC-44.layer-2.5.execution_queue_indicator` checkbox line)
+
 ### 2026-06-08 — Layer 2.5 evidence (leaf-parade — `GroupChatMessages` lift)
 
 Branch `leaf-groupchat-messages` cut off `main @ 891d179a7` (post-merge of the `leaf-autorunner-help` lift that landed the `shortcutFormatter` webFull shim). This branch is the L2.5 lift of the message-history scrollback view that powers Group Chats. Lifts `src/renderer/components/GroupChatMessages.tsx` (430 LOC) verbatim into `src/webFull/components/` and ships a parity catalog. The shim landed by the `AutoRunnerHelpModal` lift unblocked this lift — its evidence block explicitly named `GroupChatMessages` as a follow-on consumer.
@@ -2448,6 +2450,7 @@ Branch `leaf-groupchat-messages` cut off `main @ 891d179a7` (post-merge of the `
 
 - Wiring the lifted primitive into webFull Settings-tab pickers (theme / density / font-scale toggles) — those have transitive store / IPC dependencies and are downstream-layer scope. The primitive ships latent surface area for L2.6+ feature consumers.
 - Adding `aria-pressed` / `role="radiogroup"` semantics — the renderer uses plain `<button>` elements; lifting verbatim preserves that posture. A future accessibility-pass lift can layer these on (with the same change applied to the renderer source so they don't drift).
+
 ### 2026-06-08 — Layer 2.5 leaf-parade — `AgentErrorModal` lift
 
 - **2026-06-08** — **Layer 2.5 leaf-parade — `AgentErrorModal` lift.** Per Architect plan-reeval-3 leaf-parade audit item #6, lifted `src/renderer/components/AgentErrorModal.tsx` (264 LOC, 0 IPC, 0 Electron-only APIs) into `src/webFull/components/AgentErrorModal.tsx`. Branch `leaf-agent-error` off `main @ a5b6dd77d` (which already contains the barrel union-merge driver — verified via the existing Layer 2.5 leaf-parade section in `src/webFull/components/index.ts` with prior sibling lifts already appended).
@@ -2498,6 +2501,7 @@ Branch `leaf-groupchat-messages` cut off `main @ 891d179a7` (post-merge of the `
 - Lifting the consumer (`InputArea`) that gates rendering on AI mode + non-empty queue — has transitive store / IPC dependencies and is downstream-layer scope.
 - Lifting the downstream `ExecutionQueueBrowser` modal that the `onClick` opens — separate, larger surface; the indicator's contract ends at `onClick`.
 - Widening webFull's `SessionData` wire-protocol shape to carry `executionQueue` — deferred until a server-side `executionQueue` source-of-truth is wired through. The narrow `ExecutionQueueSession` type the lift ships is forward-compatible with that future widening.
+
 ### 2026-06-08 — Layer 2.5 evidence (leaf-parade — `FirstRunCelebration` lift)
 
 Branch `leaf-first-run-celebration` cut off `main`. Newly unblocked lift: the `shortcutFormatter` shim landed on branch `leaf-autorunner-help` @ `a82d4012e` cleared `FirstRunCelebration` from the audit's "transitive `window.maestro.platform` blocker" bucket. This lift moves the 498-LOC celebration modal verbatim into `src/webFull/components/` and ships a parity catalog.
