@@ -121,7 +121,7 @@ import type { Theme } from '../../shared/theme-types';
 import type { BatchRunState, SessionState, Shortcut } from '../../renderer/types';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
-import { AutoRun, type AutoRunHandle } from '../../renderer/components/AutoRun';
+import { AutoRun, type AutoRunHandle } from './AutoRun';
 import type { DocumentTaskCount } from './AutoRunDocumentSelector';
 import { ConfirmModal } from './ConfirmModal';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
