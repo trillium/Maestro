@@ -81,7 +81,7 @@ export function initSentry(opts?: InitSentryOptions): void {
 		// DSN is actually configured. Use require() rather than dynamic import
 		// to keep `initSentry` synchronous (the caller is typically a top-of-
 		// boot init line and doesn't want to await).
-		 
+
 		const sentry = require('@sentry/node') as SentryNodeModule;
 		sentry.init({
 			dsn,

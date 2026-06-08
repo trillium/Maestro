@@ -257,7 +257,7 @@ describe('useSettings — receives broadcast and merges into local state', () =>
 		// hook reads `window.location.origin` + securityToken to build its
 		// API base — a no-op token is fine for these tests since fetch is
 		// mocked.
-		 
+
 		(window as any).__MAESTRO_CONFIG__ = {
 			securityToken: 'test-token',
 			sessionId: null,
