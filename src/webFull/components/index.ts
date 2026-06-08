@@ -49,3 +49,9 @@ export { CreateGroupModal } from './CreateGroupModal';
 
 export { SessionList } from './SessionList';
 export type { SessionListProps } from './SessionList';
+
+// ============================================================================
+// Layer 2.5 leaf-parade primitives (verbatim from renderer with relative-path adapts)
+// ============================================================================
+
+export { PlaybookDeleteConfirmModal } from './PlaybookDeleteConfirmModal';
