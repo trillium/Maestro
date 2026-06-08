@@ -3071,6 +3071,7 @@ Branch `leaf-error-boundary` cut off `main @ 714337edf`. This branch lifts `src/
 
 - `src/webFull/components/index.ts` — appended a single `export { ErrorBoundary } from './ErrorBoundary';` line under the existing Layer 2.5 leaf-parade section, immediately after the `GroupChatPanel` line. No prior exports changed.
 - `ISA.md` — appended this evidence block; added `ISC-44.layer-2.5.error_boundary` directly as `[x]` CLOSED at the per-feature ISC list (line precedes `ISC-44.layer-2.5.agent_error` placement, ordered by lift sequence).
+
 ### 2026-06-08 — Layer 2.5 evidence (leaf-parade — `MaestroSilhouette` + `TemplateAutocompleteDropdown` paired lift)
 
 Branch `leaf-silhouette-and-autocomplete` cut off `main @ 714337edf`. This branch lifts two small presentational components into `src/webFull/components/` in one semantic atomic commit per the brief's "TWO tiny components / single branch / single semantic atomic commit" framing: `MaestroSilhouette` (88 LOC, conductor PNG `<img>` wrapper with a sibling `AnimatedMaestro` CSS-keyframe variant) and `TemplateAutocompleteDropdown` (108 LOC, `forwardRef<HTMLDivElement>` absolute-positioned dropdown for the template-variable picker). Both meet the brief's tiny-leaf criteria: both under 120 LOC, both pure presentational, both pre-flight grep clean (no `window.maestro`, no `from 'electron'`).
@@ -3111,6 +3112,7 @@ Branch `leaf-silhouette-and-autocomplete` cut off `main @ 714337edf`. This branc
 
 - `src/webFull/components/index.ts` — appended `export { MaestroSilhouette, AnimatedMaestro } from './MaestroSilhouette';` and `export { TemplateAutocompleteDropdown } from './TemplateAutocompleteDropdown';` under the existing Layer 2.5 leaf-parade section, immediately after the `GroupChatPanel` line. No prior exports changed.
 - `ISA.md` — appended this evidence block; added `ISC-44.layer-2.5.maestro_silhouette` and `ISC-44.layer-2.5.template_autocomplete_dropdown` directly as `[x]` CLOSED at the per-feature ISC list, immediately following the `groupchat_panel` line (ordered by lift sequence).
+
 ### 2026-06-08 — Layer 2.5 evidence (leaf-parade — `participantColors` util lift; neutralizes cross-fork import from `leaf-groupchat-messages`; precondition #2 for GroupChatInput lift)
 
 **Closes:** ISC-44.layer-2.5.participant_colors_util.
@@ -3190,6 +3192,7 @@ The other five cross-fork imports inside `GroupChatMessages` (`textProcessing`, 
 - `src/web/` — read-only oracle per fork hygiene.
 - `src/renderer/` — read-only oracle per fork hygiene.
 - `src/main/` — no new server routes; the boundary surface is purely a renderer-side React lifecycle hook.
+
 ### 2026-06-08 — Layer 2.5 evidence (leaf-parade — `GitStatusWidget` lift)
 
 Branch `leaf-git-status-widget` cut off `main @ 714337edf`. This lift ports the renderer's header git-status widget (244 LOC) into webFull. The widget is a header pill that displays git file changes with a GitHub-style hover tooltip — compact mode shows file count, full mode shows additions / deletions / modified breakdown, hover reveals per-file diff bars + "View Full Diff" / optional "View Git Log" actions.
