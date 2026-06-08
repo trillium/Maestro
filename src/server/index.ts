@@ -48,9 +48,11 @@ import { getHistoryManager } from './history-manager';
 import { RawPtyMultiplexer } from './raw-pty-multiplexer';
 import { getWakaTimeManager } from './wakatime-manager';
 import { getStatsManager } from './stats-manager';
+import { getFontsManager } from './fonts-manager';
 import {
 	registerWakatimeProvider,
 	registerStatsProvider,
+	registerFontsProvider,
 } from '../main/web-server/routes/apiRoutes';
 import type { StatsTimeRange } from '../shared/stats-types';
 
@@ -200,6 +202,28 @@ registerStatsProvider({
 	getQueryEvents: (range: string) => statsManager.getQueryEvents(range as StatsTimeRange),
 	getSessionLifecycle: (range: string) =>
 		statsManager.getSessionLifecycleEvents(range as StatsTimeRange),
+});
+
+// W2 — Fonts manager. Server-side port of the `fonts:detect` IPC handler at
+// `src/main/ipc/handlers/system.ts` (~line 120) that backs the new
+// `GET /api/fonts/detected` REST route (closes ISC-44.display.font_family,
+// server-half). The renderer-side IPC handler is NOT touched; both can run
+// side-by-side in a hybrid Electron + headless-sidecar deployment because
+// the underlying `fc-list` binary is the cross-mode contract.
+//
+// Stateless — no DB handle, no network egress, no async initialization. Each
+// detectFonts() call shells out fresh to `fc-list`. No SIGINT/SIGTERM
+// shutdown hook needed (no resources to release).
+const fontsManager = getFontsManager();
+
+// Register the manager as the default Fonts provider for the REST route.
+// MUST run before `server.start()` so the route has a backing provider by
+// the time the first client request arrives. The renderer-side Electron
+// path does NOT register a provider — the `fonts:detect` IPC channel
+// continues to own that surface — and the route correctly 503s when
+// called outside the headless server.
+registerFontsProvider({
+	detectFonts: () => fontsManager.detectFonts(),
 });
 
 // Persistent token: stored in settings if present, otherwise ephemeral per boot.

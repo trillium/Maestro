@@ -166,7 +166,7 @@ Every feature ported into `src/webFull/` gets a parity catalog at `src/webFull/<
 - [ ] ISC-44.general.power: power.setEnabled (sleep prevention). Currently DROPPED (Electron-only; no browser equivalent).
 - [ ] ISC-44.general.gpu_acceleration: GPU acceleration toggle. Currently DROPPED (Electron renderer setting).
 - [ ] ISC-44.general.shell_open_path: shell.openPath ("open in Finder"). Currently DROPPED (no browser equivalent).
-- [ ] ISC-44.display.font_family: fontFamily picker + custom-font management via `/api/fonts/detected`. Currently DEFERRED.
+- [x] ISC-44.display.font_family: Settings Display tab's fontFamily picker surfaced via `GET /api/fonts/detected` REST route. **CLOSED (server-half) 2026-06-08** on branch `w2-fonts-server-port`. Server-side `FontsManager` ported to `src/server/fonts-manager.ts` (no `electron` import, no `src/main/utils/*` imports — fully self-contained mirror of the `fonts:detect` IPC handler at `src/main/ipc/handlers/system.ts` line ~120). One additive REST route added in `src/main/web-server/routes/apiRoutes.ts` (`GET /api/fonts/detected` — wraps the IPC's bare `string[]` reply in a `{ fonts, timestamp }` envelope for parity with the rest of `/api/*`). `FontsProvider` interface + `registerFontsProvider()` / `getFontsProvider()` lazy registry follows the WakaTimeProvider / StatsProvider pattern from prior W2 ports — no fallback default, route 503s when no provider is registered (Electron path continues using `fonts:detect` IPC). Headless server wires the manager + provider in `src/server/index.ts` before `WebServer.start()`. Stateless manager — no DB handle, no network egress, no SIGINT/SIGTERM hook needed; each `detectFonts()` call shells out fresh to `fc-list`. webFull-side hook (`useDetectedFonts()` reading the route from `DisplayTab.tsx`, replacing the "Coming in subsequent layers" panel entry for fontFamily picker) is the next follow-on. The renderer-side `src/main/ipc/handlers/system.ts` is NOT touched — Electron continues using IPC; both stacks can run side-by-side because the on-disk `fc-list` binary is the cross-mode contract. The "custom-font management" sub-deferral (font file upload + storage) is its own follow-on and remains open under a future ISC-44.display.custom_font_management entry — flagged here as "client-half DEFERRED" because it requires a new file-upload surface that the renderer side doesn't have either.
 - [ ] ISC-44.display.window_chrome: useNativeTitleBar + autoHideMenuBar. Currently DROPPED (Electron BrowserWindow chrome).
 - [ ] ISC-44.display.bionify_info_modal: bionify info modal. Currently DEFERRED (non-essential).
 - [x] ISC-44.global.settings_broadcast: ISC-14 (CLOSED 2026-06-08) — `settings_changed` WS broadcast on server-side mutation so concurrent browsers stay in sync without reload. Was MISSING; shipped on `w2-isc14-settings-broadcast` (plan-reeval-1 N2 closure). Fan-out frame `{type:'settings_changed', changedKeys, newValues, timestamp}` emitted by headless server on every successful PATCH /api/settings; webFull `useSettings()` subscribes via module-level event bus and merges newValues into local state. Last-writer-wins per ISA Principle 2. See Decisions 2026-06-08 ("ISC-44.global.settings_broadcast shipped").
@@ -1775,3 +1775,76 @@ The renderer-side IPC returns a raw number (ms since epoch); the REST surface re
 - **ISC-44.general.stats, client-half:** OPEN (next follow-on). webFull's `src/webFull/components/Settings/tabs/GeneralTab.tsx` still shows "Stats database size, clear, earliest timestamp" in the "Coming in subsequent layers" panel. The follow-on agent will: (a) add a `useStatsSummary()` hook in `src/webFull/hooks/` reading `GET /api/stats/summary` (and exposing `clearOldData(days)` that posts to `POST /api/stats/clear-old-data` with optimistic-then-refetch); (b) wire those into a Stats section in `GeneralTab.tsx` (database size display + earliest-data timestamp + "Clear data older than N days" affordance + confirmation modal); (c) remove the deferral line from the panel; (d) flip ISC-44.general.stats from "server-half CLOSED" to fully CLOSED in this ISA. Parity catalog stories for the webFull port land in `src/webFull/components/Settings/tabs/GeneralTab.parity.test.ts` per the L3.1 pattern. The dashboard-aggregation surface (`/api/stats/aggregation`, `/api/stats/query-events`, `/api/stats/session-lifecycle`) is consumed by the future Usage Dashboard webFull port, which is its own ISC and not blocked by this work.
 - **No new dependencies, no new env vars, no new build steps.** The port reuses existing `better-sqlite3` (already in `node_modules`), plus `fs`, `path`, and `src/shared/data-dir.ts`. The migration sequence runs on a fresh `<dataDir>/stats.db`; on an Electron-shared `stats.db` already at v4, `runMigrations()` no-ops in <1ms.
 - **L0a stats DB migration runner:** The reject-bailout clause in the brief said: "If the stats DB requires migration code, call the migration runner from the new manager. Don't bypass." Status: the migration runner IS called (inlined into `src/server/stats-manager.ts`, byte-for-byte identical to `src/main/stats/migrations.ts`). A fresh `MAESTRO_DATA_DIR` brings the schema up to v4 at boot; an Electron-shared DB is already at v4 and the runner no-ops. Verified by the boot log above.
+
+### 2026-06-08 — W2 Fonts evidence (server-side port + REST route — ISC-44.display.font_family closure, server-half)
+
+Closes the server-half of `ISC-44.display.font_family`. The renderer-side `fonts:detect` IPC handler at `src/main/ipc/handlers/system.ts` (~line 120) was left UNTOUCHED — Electron continues using the IPC channel exactly as before. Server-side parity was achieved through a parallel port at `src/server/fonts-manager.ts` plus one additive REST route (`GET /api/fonts/detected`) wired through a `FontsProvider` registry that mirrors the W2-wakatime / W2-stats provider pattern.
+
+#### Why a self-contained port (not a re-import of the IPC handler)
+
+The renderer-side detector is a single 40-line `ipcMain.handle('fonts:detect', ...)` block inside `src/main/ipc/handlers/system.ts` that mixes shell-detection, dialog handlers, and font detection. It imports `execFileNoThrow` from `src/main/utils/execFile.ts` and `electron`'s `ipcMain`/`BrowserWindow`. Two paths were viable:
+
+1. **Reuse**: Refactor the font-detection body into a shared helper module callable from both IPC and REST. Saves ~30 LOC of duplication. Cost: cross-tree change to `src/main/ipc/handlers/system.ts`, which the brief explicitly forbids ("the renderer-side `src/main/ipc/handlers/fonts.ts` (or equivalent) is NOT touched").
+2. **Self-contained port**: Mirror the W2-wakatime / W2-stats precedent. ~140 LOC of new code, zero cross-tree imports.
+
+Path 2 chosen: keeps the renderer untouched (brief invariant), matches the prior W2 ports exactly (one new file in `src/server/`, identical singleton accessor shape, identical provider-registry wiring), keeps the `tsconfig.server.json` include list narrow. Trade-off accepted: the `fc-list` invocation + fallback list is duplicated in two places (renderer + server). The duplication is byte-for-byte identical — if the renderer's fallback list or fc-list args change, the server-side mirror must update too. The fallback list is unlikely to drift (seven common monospace fonts as a hardcoded safety net), and the `fc-list : family` invocation has been stable for years.
+
+#### Why the manager is stateless (no init, no shutdown hook)
+
+The wakatime manager owns a CLI install path + branch/language caches; the stats manager owns a `better-sqlite3` handle. The fonts manager owns nothing — each `detectFonts()` call shells out fresh to `fc-list`. No initialization work, no resources to close. The SIGINT/SIGTERM shutdown sequence in `src/server/index.ts` is unchanged; no new entry needed.
+
+Consequence: the fonts surface incurs the `fc-list` cost on every call. On macOS this is ~0.74s per the renderer-side comment (vs 8.77s for the older `system_profiler` path). For a settings picker that's hit once per modal open, that's acceptable. If a future caller needs higher throughput, a TTL'd cache fits cleanly in the manager without changing the route contract.
+
+#### Why `FontsProvider` has no fallback default (unlike `SettingsProvider`)
+
+Same reasoning as `StatsProvider` and `WakaTimeProvider`: the headless boot path is the only legitimate caller. Electron uses `fonts:detect` IPC directly; webFull (when its `useDetectedFonts()` hook lands) hits this route through the headless server. There is no third surface that would benefit from a default provider. The route 503s cleanly when no provider is registered.
+
+#### Why the route wraps the bare `string[]` reply in a `{ fonts, timestamp }` envelope
+
+Every other `/api/*` route returns a `timestamp`-stamped object — the wrap matches that convention. The bare-array shape from the IPC channel is a renderer-side convenience (the IPC layer JSON-stringifies the bare array fine). webFull clients unwrap `.fonts` from the response, which is a trivial cost for the cross-surface consistency win. Documented inline at the route definition.
+
+#### Files added (new files only)
+
+- `src/server/fonts-manager.ts` (~140 LOC) — server-side `FontsManager` port. Public API: `detectFonts()` returns `Promise<string[]>` matching the renderer-side IPC reply shape. Inlined `execFileNoThrow` shim (no stdin variant, no Windows PATHEXT — `fc-list` is invoked by bare name off `$PATH`). Inlined `FALLBACK_FONTS` list (byte-for-byte identical to the renderer-side fallback). `getFontsManager()` + `_resetFontsManager()` singleton helpers match the wakatime / stats pattern.
+
+#### Files edited (purely additive)
+
+- `src/main/web-server/routes/apiRoutes.ts` — additive only. New `FontsProvider` interface + `registerFontsProvider()` / `getFontsProvider()` registry at module level. One new route registered at the end of `registerRoutes()` (`GET /:token/api/fonts/detected`). 503 when no provider is registered. 500 on provider exceptions. Per ISC-40 N1 legalization, additive `src/main/web-server/routes/` edits are authorized. Existing routes and the `ApiRouteCallbacks` interface unchanged.
+- `src/server/index.ts` — additive only. Import `getFontsManager` from `./fonts-manager` and `registerFontsProvider` from `../main/web-server/routes/apiRoutes`. Construct the manager (stateless, no init needed), register the provider before `server.start()`. No SIGINT/SIGTERM shutdown work added (manager has no resources to release). No existing wiring touched.
+
+#### Files NOT touched (forbidden by brief / standing scope rule)
+
+- `src/main/ipc/handlers/system.ts` — UNTOUCHED. The renderer-side `fonts:detect` handler continues to serve the Electron path exactly as before. Working-tree `git diff HEAD -- src/main/ipc/handlers/system.ts | wc -c` → 0.
+- `src/main/preload/system.ts` — UNTOUCHED. The renderer-side preload bridge (`window.maestro.system.fonts.detect()`) is unchanged. Working-tree `git diff HEAD -- src/main/preload/system.ts | wc -c` → 0.
+- `src/web/`, `src/renderer/` — UNTOUCHED. Standing scope rule (and per the brief: `src/web/` READ-ONLY, `src/renderer/` READ-ONLY for this task). `git diff main..HEAD -- src/web/ src/renderer/ src/main/ipc/ | wc -c` → 0.
+
+#### Verification — build
+
+- `eval "$(/opt/homebrew/bin/fnm env --shell bash)" && fnm use 22.22.1 && npx tsc -p tsconfig.server.json` → exit 0, no diagnostics. `dist/server/fonts-manager.js` + updated `dist/server/index.js` produced.
+
+#### Verification — boot smoke
+
+- `MAESTRO_HEADLESS=1 MAESTRO_DATA_DIR=/tmp/maestro-fonts-test MAESTRO_WEB_PORT=45720 node dist/server/index.js` boots successfully on port 45720. Ephemeral token logged (`d7c7cb1a-3282-4be2-bfd4-58ec15a79ebf` for this probe run). Existing L0h / L6.3 / W2-wakatime / W2-stats boot log lines unchanged. No new boot log lines for the fonts wiring (manager is stateless — nothing to log at construction).
+
+#### Verification — curl smoke (the route works end-to-end)
+
+- `curl -is "http://localhost:45720/<TOKEN>/api/fonts/detected"` → `HTTP/1.1 200 OK`, `content-length: 18161`, body `{"fonts":[...],"timestamp":...}` with 459 font families returned. Sample monospace entries present: `Andale Mono`, `PT Mono`, `.SF NS Mono`, `Menlo`, `Monaco`, `Courier`, `Courier New`. Rate-limit headers honored (`x-ratelimit-limit: 100`, `x-ratelimit-remaining: 99`).
+- `curl -is "http://localhost:45720/api/fonts/detected"` (no token) → `HTTP/1.1 404 Not Found`. Token-gating works: the route is namespaced under the security token, so unauthenticated paths fall through to the catch-all 404.
+- `curl -is "http://localhost:45720/wrong-token/api/fonts/detected"` → `HTTP/1.1 404 Not Found`. Same 404 path, no token-leak via differential response shapes.
+- 503 path (no FontsProvider registered) verified by branch coverage in the route body (`getFontsProvider() === null` → 503). Not exercised in the probe log above because the probe ran with the provider registered.
+
+#### Verification — scope guards (working tree + branch vs main)
+
+- `git diff HEAD -- src/main/ipc/handlers/system.ts | wc -c` → 0 (forbidden renderer-side handler untouched).
+- `git diff HEAD -- src/main/preload/system.ts | wc -c` → 0 (forbidden renderer-side preload bridge untouched).
+- `git diff main..HEAD -- src/web/ | wc -c` → 0.
+- `git diff main..HEAD -- src/renderer/ | wc -c` → 0.
+- `git diff main..HEAD -- src/main/ipc/ | wc -c` → 0.
+- `git status -s` lists exactly: modified `src/main/web-server/routes/apiRoutes.ts`, modified `src/server/index.ts`, new `src/server/fonts-manager.ts`, plus this ISA append.
+
+#### What this closes / leaves open
+
+- **ISC-44.display.font_family, server-half:** CLOSED. The REST surface exists, returns the correct shape (matching the IPC reply contract — `string[]` wrapped in a `timestamp`-stamped envelope), handles error paths (503 on missing provider, 500 on provider exceptions), and is wired in the headless boot path.
+- **ISC-44.display.font_family, client-half:** OPEN (next follow-on). webFull's `src/webFull/components/Settings/tabs/DisplayTab.tsx` still shows the fontFamily picker as a deferral in the "Coming in subsequent layers" panel. The follow-on agent will: (a) add a `useDetectedFonts()` hook in `src/webFull/hooks/` reading `GET /api/fonts/detected` (returns `{ fonts: string[], loading, error }` with single-flight caching across the modal lifetime); (b) wire the hook into a font-family `<select>` in `DisplayTab.tsx` replacing the deferral entry; (c) remove the deferral line from the panel; (d) flip ISC-44.display.font_family from "server-half CLOSED" to fully CLOSED in this ISA. Parity catalog stories for the webFull port land in `src/webFull/components/Settings/tabs/DisplayTab.parity.test.ts` per the L3.1 pattern.
+- **Custom-font management:** OPEN, deferred. The original ISC-44.display.font_family line bundled "fontFamily picker + custom-font management" into one entry, but custom-font upload + storage is a meaningfully larger surface (multipart upload, on-disk font cache, IPC for font registration on the renderer side). The renderer side doesn't have it either — `fonts:detect` only enumerates system fonts. Calling this out explicitly: the closure here covers the system-font enumeration half; custom-font management is its own follow-on under a future ISC-44.display.custom_font_management entry. This was flagged in the brief as "if the Electron implementation reaches into Electron-specific APIs that don't translate (unlikely for font detection but possible for some custom-font management flows), flag as 'client-half DEFERRED' — don't try to port the un-portable part." Status: nothing un-portable, custom-font management simply doesn't exist on either side yet.
+- **No new dependencies, no new env vars, no new build steps.** The port reuses existing `child_process` (Node stdlib) and the on-PATH `fc-list` binary (system fontconfig — ships by default on macOS and essentially every Linux distribution). Fallback list activates if `fc-list` is absent. Verified the curl probe returned 459 fonts on the host system (macOS Darwin 25.3.0, fc-list at `/opt/homebrew/bin/fc-list`).

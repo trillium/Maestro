@@ -257,6 +257,53 @@ export function getStatsProvider(): StatsProvider | null {
 	return statsProvider;
 }
 
+/* ============ Fonts provider registry (W2 — closes ISC-44.display.font_family, server-half) ============ */
+//
+// Mirrors the WakaTimeProvider / StatsProvider patterns above. Headless
+// entrypoints register a provider backed by `src/server/fonts-manager.ts`;
+// the Electron path leaves it unset and the route 503s cleanly. NO fallback
+// default is constructed here: the FontsManager is cheap to instantiate (no
+// network, no DB handle), but keeping the registry symmetrical with the
+// prior W2 ports preserves the single-owner invariant — the headless boot
+// path is the only legitimate registrant. The renderer-side `fonts:detect`
+// IPC handler in `src/main/ipc/handlers/system.ts` continues to own the
+// font-detection surface inside Electron, and the routes here do NOT touch
+// it. Both stacks can run side-by-side because the underlying `fc-list`
+// binary is the cross-mode contract.
+export interface FontsProvider {
+	/**
+	 * Detect available font families on the host. Returns a deduplicated,
+	 * non-empty array of font family names (never throws — falls back to a
+	 * small monospace list when `fc-list` is unavailable). Mirrors the
+	 * renderer-side `fonts:detect` IPC reply shape (`string[]`).
+	 */
+	detectFonts: () => Promise<string[]>;
+}
+
+let fontsProvider: FontsProvider | null = null;
+
+/**
+ * Register the active Fonts provider. Pass null to clear.
+ *
+ * The headless server boot path calls this once before `WebServer.start()` so
+ * `GET /api/fonts/detected` is wired by the time the first client request
+ * arrives. Electron-host paths can ignore this — the route 503s cleanly when
+ * no provider is registered, and the Electron renderer continues to use the
+ * `fonts:detect` IPC channel directly.
+ */
+export function registerFontsProvider(provider: FontsProvider | null): void {
+	fontsProvider = provider;
+}
+
+/**
+ * Internal accessor for the route handlers. Returns the registered provider
+ * or `null` if none is registered (the route translates `null` → HTTP 503).
+ * Exposed for testing.
+ */
+export function getFontsProvider(): FontsProvider | null {
+	return fontsProvider;
+}
+
 /**
  * API Routes Class
  *
@@ -977,6 +1024,59 @@ export class ApiRoutes {
 					return reply.code(500).send({
 						error: 'Internal Server Error',
 						message: `Failed to read session lifecycle: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// ============ Fonts endpoints (W2 — closes ISC-44.display.font_family, server-half) ============
+		//
+		// Additive REST route that mirrors the renderer-side `fonts:detect` IPC
+		// channel (one channel, one method — see `src/main/ipc/handlers/system.ts`
+		// line ~120). 503 when no FontsProvider is registered (the Electron path
+		// leaves it unset). Per ISC-40 N1 legalization, additive
+		// `src/main/web-server/routes/` edits are authorized. NO touch to
+		// `src/main/ipc/handlers/system.ts` or the renderer-side preload bridge.
+		//
+		// Route surface (1 endpoint):
+		//   GET /api/fonts/detected — returns `{ fonts: string[], timestamp }`,
+		//     the deduplicated list of available font families. The IPC channel
+		//     returns the bare `string[]`; we wrap in an envelope here for parity
+		//     with the rest of the `/api/*` surface (every other route returns a
+		//     `timestamp`-stamped object, never a bare array). webFull clients
+		//     unwrap `.fonts` from the response.
+
+		// GET /api/fonts/detected — mirrors the `fonts:detect` IPC reply.
+		server.get(
+			`/${token}/api/fonts/detected`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (_request, reply) => {
+				const provider = getFontsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Fonts provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const fonts = await provider.detectFonts();
+					return {
+						fonts,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to detect fonts: ${error.message}`,
 						timestamp: Date.now(),
 					});
 				}
