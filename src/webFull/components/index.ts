@@ -188,3 +188,5 @@ export {
 	addTerminalHighlightMarkers,
 } from './TerminalOutput';
 export type { TerminalScrollSnapshot } from './TerminalOutput';
+export { MarketplaceModal } from './MarketplaceModal';
+export type { MarketplaceModalProps } from './MarketplaceModal';
