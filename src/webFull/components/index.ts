@@ -109,3 +109,5 @@ export { GroupChatPanel } from './GroupChatPanel';
 export { ErrorBoundary } from './ErrorBoundary';
 export { LogFilterControls } from './LogFilterControls';
 export type { LogFilterControlsProps } from './LogFilterControls';
+export { FontConfigurationPanel } from './FontConfigurationPanel';
+export type { FontConfigurationPanelProps } from './FontConfigurationPanel';
