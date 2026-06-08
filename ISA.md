@@ -5272,3 +5272,5 @@ The rest (`react`, `lucide-react`, `react-markdown`, `rehype-slug`) resolves ide
 
 - 2026-06-08 /api/processes cluster: GET /api/processes, GET /api/processes/:sessionId. Pattern matches fs/agents. ISC: ISC-44.server.api_processes_cluster.
 - 2026-06-08 catalog-flaw fix wave C: 1 catalog edit — ThinkingStatusPill `'1.3k'` → `'1.3K'` to match formatTokensCompact's uppercase output.
+
+- 2026-06-08 chain-merge #34: largest landing of the session. 10 branches + uuid pin all on origin. Drawdown 88->71 cross-fork, Wizard 26 leaves + 4 medium-IPC pending land in #35, UsageDashboard 15/19 surface lifted, Settings store backed, /api/processes + /api/git clusters shipping, Playwright 233 stories passing, 1 catalog flaw fix. Total: ~50 ISCs closed in this wave.
