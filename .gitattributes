@@ -7,3 +7,15 @@
 # entries; only add new ones. Union merge produces correct results only
 # under that discipline.
 ISA.md merge=union
+
+# src/webFull/components/index.ts is append-shaped by convention — every
+# lifted component appends a re-export line at the end of its layer section.
+# Parallel leaf-parade lifts each append in their own commit; the natural
+# merge produces a textual conflict because each appended a different line
+# at the same EOF position. Use union merge so parallel appends concatenate.
+#
+# Convention: only APPEND to this file. Never reorder, edit, or remove
+# existing export lines without a coordinated wave. Union merge produces
+# duplicate exports if two branches both export the same name, which TS
+# catches at build:webfull — so a duplicate is loud, not silent.
+src/webFull/components/index.ts merge=union
