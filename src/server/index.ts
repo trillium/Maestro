@@ -46,6 +46,8 @@ import * as mutator from './sessions-mutator';
 import { initSentry, captureException } from './sentry';
 import { getHistoryManager } from './history-manager';
 import { RawPtyMultiplexer } from './raw-pty-multiplexer';
+import { getWakaTimeManager } from './wakatime-manager';
+import { registerWakatimeProvider } from '../main/web-server/routes/apiRoutes';
 
 type StoredSession = {
 	id: string;
@@ -99,6 +101,60 @@ const groupsStore = new FileStore<{ groups: StoredGroup[] }>({
 // `initialize()` is awaited inside main() so the directory + legacy migration
 // land before the server starts responding to history queries.
 const historyManager = getHistoryManager();
+
+// W2 — WakaTime manager. Server-side port of `src/main/wakatime-manager.ts`
+// that backs the new `GET /api/wakatime/status` + `POST /api/wakatime/validate-key`
+// REST routes (closes ISC-44.general.wakatime, server-half). The renderer-side
+// WakaTimeManager + `wakatime:*` IPC handlers are NOT touched; both can run
+// side-by-side in a hybrid Electron + headless-sidecar deployment because the
+// CLI binary + `~/.wakatime.cfg` config file are the contract between modes.
+//
+// Version string: read from package.json at the project root. The renderer
+// reads `app.getVersion()`; we supply it as data here since `electron` cannot
+// be imported into the server bundle. Resolution is best-effort — on any
+// failure (file missing, malformed JSON) we fall back to `'unknown'`, which
+// only affects the `--plugin` heartbeat tag (cosmetic).
+function readAppVersion(): string {
+	try {
+		// package.json sits at the repo root; this file lives at
+		// `dist/server/index.js` post-tsc, so `../../package.json` resolves
+		// correctly under the compiled tree. Development runs from `src/`
+		// resolve `../../package.json` the same way (5 levels up... actually
+		// 2 levels up from src/server). We prefer process.cwd() probing first
+		// for robustness, then fall through to the compiled-tree relative path.
+		const candidates = [
+			path.resolve(process.cwd(), 'package.json'),
+			path.resolve(__dirname, '../../package.json'),
+		];
+		for (const candidate of candidates) {
+			try {
+				const raw = require('fs').readFileSync(candidate, 'utf-8');
+				const parsed = JSON.parse(raw) as { name?: string; version?: string };
+				if (parsed.name === 'maestro' && typeof parsed.version === 'string') {
+					return parsed.version;
+				}
+			} catch {
+				/* try next */
+			}
+		}
+	} catch {
+		/* fall through */
+	}
+	return 'unknown';
+}
+
+const wakatimeManager = getWakaTimeManager(settingsStore, readAppVersion());
+
+// Register the manager as the default WakaTime provider for the REST routes.
+// MUST run before `server.start()` so the routes have a backing provider by
+// the time the first client request arrives. The renderer-side Electron path
+// does NOT register a provider — the `wakatime:*` IPC namespace continues to
+// own that surface — and the routes correctly 503 when called outside the
+// headless server.
+registerWakatimeProvider({
+	getStatus: () => wakatimeManager.checkCli(),
+	validateKey: (key: string) => wakatimeManager.validateApiKey(key),
+});
 
 // Persistent token: stored in settings if present, otherwise ephemeral per boot.
 // FileStore's generic-V overload is shadowed by the keyof-T overload when T is

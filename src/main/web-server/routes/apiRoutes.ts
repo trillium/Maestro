@@ -148,6 +148,47 @@ export function _resetDefaultSettingsStore(): void {
 	defaultStore = null;
 }
 
+/* ============ WakaTime provider registry (W2 — closes ISC-44.general.wakatime, server-half) ============ */
+//
+// Mirrors the SettingsProvider pattern above. Headless entrypoints register a
+// provider backed by `src/server/wakatime-manager.ts`; the Electron path leaves
+// it unset and the routes 503 cleanly. NO fallback default is constructed here:
+// instantiating a WakaTimeManager requires a settingsStore + appVersion that
+// only the headless boot path knows, and we explicitly do not want to drag the
+// `src/server/wakatime-manager.ts` module into the renderer's import graph
+// (that module includes the auto-install download path; lazy here keeps Electron
+// untouched).
+export interface WakaTimeProvider {
+	/** Status check — `{ available, version? }`. Auto-installs the CLI if needed. */
+	getStatus: () => Promise<{ available: boolean; version?: string }>;
+	/** Validate an API key against the WakaTime API. Returns `{ valid }`. */
+	validateKey: (key: string) => Promise<{ valid: boolean }>;
+}
+
+let wakatimeProvider: WakaTimeProvider | null = null;
+
+/**
+ * Register the active WakaTime provider. Pass null to clear.
+ *
+ * The headless server boot path calls this once before `WebServer.start()` so
+ * `GET /api/wakatime/status` and `POST /api/wakatime/validate-key` are wired
+ * by the time the first client request arrives. Electron-host paths can ignore
+ * this — the routes 503 cleanly when no provider is registered, and the
+ * Electron renderer continues to use the `wakatime:*` IPC namespace directly.
+ */
+export function registerWakatimeProvider(provider: WakaTimeProvider | null): void {
+	wakatimeProvider = provider;
+}
+
+/**
+ * Internal accessor for the route handlers. Returns the registered provider
+ * or `null` if none is registered (the routes translate `null` → HTTP 503).
+ * Exposed for testing.
+ */
+export function getWakatimeProvider(): WakaTimeProvider | null {
+	return wakatimeProvider;
+}
+
 /**
  * API Routes Class
  *
@@ -537,6 +578,98 @@ export class ApiRoutes {
 					return reply.code(500).send({
 						error: 'Internal Server Error',
 						message: `Failed to persist settings: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// ============ WakaTime endpoints (W2 — closes ISC-44.general.wakatime, server-half) ============
+		//
+		// Additive REST routes that mirror the renderer-side `wakatime:*` IPC
+		// namespace (`wakatime:checkCli`, `wakatime:validateApiKey`). 503 when
+		// no WakaTimeProvider is registered (the Electron path leaves it unset).
+		// Per ISC-40 N1 legalization, additive `src/main/web-server/routes/` edits
+		// are authorized. NO touch to `src/main/wakatime-manager.ts` or the
+		// renderer-side IPC handlers.
+
+		// GET /api/wakatime/status — mirrors `wakatime:checkCli` IPC reply shape
+		// (`{ available: boolean, version?: string }`).
+		server.get(
+			`/${token}/api/wakatime/status`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (_request, reply) => {
+				const provider = getWakatimeProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'WakaTime provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const status = await provider.getStatus();
+					return {
+						...status,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to read WakaTime status: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// POST /api/wakatime/validate-key — mirrors `wakatime:validateApiKey` IPC
+		// reply shape (`{ valid: boolean }`). Body: `{ key: string }`.
+		server.post(
+			`/${token}/api/wakatime/validate-key`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.maxPost,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getWakatimeProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'WakaTime provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const body = request.body as { key?: string } | undefined;
+				const key = body?.key;
+				if (typeof key !== 'string') {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'key must be a string',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.validateKey(key);
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to validate WakaTime key: ${error.message}`,
 						timestamp: Date.now(),
 					});
 				}
