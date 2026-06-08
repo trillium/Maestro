@@ -212,3 +212,54 @@ export type { RemotePathValidate, RemotePathValidateResult } from './NewInstance
 // `./Settings/SettingsModal` path.
 export { SettingsModal } from './Settings/SettingsModal';
 export type { SettingsModalProps, SettingsTabId } from './Settings/SettingsModal';
+
+// ============================================================================
+// Phase 1 — Wizard ecosystem leaf parade (ISC-44.lift.wizard_*)
+//
+// Lifted from `src/renderer/components/Wizard/` and
+// `src/renderer/components/InlineWizard/` in the Phase 1 leaf parade per
+// `WIZARD_LIFT_PLAN.md`. Every lifted file is 0-IPC (verified via
+// `grep -c 'window\.maestro' <renderer file>` returning 0) or had a single
+// `shell.openExternal` swapped to `window.open(href, '_blank', 'noopener,noreferrer')`.
+//
+// SKIPPED in this batch — blocked by missing `createWizardBubbleMarkdownComponents`
+// shim (the renderer helper hardcodes `window.maestro.shell.openExternal`,
+// unlike `createMarkdownComponents` which uses an injected callback):
+//   - InlineWizard/WizardMessageBubble.tsx
+//   - InlineWizard/WizardConversationView.tsx  (depends on WizardMessageBubble)
+// See report for follow-up shim plan.
+// ============================================================================
+
+// Wizard tree
+export { WizardExitConfirmModal } from './Wizard/WizardExitConfirmModal';
+export { ExistingAutoRunDocsModal } from './Wizard/ExistingAutoRunDocsModal';
+export { ScreenReaderAnnouncement, useAnnouncement } from './Wizard/ScreenReaderAnnouncement';
+export type { AnnouncementPoliteness } from './Wizard/ScreenReaderAnnouncement';
+export { DocumentSelector } from './Wizard/shared/DocumentSelector';
+export type { DocumentSelectorProps } from './Wizard/shared/DocumentSelector';
+export { TypingIndicator } from './Wizard/shared/TypingIndicator';
+
+// Wizard tour
+export { TourOverlay } from './Wizard/tour/TourOverlay';
+export { TourStep } from './Wizard/tour/TourStep';
+export { TourWelcome } from './Wizard/tour/TourWelcome';
+export { tourSteps, replaceShortcutPlaceholders } from './Wizard/tour/tourSteps';
+export { useTour } from './Wizard/tour/useTour';
+export type { TourStepConfig, TourUIAction, SpotlightInfo } from './Wizard/tour/useTour';
+
+// Wizard services (pure data + parsers, 0 IPC)
+export { wizardPrompts, parseStructuredOutput } from './Wizard/services/wizardPrompts';
+
+// InlineWizard tree
+export { WizardPill } from './InlineWizard/WizardPill';
+export { WizardConfidenceGauge } from './InlineWizard/WizardConfidenceGauge';
+export { WizardInputPanel } from './InlineWizard/WizardInputPanel';
+export { WizardModePrompt } from './InlineWizard/WizardModePrompt';
+export { WizardExitConfirmDialog } from './InlineWizard/WizardExitConfirmDialog';
+export {
+	DocumentGenerationView,
+	type DocumentGenerationViewProps,
+} from './InlineWizard/DocumentGenerationView';
+export { AustinFactsDisplay } from './InlineWizard/AustinFactsDisplay';
+export { StreamingDocumentPreview } from './InlineWizard/StreamingDocumentPreview';
+export { GenerationCompleteOverlay } from './InlineWizard/GenerationCompleteOverlay';
