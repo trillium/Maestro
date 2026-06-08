@@ -275,4 +275,94 @@ export class BroadcastService {
 			timestamp: Date.now(),
 		});
 	}
+
+	/**
+	 * Layer 6.1: send a `pty_data` chunk to a specific client. Unlike the
+	 * other `broadcast*` methods this one is point-to-point — the
+	 * RawPtyMultiplexer fans out per-subscriber, so the send target is
+	 * always a single clientId, not a session-wide audience.
+	 *
+	 * `bytes` is the raw PTY chunk. We base64-encode here so the multiplexer
+	 * itself stays Buffer-typed and the wire shape is centralized. `tabId` is
+	 * optional and currently unused by the protocol (terminal sessions are
+	 * 1:1 with PTYs), but reserved so future multi-tab PTY work doesn't have
+	 * to change this signature.
+	 */
+	broadcastPtyData(
+		clientId: string,
+		sessionId: string,
+		bytes: Buffer,
+		seq: number,
+		tabId?: string
+	): void {
+		if (!this.getWebClients) return;
+		const client = this.getWebClients().get(clientId);
+		if (!client) return;
+		if (client.socket.readyState !== WebSocket.OPEN) return;
+		const payload: Record<string, unknown> = {
+			type: 'pty_data',
+			sessionId,
+			seq,
+			bytes: bytes.toString('base64'),
+			timestamp: Date.now(),
+		};
+		if (tabId !== undefined) payload.tabId = tabId;
+		client.socket.send(JSON.stringify(payload));
+	}
+
+	/**
+	 * Layer 6.1: notify a client that the ring buffer rotated past bytes the
+	 * client had not yet seen (its `lastSeq` is older than the multiplexer's
+	 * current `oldestSeq`). The client's xterm.js host should render a
+	 * `[scrollback truncated]` marker before applying subsequent `pty_data`.
+	 */
+	broadcastPtyDropped(
+		clientId: string,
+		sessionId: string,
+		droppedBytes: number,
+		lastSeq: number
+	): void {
+		if (!this.getWebClients) return;
+		const client = this.getWebClients().get(clientId);
+		if (!client) return;
+		if (client.socket.readyState !== WebSocket.OPEN) return;
+		client.socket.send(
+			JSON.stringify({
+				type: 'pty_dropped',
+				sessionId,
+				droppedBytes,
+				lastSeq,
+				timestamp: Date.now(),
+			})
+		);
+	}
+
+	/**
+	 * Layer 6.1: deliver a backfill slice for a client that just subscribed
+	 * to a session's raw PTY stream. Single-message form (the multiplexer's
+	 * ring is bounded so backfills are <= hard cap; split-message form is L6.3).
+	 */
+	broadcastPtyBackfill(
+		clientId: string,
+		sessionId: string,
+		bytes: Buffer,
+		fromSeq: number,
+		toSeq: number
+	): void {
+		if (!this.getWebClients) return;
+		const client = this.getWebClients().get(clientId);
+		if (!client) return;
+		if (client.socket.readyState !== WebSocket.OPEN) return;
+		client.socket.send(
+			JSON.stringify({
+				type: 'pty_backfill',
+				sessionId,
+				fromSeq,
+				toSeq,
+				bytes: bytes.toString('base64'),
+				isFinal: true,
+				timestamp: Date.now(),
+			})
+		);
+	}
 }

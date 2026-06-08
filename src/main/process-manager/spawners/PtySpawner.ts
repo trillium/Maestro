@@ -125,6 +125,24 @@ export class PtySpawner {
 
 			// Handle output
 			ptyProcess.onData((data) => {
+				// Layer 6.1: emit RAW bytes BEFORE stripping. Additive — the
+				// stripped path below stays exactly as before (desktop renderer
+				// continues to consume `data` via DataBufferManager). The raw
+				// emission feeds the server-side RawPtyMultiplexer which
+				// fanouts to web clients with an active `pty_subscribe`. If
+				// nothing is subscribed, the multiplexer still buffers in the
+				// session ring for backfill-on-reconnect (scrollback per
+				// ISC-13). Cost when there are no listeners: one EventEmitter
+				// dispatch + one Buffer.from() per chunk — negligible.
+				try {
+					this.emitter.emit('raw-pty-data', sessionId, Buffer.from(data, 'utf-8'));
+				} catch (err) {
+					// Listener errors must not break the stripped path below.
+					logger.warn('[ProcessManager] raw-pty-data emit threw', 'ProcessManager', {
+						sessionId,
+						error: String(err),
+					});
+				}
 				const managedProc = this.processes.get(sessionId);
 				const cleanedData = stripControlSequences(data, managedProc?.lastCommand, isTerminal);
 				logger.debug('[ProcessManager] PTY onData', 'ProcessManager', {
