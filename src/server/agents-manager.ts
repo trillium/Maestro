@@ -35,15 +35,11 @@
  *      schema change. The renderer continues to import the same files; the
  *      "single source of truth" invariant is preserved.
  *
- *   5. **No detector cache and no model discovery.** The renderer-side
- *      `AgentDetector` class caches detection results, dedupes parallel
- *      detection promises, and runs agent-specific `models` subcommands.
- *      The server-side surface starts WITHOUT those features — each
+ *   5. **No detector cache.** The renderer-side `AgentDetector` class caches
+ *      detection results and dedupes parallel detection promises. The
+ *      server-side surface starts WITHOUT a detection cache — each
  *      `detectAgents()` call shells out fresh. A future brief can add
- *      caching and model discovery once a real consumer needs them (the
- *      NewInstanceModal sites that this brief unblocks need detection +
- *      capabilities, but model discovery is a separate IPC channel that
- *      will get its own route cluster).
+ *      caching once a real consumer benchmarks repeated detection.
  *
  *   6. **No SSH-remote dispatch.** The renderer-side handler accepts an
  *      optional `sshRemoteId` that proxies detection over SSH. The
@@ -55,13 +51,27 @@
  *      a remote was requested. This matches the W3-fs precedent at
  *      `apiRoutes.ts:1278+`.
  *
- *   7. **No agent-config persistence and no custom-path/args/env handling.**
- *      The renderer-side handler exposes a full read/write surface for agent
- *      configuration (electron-store backed). That state is desktop-mode-only
- *      — the headless web shell does not edit per-agent configs at this
- *      stage. The umbrella Decision names this as out of scope for the
- *      shim cluster; a future brief can add `/api/agents/config/*` against
- *      a server-side FileStore if a real webFull consumer materializes.
+ *   7. **Agent-config persistence and model discovery ARE ported (W3-agents-writers).**
+ *      Extends the original W3-agents detection-only surface with the
+ *      writer surface the umbrella big_3_ipc_strategy Decision named as a
+ *      follow-up: `getConfig` / `setConfig` (backed by a JSON FileStore at
+ *      `<dataDir>/agents-config.json`, mirroring the marketplace JSON-file
+ *      pattern) and `getModels` (local-only, mirrors `AgentDetector.runModelDiscovery`
+ *      — only `opencode` actually shells out; other agents short-circuit to
+ *      `[]`). Closes the NewInstanceModal preconditions at sites 284, 405,
+ *      971, 1277, 1288, 1482, 1791 — the remaining 6 of 11 IPC call sites
+ *      that the original W3-agents Decision audit named.
+ *
+ *      Out of scope for THIS extension brief (custom path/args/env handling):
+ *      `getCustomPath` / `setCustomPath` / `getAllCustomPaths` /
+ *      `getCustomArgs` / `setCustomArgs` / `getAllCustomArgs` /
+ *      `getCustomEnvVars` / `setCustomEnvVars` / `getAllCustomEnvVars`.
+ *      These ride on the same JSON store via the `customPath` / `customArgs`
+ *      / `customEnvVars` sub-keys (per the renderer-side handler's storage
+ *      shape), and would be additive sub-keys in a follow-up brief if a
+ *      real webFull consumer materializes. The 3 routes this brief ships
+ *      cover NewInstanceModal's preconditions; the custom-path surface is
+ *      a Settings-panel feature, not a NewInstanceModal precondition.
  *
  *   8. **`stripAgentFunctions` inlined.** Agent definitions carry function
  *      properties (`resumeArgs`, `modelArgs`, `workingDirArgs`, `imageArgs`,
@@ -96,6 +106,30 @@ import {
 } from '../main/agents/definitions';
 import { getAgentCapabilities, type AgentCapabilities } from '../main/agents/capabilities';
 import { isWindows, getWhichCommand } from '../shared/platformDetection';
+
+/* ============ Config-store shape ============ */
+
+/**
+ * On-disk shape of `<dataDir>/agents-config.json`. Mirrors the renderer-side
+ * `AgentConfigsData` shape at `src/main/ipc/handlers/agents.ts:33` exactly —
+ * top-level `configs` keyed by agent id, each value an opaque `Record<string,
+ * unknown>` (the renderer-side electron-store backs this same shape). Same
+ * file on disk is the cross-mode contract: a hybrid Electron + headless
+ * deployment writing to the same `dataDir` reads each other's edits without
+ * schema translation.
+ *
+ * NOTE on storage location: the Electron path uses electron-store's default
+ * (`~/Library/Application Support/<app>/agent-configs.json` on macOS), keyed
+ * by the store NAME `agent-configs`. The headless server uses
+ * `<dataDir>/agents-config.json` — same shape, sibling location. The umbrella
+ * big_3_ipc_strategy Decision flagged config-CRUD as a follow-up brief; this
+ * brief picks the headless-friendly `<dataDir>/...` location to match the
+ * W3-marketplace precedent (also a JSON file under `<dataDir>/`). A future
+ * brief MAY merge the two stores if a hybrid deployment needs unified config.
+ */
+interface AgentConfigsData {
+	configs: Record<string, Record<string, unknown>>;
+}
 
 const LOG_CONTEXT = '[Agents]';
 const EXEC_MAX_BUFFER = 10 * 1024 * 1024;
@@ -502,33 +536,43 @@ export interface AgentDetectResult {
  * Server-side agents manager. Mirrors the read-side surface of the
  * renderer-side `agents:*` IPC handlers.
  *
- * Surface (3 methods — one per route the brief names):
+ * Surface (6 methods after W3-agents-writers — original 3 + 3 new):
  *   - `detectAgents()`         → `agents:detect` (returns list)
  *   - `detectAgent(agentId)`   → `agents:refresh` (returns list + debug info)
  *   - `getCapabilities(agentId)` → `agents:getCapabilities` (returns matrix)
+ *   - `getConfig(agentId)`     → `agents:getConfig` (merged defaults + stored)
+ *   - `setConfig(agentId, cfg)`→ `agents:setConfig` (overwrites stored)
+ *   - `getModels(agentId, forceRefresh?)` → `agents:getModels` (local-only,
+ *     `[]` for agents without model discovery, `opencode models` for opencode)
  *
- * Not ported (deliberately out of scope per the brief audit):
- *   - `agents:getConfig` / `agents:setConfig` / config CRUD — needs a
- *     headless-side config store (electron-store equivalent) that doesn't
- *     yet exist; the umbrella big_3_ipc_strategy Decision marks agent-config
- *     persistence as out of scope for the shim cluster.
- *   - `agents:getModels` — local model discovery shells out to each agent's
- *     `models` subcommand; the route surface here covers detection only.
- *     Model discovery can ride on a follow-up brief if NewInstanceModal in
- *     webFull needs it.
+ * Constructor takes `dataDir` to back the config FileStore at
+ * `<dataDir>/agents-config.json`. The pre-W3-agents-writers surface was
+ * stateless (parameterless constructor); the writer surface needs a disk
+ * location, so the constructor now takes a single `dataDir` argument.
+ * Callers that only need the read surface can pass any string (the file is
+ * not opened until `getConfig` / `setConfig` is called).
+ *
+ * Not ported (deliberately out of scope):
  *   - `agents:discoverSlashCommands` — Claude Code only, expensive to
  *     invoke; no current webFull consumer.
  *   - `agents:setCustomPath` / `agents:setCustomArgs` / `agents:setCustomEnvVars`
- *     and their getters — same config-store gap as getConfig/setConfig.
- *
- * The IPC surprise these omissions surface: the NewInstanceModal port to
- * webFull will need a separate brief to land the agent-config CRUD routes
- * (and probably model discovery) before the modal becomes fully functional
- * in web mode. This brief lands the detection + capabilities sub-surface
- * that the umbrella Decision named as the first dependency in the
- * IPC-shim unblock chain.
+ *     and their getters — Settings-panel feature, not a NewInstanceModal
+ *     precondition. The same JSON store can back them via sub-keys when a
+ *     consumer materializes.
  */
 export class AgentsManager {
+	private readonly configFilePath: string;
+	private modelCache = new Map<string, { models: string[]; timestamp: number }>();
+	private readonly modelCacheTtlMs = 5 * 60 * 1000;
+
+	/**
+	 * @param dataDir Directory containing `agents-config.json`. The file is
+	 *   lazily read on first `getConfig` call; it does NOT need to exist at
+	 *   construction time (the manager writes it on first `setConfig`).
+	 */
+	constructor(dataDir: string) {
+		this.configFilePath = path.join(dataDir, 'agents-config.json');
+	}
 	/**
 	 * Detect all available agents on the local host.
 	 *
@@ -651,6 +695,217 @@ export class AgentsManager {
 	getCapabilities(agentId: string): AgentCapabilities {
 		return getAgentCapabilities(agentId);
 	}
+
+	/* ============ Config FileStore (lazy) ============ */
+
+	/**
+	 * Read the entire `<dataDir>/agents-config.json` file. Returns the empty
+	 * shape `{ configs: {} }` on ENOENT or parse failure (matches the
+	 * renderer-side electron-store posture, which auto-initializes to the
+	 * default on first read of a fresh install).
+	 *
+	 * Race-condition note: the JSON-file pattern (read → mutate in memory →
+	 * write whole file) is the same pattern marketplace-manager uses for
+	 * playbooks.json. Two concurrent `setConfig` calls against different
+	 * agent ids COULD race and lose one write; that's an accepted trade-off
+	 * for the JSON-file simplicity (the renderer-side electron-store has the
+	 * same race posture). The Settings-panel UX writes one agent at a time
+	 * from a single client, so the race is theoretical for the current
+	 * consumer surface. A future brief MAY add a file-level mutex if a
+	 * batch-write consumer materializes.
+	 */
+	private async readConfigStore(): Promise<AgentConfigsData> {
+		try {
+			const content = await fs.promises.readFile(this.configFilePath, 'utf-8');
+			const data = JSON.parse(content) as Partial<AgentConfigsData>;
+			if (!data || typeof data !== 'object' || !data.configs || typeof data.configs !== 'object') {
+				console.warn(`${LOG_CONTEXT} agents-config.json has invalid shape, returning empty`);
+				return { configs: {} };
+			}
+			return { configs: data.configs as Record<string, Record<string, unknown>> };
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code === 'ENOENT') {
+				return { configs: {} };
+			}
+			console.warn(`${LOG_CONTEXT} failed to read agents-config.json: ${(error as Error).message}`);
+			return { configs: {} };
+		}
+	}
+
+	private async writeConfigStore(data: AgentConfigsData): Promise<void> {
+		// Ensure parent dir exists — `<dataDir>` may not have been created yet
+		// on a fresh headless install. Matches the marketplace-manager posture
+		// at marketplace-manager.ts:306.
+		await fs.promises.mkdir(path.dirname(this.configFilePath), { recursive: true });
+		await fs.promises.writeFile(this.configFilePath, JSON.stringify(data, null, 2), 'utf-8');
+	}
+
+	/**
+	 * Get the merged config for an agent id — defaults from
+	 * `AGENT_DEFINITIONS[*].configOptions[*].default` overlaid with the
+	 * stored config from `<dataDir>/agents-config.json`. Mirrors the
+	 * renderer-side `agents:getConfig` handler at agents.ts:556 byte-for-byte:
+	 *
+	 *   const defaults = {};
+	 *   for (option of agentDef.configOptions) if (option.default !== undefined)
+	 *       defaults[option.key] = option.default;
+	 *   return { ...defaults, ...storedConfig };
+	 *
+	 * Unknown agent ids: returns just the stored config (or `{}` if none) —
+	 * matches the renderer-side handler's behavior (the `agentDef` lookup
+	 * returns undefined, the for-loop is skipped, defaults is `{}`).
+	 *
+	 * The merged shape includes `customPath`, `customArgs`, `customEnvVars`
+	 * sub-keys when those have been written to the store via the
+	 * renderer-side handlers (the same JSON file backs both surfaces) — they
+	 * pass through transparently because the merge is shallow.
+	 */
+	async getConfig(agentId: string): Promise<Record<string, unknown>> {
+		const store = await this.readConfigStore();
+		const storedConfig = store.configs[agentId] || {};
+
+		const agentDef = AGENT_DEFINITIONS.find((a) => a.id === agentId);
+		const defaults: Record<string, unknown> = {};
+		if (agentDef?.configOptions) {
+			for (const option of agentDef.configOptions) {
+				if (option.default !== undefined) {
+					defaults[option.key] = option.default;
+				}
+			}
+		}
+
+		return { ...defaults, ...storedConfig };
+	}
+
+	/**
+	 * Overwrite the stored config for an agent id. Mirrors the renderer-side
+	 * `agents:setConfig` handler at agents.ts:578 — replaces (does NOT merge)
+	 * the per-agent record. Unknown agent ids are accepted (the renderer-side
+	 * handler accepts them too — no `AGENT_DEFINITIONS` lookup runs before
+	 * the write). Returns `true` on success to match the renderer-side
+	 * handler's reply shape.
+	 *
+	 * Note: this OVERWRITES, it doesn't merge. A caller that wants to update
+	 * a single key should read-modify-write via `getConfig` first. Matches
+	 * the renderer-side handler's semantics so the cross-mode contract stays
+	 * symmetric.
+	 */
+	async setConfig(agentId: string, config: Record<string, unknown>): Promise<boolean> {
+		const store = await this.readConfigStore();
+		store.configs[agentId] = config;
+		await this.writeConfigStore(store);
+		console.log(`${LOG_CONTEXT} updated config for agent: ${agentId}`);
+		return true;
+	}
+
+	/**
+	 * Discover available models for an agent id. LOCAL ONLY — SSH-remote
+	 * dispatch is a sibling brief. Mirrors the renderer-side
+	 * `AgentDetector.discoverModels` at detector.ts:208 + `runModelDiscovery`
+	 * at detector.ts:247:
+	 *
+	 *   1. If agent not detected → `[]` (cannot discover models on a missing
+	 *      binary).
+	 *   2. If agent does NOT support model selection (`capabilities.supportsModelSelection
+	 *      === false`) → `[]`.
+	 *   3. Else: agent-specific fan-out. Currently only `opencode` has a
+	 *      `models` subcommand implementation; other agents that claim
+	 *      `supportsModelSelection: true` (codex, gemini-cli) fall through to
+	 *      the `default` branch and return `[]` (the renderer-side detector
+	 *      does the same). When/if they get model-discovery implementations,
+	 *      THIS function is the sibling to update.
+	 *
+	 * Cache TTL is 5 minutes (matches `AgentDetector.modelCacheTtlMs`). Pass
+	 * `forceRefresh: true` to bypass.
+	 *
+	 * Resilience: every exception is caught and logged; the function returns
+	 * `[]` on failure so the route never 500s on a missing/broken agent
+	 * binary. Matches the renderer-side `runModelDiscovery` posture (try/
+	 * catch at detector.ts:251, returns `[]` on throw).
+	 */
+	async getModels(agentId: string, forceRefresh = false): Promise<string[]> {
+		// Cache check
+		if (!forceRefresh) {
+			const cached = this.modelCache.get(agentId);
+			if (cached && Date.now() - cached.timestamp < this.modelCacheTtlMs) {
+				console.log(`${LOG_CONTEXT} returning cached models for ${agentId}`);
+				return cached.models;
+			}
+		}
+
+		// Detect the agent first — model discovery shells out to the agent
+		// binary, so we need its path. detectAgents() shells out fresh each
+		// call (no detector cache yet); cheap enough for this consumer (the
+		// modal calls this on tool-type change, not on every keystroke).
+		const list = (await this.detectAgents()) as Array<{
+			id: string;
+			binaryName?: string;
+			command?: string;
+			path?: string;
+			available?: boolean;
+			capabilities?: { supportsModelSelection?: boolean };
+		}>;
+		const agent = list.find((a) => a.id === agentId);
+
+		if (!agent || !agent.available) {
+			console.warn(`${LOG_CONTEXT} cannot discover models: agent ${agentId} not available`);
+			return [];
+		}
+
+		if (!agent.capabilities?.supportsModelSelection) {
+			console.log(`${LOG_CONTEXT} agent ${agentId} does not support model selection`);
+			return [];
+		}
+
+		// Agent-specific model discovery. Mirrors detector.ts:253-283.
+		const command = agent.path || agent.command;
+		if (!command) {
+			console.warn(`${LOG_CONTEXT} no command path for agent ${agentId}, cannot discover models`);
+			return [];
+		}
+
+		const env = getExpandedEnv();
+		let models: string[] = [];
+
+		try {
+			switch (agentId) {
+				case 'opencode': {
+					// `opencode models` returns one model per line (e.g.
+					// "opencode/gpt-5-nano", "ollama/gpt-oss:latest").
+					const result = await execFileNoThrow(command, ['models'], env);
+					if (result.exitCode !== 0) {
+						console.warn(
+							`${LOG_CONTEXT} model discovery failed for ${agentId}: exit code ${result.exitCode}`
+						);
+						return [];
+					}
+					models = result.stdout
+						.split('\n')
+						.map((line) => line.trim())
+						.filter((line) => line.length > 0);
+					console.log(`${LOG_CONTEXT} discovered ${models.length} models for ${agentId}`);
+					break;
+				}
+				default:
+					// Other agents that claim `supportsModelSelection: true`
+					// (codex, gemini-cli) don't have a `models` subcommand
+					// implemented in the renderer-side detector either —
+					// they fall through to `[]`. THIS switch is the sibling
+					// to update when they get model-discovery implementations.
+					console.log(`${LOG_CONTEXT} no model discovery implemented for ${agentId}`);
+					return [];
+			}
+		} catch (error) {
+			console.error(
+				`${LOG_CONTEXT} model discovery threw for ${agentId}: ${(error as Error).message}`
+			);
+			return [];
+		}
+
+		this.modelCache.set(agentId, { models, timestamp: Date.now() });
+		return models;
+	}
 }
 
 /* ============ Singleton accessor for the headless server ============ */
@@ -661,12 +916,27 @@ let agentsManager: AgentsManager | null = null;
  * Get-or-create the singleton AgentsManager for the headless server.
  *
  * Matches the `getHistoryManager()` / `getWakaTimeManager()` /
- * `getStatsManager()` / `getFontsManager()` / `getFsManager()` patterns.
- * Parameterless because detection is pure-stdlib (no config / DB / network).
+ * `getStatsManager()` / `getFontsManager()` / `getFsManager()` / `getMarketplaceManager()`
+ * patterns. Lazy-init: the FIRST call MUST supply `dataDir`; subsequent calls
+ * ignore the argument (matching the marketplace-manager.ts:814 posture). The
+ * `dataDir` is needed for the config FileStore at
+ * `<dataDir>/agents-config.json` (W3-agents-writers).
+ *
+ * For backward compatibility with the pre-W3-agents-writers signature, callers
+ * MAY pass no argument — but the FIRST caller (`src/server/index.ts`) MUST
+ * supply `dataDir`, or `getConfig` / `setConfig` will write to `./agents-config.json`
+ * relative to the process cwd. Defensive: if no `dataDir` was ever supplied,
+ * the manager logs a warning on first config-related call.
  */
-export function getAgentsManager(): AgentsManager {
+export function getAgentsManager(dataDir?: string): AgentsManager {
 	if (!agentsManager) {
-		agentsManager = new AgentsManager();
+		if (!dataDir) {
+			console.warn(
+				`${LOG_CONTEXT} getAgentsManager() called before initialization with dataDir. ` +
+					`Config FileStore will be written to process cwd. The first call MUST supply dataDir.`
+			);
+		}
+		agentsManager = new AgentsManager(dataDir ?? '.');
 	}
 	return agentsManager;
 }
