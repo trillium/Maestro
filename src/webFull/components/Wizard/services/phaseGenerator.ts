@@ -1607,6 +1607,69 @@ export function createPhaseGenerator(config: PhaseGeneratorConfig): PhaseGenerat
 	return new PhaseGenerator(config);
 }
 
+/**
+ * Module-level injection slot for the active `PhaseGenerator` instance.
+ *
+ * The original renderer module exported a singleton (`phaseGenerator`) that
+ * the wizard screens imported directly. webFull cannot construct a singleton
+ * at module-load time because the `PhaseGenerator` requires a `serverToken`
+ * + `ProcessLifecycleClient` that the host wires per-session.
+ *
+ * To preserve the screens' import shape (`import { phaseGenerator } from
+ * '../services/phaseGenerator'`), this module exposes a setter the host
+ * calls once after `createPhaseGenerator(config)`, and a getter (the
+ * `phaseGenerator` proxy) the screens consume. This mirrors the
+ * `setProcessLifecycleClient` / `setAgentResolver` pattern already used by
+ * `conversationManager.ts`.
+ *
+ * If a screen reaches for the singleton before the host wires it, every
+ * method throws a clear error rather than silently no-oping. The error
+ * message names the setter the host should call, so the failure mode is
+ * actionable instead of mysterious.
+ */
+let _activePhaseGenerator: PhaseGenerator | null = null;
+
+export function setPhaseGenerator(instance: PhaseGenerator | null): void {
+	_activePhaseGenerator = instance;
+}
+
+export function getPhaseGenerator(): PhaseGenerator {
+	if (!_activePhaseGenerator) {
+		throw new Error(
+			'[webFull] phaseGenerator is not wired. Call setPhaseGenerator(createPhaseGenerator(config)) from the wizard host before mounting wizard screens.'
+		);
+	}
+	return _activePhaseGenerator;
+}
+
+/**
+ * Proxy that delegates every property access to the active `PhaseGenerator`
+ * instance set via `setPhaseGenerator`. Lets the wizard screens import
+ * `phaseGenerator` the same way they did in the renderer, while keeping
+ * construction host-controlled.
+ *
+ * Method calls bind to the underlying instance so `this` resolves correctly
+ * inside the class methods.
+ */
+export const phaseGenerator: PhaseGenerator = new Proxy({} as PhaseGenerator, {
+	get(_target, prop, _receiver) {
+		const instance = getPhaseGenerator();
+		const value = Reflect.get(instance, prop, instance);
+		if (typeof value === 'function') {
+			return value.bind(instance);
+		}
+		return value;
+	},
+	set(_target, prop, value) {
+		const instance = getPhaseGenerator();
+		return Reflect.set(instance, prop, value, instance);
+	},
+	has(_target, prop) {
+		const instance = getPhaseGenerator();
+		return Reflect.has(instance, prop);
+	},
+});
+
 // Export utility functions for use elsewhere
 export const phaseGeneratorUtils = {
 	generateDocumentGenerationPrompt,

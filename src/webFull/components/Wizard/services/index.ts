@@ -10,6 +10,9 @@ export { wizardPrompts, parseStructuredOutput } from './wizardPrompts';
 export {
 	PhaseGenerator,
 	createPhaseGenerator,
+	phaseGenerator,
+	setPhaseGenerator,
+	getPhaseGenerator,
 	phaseGeneratorUtils,
 	wizardDebugLogger,
 	sanitizeFilename,

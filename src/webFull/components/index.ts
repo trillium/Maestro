@@ -460,3 +460,33 @@ export type {
 
 export { wizardDebugLogger } from './Wizard/services/wizardDebugLogger';
 export type { WizardDebugLogEntry } from './Wizard/services/wizardDebugLogger';
+
+// ============================================================================
+// Wizard Phase 4 — PreparingPlanScreen (lifted from
+// `src/renderer/components/Wizard/screens/PreparingPlanScreen.tsx`, ~914 LOC).
+//
+// 0 direct IPC calls in the renderer source. One `window.maestro.shell.openExternal`
+// fallback inside `FactContent` was simplified to `window.open(..., '_blank',
+// 'noopener,noreferrer')` since webFull has no Electron shell — same precedent
+// as `Wizard/shared/DocumentEditor.tsx` and `InlineWizard/WizardMessageBubble.tsx`.
+//
+// The renderer's `phaseGenerator` singleton was replaced with a proxy backed
+// by `setPhaseGenerator(createPhaseGenerator(config))`. Hosts wire the active
+// instance once per session; until they do, every `phaseGenerator.*` access
+// throws an actionable error (same posture as `setProcessLifecycleClient`
+// in `conversationManager.ts`). See `Wizard/services/phaseGenerator.ts` for
+// the proxy + setter rationale.
+//
+// Wire-ready but not yet mounted — same status as `PhaseReviewScreen`.
+// ============================================================================
+export { PreparingPlanScreen } from './Wizard/screens/PreparingPlanScreen';
+
+// Expose the new setter + proxy alongside the existing factory so hosts can
+// wire a session-scoped `PhaseGenerator` before mounting wizard screens. The
+// `phaseGenerator` proxy lets the screens keep their renderer-style import
+// shape (`import { phaseGenerator } from '../services/phaseGenerator'`).
+export {
+	phaseGenerator as wizardPhaseGenerator,
+	setPhaseGenerator as setWizardPhaseGenerator,
+	getPhaseGenerator as getWizardPhaseGenerator,
+} from './Wizard/services/phaseGenerator';
