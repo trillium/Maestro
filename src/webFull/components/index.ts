@@ -173,3 +173,10 @@ export type {
 	QueuedItem as ExecutionQueueBrowserQueuedItem,
 	ExecutionQueueSession as ExecutionQueueBrowserSession,
 } from './ExecutionQueueBrowser';
+export { TransferErrorModal, classifyTransferError } from './TransferErrorModal';
+export type {
+	TransferError,
+	TransferErrorType,
+	TransferErrorModalProps,
+} from './TransferErrorModal';
+export { HistoryDetailModal } from './HistoryDetailModal';
