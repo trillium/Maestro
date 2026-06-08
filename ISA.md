@@ -5329,3 +5329,10 @@ The rest (`react`, `lucide-react`, `react-markdown`, `rehype-slug`) resolves ide
 - Push SHA: d00b58d45 (range 9e820778f..d00b58d45 → origin/main)
 - Worktrees pruned: 5 (catalog-umbrella, catalog-fix-AB, wizard-bubble, ws-family, wizard-phase2)
 - Notes: pre-push hook caught one prettier formatting drift on ISA.md (post-merge whitespace); fixed in commit d00b58d45 ("chore(prettier): format ISA.md post-merge") and push succeeded on retry. First push attempt also hit a transient github.com:443 connect timeout — second attempt clean.
+
+## Verification — chain-merge #36 [2026-06-08]
+
+- Branches landed: feat/settings-subtabs-lift, feat/api-autorun-delete-folder, feat/wizard-phase3A-context-conversation, feat/wizard-phase3B-phaseGenerator
+- All 4 merged clean, lint green after each, tests ~29,213 passing
+- Push SHA: 784b182f1
+- Worktrees pruned: 2 (maestro-settings-subtabs, maestro-phase3b)
