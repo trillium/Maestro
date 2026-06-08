@@ -12,7 +12,14 @@ docs/releases.md
 
 # Orchestration / planning / scratch docs — not product code
 .orchestrator-scratch.md
+.orchestrator-monitors.md
 .orchestrator-tick-count
 PLAN_AUDIT_*.md
 WEB_PORT_ORDER.md
 MERGE_PROTOCOL.md
+CATALOG_FLAW_AUDIT_*.md
+HANDOFF.md
+OPENCODE_TRIAGE.md
+STATUS.md
+USAGE_DASHBOARD_LIFT_PLAN.md
+WIZARD_LIFT_PLAN.md
