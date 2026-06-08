@@ -97,3 +97,9 @@ export { CollapsibleJsonViewer } from './CollapsibleJsonViewer';
 export { MarkdownRenderer, CodeBlockWithCopy } from './MarkdownRenderer';
 export type { CodeBlockWithCopyProps, MarkdownRendererProps } from './MarkdownRenderer';
 export { GroupChatHeader } from './GroupChatHeader';
+export { AppOverlays } from './AppOverlays';
+export type {
+	AppOverlaysProps,
+	StandingOvationData as AppOverlaysStandingOvationData,
+	FirstRunCelebrationData as AppOverlaysFirstRunCelebrationData,
+} from './AppOverlays';
