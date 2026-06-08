@@ -105,4 +105,19 @@ export const registry: Record<string, ComponentAdapter> = {
 	DeleteGroupChatModal: {
 		load: () => import('./adapters/DeleteGroupChatModal.adapter').then((m) => m.default),
 	},
+	HistoryHelpModal: {
+		load: () => import('./adapters/HistoryHelpModal.adapter').then((m) => m.default),
+	},
+	AutoRunnerHelpModal: {
+		load: () => import('./adapters/AutoRunnerHelpModal.adapter').then((m) => m.default),
+	},
+	QueuedItemsList: {
+		load: () => import('./adapters/QueuedItemsList.adapter').then((m) => m.default),
+	},
+	ToolCallCard: {
+		load: () => import('./adapters/ToolCallCard.adapter').then((m) => m.default),
+	},
+	FirstRunCelebration: {
+		load: () => import('./adapters/FirstRunCelebration.adapter').then((m) => m.default),
+	},
 };
