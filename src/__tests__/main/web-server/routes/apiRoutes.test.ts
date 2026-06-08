@@ -106,6 +106,11 @@ function createMockFastify() {
 			const config = handler ? options?.config : undefined;
 			routes.set(`PATCH:${path}`, { handler: h, config });
 		}),
+		put: vi.fn((path: string, options: any, handler?: Function) => {
+			const h = handler || options;
+			const config = handler ? options?.config : undefined;
+			routes.set(`PUT:${path}`, { handler: h, config });
+		}),
 		delete: vi.fn((path: string, options: any, handler?: Function) => {
 			const h = handler || options;
 			const config = handler ? options?.config : undefined;
