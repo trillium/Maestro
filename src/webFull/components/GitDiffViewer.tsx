@@ -1,0 +1,427 @@
+/**
+ * GitDiffViewer — webFull lift
+ *
+ * Layer 2.5 leaf-parade lift of `src/renderer/components/GitDiffViewer.tsx`
+ * (326 LOC). Pre-flight `grep -E "window\.maestro\.|from ['\"]electron['\"]|
+ * ipcRenderer|shell\.openExternal|shell\.openPath"
+ * src/renderer/components/GitDiffViewer.tsx` returned empty (exit 1) — the
+ * viewer itself touches zero IPC namespaces and zero Electron-only APIs at
+ * module-load OR runtime. All side effects flow through the `onClose` prop
+ * callback.
+ *
+ * **Reference oracle:** `src/renderer/components/GitDiffViewer.tsx` — modal
+ * dialog that renders a parsed git diff as a tabbed file viewer. Behavior
+ * surface:
+ *   - tabs across the top, one per changed file, with per-file +/- counts
+ *   - active tab renders react-diff-view <Diff>/<Hunk> for text files,
+ *     ImageDiffViewer side-by-side for images, "Binary file changed" copy
+ *     for non-image binaries, "Unable to parse diff" fallback otherwise
+ *   - keyboard nav via Cmd/Ctrl+[ and Cmd/Ctrl+] cycling through tabs
+ *   - layer-stack registration as a `modal` (priority `GIT_DIFF`, `lenient`
+ *     focus trap, blocks lower layers, Escape closes via `onCloseRef`)
+ *   - empty-diff fallback ("No changes to display") when parsing yields 0
+ *     files
+ *   - footer with per-file stats + "File N of M" indicator
+ *
+ * **Lift policy:** verbatim copy of the renderer body. Cross-fork edges
+ * documented below; nothing in the component itself is mutated.
+ *
+ * Import-path adjustments matching the L2.5 precedent established by
+ * `MergeProgressOverlay`, `GitStatusWidget`, `ParticipantCard`, etc.:
+ *
+ * 1. `Theme` from `'../types'` → `'../../shared/theme-types'`. Renderer
+ *    routes through `src/renderer/types/index.ts` which re-exports the
+ *    canonical type from `src/shared/theme-types`; webFull imports the
+ *    canonical type directly to avoid a silent-drift surface.
+ *
+ * 2. `parseGitDiff`, `getFileName`, `getDiffStats` from
+ *    `'../utils/gitDiffParser'` → `'../utils/gitDiffParser'`. The parser is
+ *    a pure util (112 LOC, 0 IPC) lifted to webFull as a companion to this
+ *    viewer — see `src/webFull/utils/gitDiffParser.ts`. Same path shape; the
+ *    `utils/` folder maps 1:1 between fork-roots.
+ *
+ * 3. `useLayerStack` from `'../contexts/LayerStackContext'` →
+ *    `'../contexts/LayerStackContext'`. The webFull context is the L2.1
+ *    layer-stack port (`src/webFull/contexts/LayerStackContext.tsx`). Same
+ *    path shape; the `contexts/` folder maps 1:1.
+ *
+ * 4. `MODAL_PRIORITIES` from `'../constants/modalPriorities'` →
+ *    `'../constants/modalPriorities'`. The webFull module is a
+ *    re-export-only shim from `src/renderer/constants/modalPriorities.ts`
+ *    per the established Architect audit-A precedent (constants don't
+ *    diverge across fork-roots). Same path shape.
+ *
+ * 5. `ImageDiffViewer` from `'./ImageDiffViewer'` →
+ *    `'../../renderer/components/ImageDiffViewer'`. The image diff sub-view
+ *    self-sources image bytes via `window.maestro.git.showFile()` and
+ *    `window.maestro.fs.readFile()` inside a `useEffect` — runtime IPC, not
+ *    module-load. Lifting it into webFull would drag two IPC namespaces
+ *    (`git`, `fs`) through the webFull surface, which is out of scope for
+ *    this leaf and blocked on the server-side `/api/git/show-file` +
+ *    `/api/fs/read-file` REST routes. **This is the only cross-fork edge
+ *    in this lift.** Future follow-on (tracked at
+ *    ISC-44.layer-2.5.image_diff_viewer) drops the edge when the routes
+ *    land. The viewer ONLY mounts `ImageDiffViewer` when `activeFile.isImage
+ *    === true`, so for the 80%-text-diff use case the edge is dormant.
+ *
+ * 6. `generateDiffViewStyles` from `'../utils/markdownConfig'` →
+ *    `'../../renderer/utils/markdownConfig'`. The styles generator is a
+ *    pure CSS-string emitter (no IPC at module-load — verified via head
+ *    inspection: only `react-markdown`, `react-syntax-highlighter`, type
+ *    imports, and intra-renderer pure helpers). The cross-fork edge here
+ *    is consistent with the established `markdownConfig` reuse pattern;
+ *    lifting the full ~900-LOC `markdownConfig` is its own leaf out of
+ *    scope for this port.
+ *
+ * 7. `'react-diff-view'` + `'react-diff-view/style/index.css'` left
+ *    untouched — the dep resolves identically from both fork-roots and is
+ *    already in `package.json` (^3.3.2).
+ *
+ * The rest of the component body — the layer registration shape, the
+ * keyboard shortcut wiring, the tab markup, the empty-diff fallback, the
+ * binary/image branch arms, the footer stats — is byte-for-byte identical
+ * to the renderer source.
+ *
+ * Parity contract pinned by `GitDiffViewer.parity.test.ts`:
+ *   - "No changes to display" copy surfaces when `diffText` parses to 0 files
+ *   - "Git Diff" title + cwd badge + "N files changed" header copy
+ *   - Tab strip renders one tab per file with the filename + per-file +/-
+ *     counts
+ *   - Active-tab body renders the file header arrow ("oldPath → newPath")
+ *     for text diffs
+ *   - "Binary file changed" copy for non-image binary files
+ *   - Footer surfaces "File N of M" + per-file stat counts
+ *   - Close button (`Close (Esc)`) discoverable in both empty and populated
+ *     states
+ *   - Negative: parser is robust to malformed input (returns empty array,
+ *     viewer surfaces the empty-state fallback) — no thrown exception
+ *
+ * Wave reference: leaf-git-diff-viewer (ISC-44.layer-2.5.git_diff_viewer).
+ */
+
+import { useState, useMemo, useEffect, useRef, memo } from 'react';
+import { Diff, Hunk } from 'react-diff-view';
+import { Plus, Minus, ImageIcon } from 'lucide-react';
+import type { Theme } from '../../shared/theme-types';
+import { parseGitDiff, getFileName, getDiffStats } from '../utils/gitDiffParser';
+import { useLayerStack } from '../contexts/LayerStackContext';
+import { MODAL_PRIORITIES } from '../constants/modalPriorities';
+import { ImageDiffViewer } from '../../renderer/components/ImageDiffViewer';
+import { generateDiffViewStyles } from '../../renderer/utils/markdownConfig';
+import 'react-diff-view/style/index.css';
+
+export interface GitDiffViewerProps {
+	diffText: string;
+	cwd: string;
+	theme: Theme;
+	onClose: () => void;
+}
+
+export const GitDiffViewer = memo(function GitDiffViewer({
+	diffText,
+	cwd,
+	theme,
+	onClose,
+}: GitDiffViewerProps) {
+	const [activeTab, setActiveTab] = useState(0);
+	const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+	const { registerLayer, unregisterLayer } = useLayerStack();
+
+	// Store onClose in ref to avoid re-registering layer on every parent re-render
+	const onCloseRef = useRef(onClose);
+	onCloseRef.current = onClose;
+
+	// Parse the diff into separate files
+	const parsedFiles = useMemo(() => parseGitDiff(diffText), [diffText]);
+
+	// Register layer on mount
+	// Note: Using 'modal' type so App.tsx blocks all shortcuts and lets this component
+	// handle its own Cmd+Shift+[] for tab navigation
+	useEffect(() => {
+		const id = registerLayer({
+			type: 'modal',
+			priority: MODAL_PRIORITIES.GIT_DIFF,
+			blocksLowerLayers: true,
+			capturesFocus: true,
+			focusTrap: 'lenient',
+			ariaLabel: 'Git Diff Preview',
+			onEscape: () => onCloseRef.current(),
+		});
+
+		return () => {
+			unregisterLayer(id);
+		};
+	}, [registerLayer, unregisterLayer]); // Removed onClose from deps
+
+	// Auto-scroll to active tab when it changes
+	useEffect(() => {
+		const activeTabElement = tabRefs.current[activeTab];
+		if (activeTabElement) {
+			activeTabElement.scrollIntoView({
+				behavior: 'smooth',
+				block: 'nearest',
+				inline: 'center',
+			});
+		}
+	}, [activeTab]);
+
+	// Handle keyboard shortcuts (tab navigation only)
+	useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if (parsedFiles.length === 0) return;
+
+			// Cmd+[ or Cmd+Shift+[ - Previous tab
+			if ((e.metaKey || e.ctrlKey) && e.key === '[') {
+				e.preventDefault();
+				setActiveTab((prev) => (prev === 0 ? parsedFiles.length - 1 : prev - 1));
+			}
+			// Cmd+] or Cmd+Shift+] - Next tab
+			else if ((e.metaKey || e.ctrlKey) && e.key === ']') {
+				e.preventDefault();
+				setActiveTab((prev) => (prev + 1) % parsedFiles.length);
+			}
+		};
+
+		window.addEventListener('keydown', handleKeyDown);
+		return () => window.removeEventListener('keydown', handleKeyDown);
+	}, [parsedFiles.length]);
+
+	if (parsedFiles.length === 0) {
+		return (
+			<div
+				className="fixed inset-0 z-[9999] flex items-center justify-center modal-overlay"
+				onClick={onClose}
+			>
+				<div
+					className="w-[85%] max-w-[1400px] h-[90%] rounded-lg shadow-2xl flex flex-col overflow-hidden"
+					style={{
+						backgroundColor: theme.colors.bgMain,
+						border: `1px solid ${theme.colors.border}`,
+					}}
+					onClick={(e) => e.stopPropagation()}
+					role="dialog"
+					aria-modal="true"
+					aria-label="Git Diff Preview"
+					tabIndex={-1}
+					ref={(el) => el?.focus()}
+				>
+					<div
+						className="flex items-center justify-between px-6 py-4 border-b"
+						style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgSidebar }}
+					>
+						<span className="text-lg font-semibold" style={{ color: theme.colors.textMain }}>
+							Git Diff
+						</span>
+						<button
+							onClick={onClose}
+							className="px-3 py-1 rounded text-sm hover:bg-white/10 transition-colors"
+							style={{ color: theme.colors.textDim }}
+						>
+							Close (Esc)
+						</button>
+					</div>
+					<div className="flex-1 flex items-center justify-center">
+						<p className="text-sm" style={{ color: theme.colors.textDim }}>
+							No changes to display
+						</p>
+					</div>
+				</div>
+			</div>
+		);
+	}
+
+	const activeFileIndex = Math.min(activeTab, parsedFiles.length - 1);
+	const activeFile = parsedFiles[activeFileIndex];
+	const stats = getDiffStats(activeFile.parsedDiff);
+
+	return (
+		<div
+			className="fixed inset-0 z-[9999] flex items-center justify-center modal-overlay"
+			onClick={onClose}
+		>
+			<div
+				className="w-[85%] max-w-[1400px] h-[90%] rounded-lg shadow-2xl flex flex-col overflow-hidden"
+				style={{
+					backgroundColor: theme.colors.bgMain,
+					borderColor: theme.colors.border,
+					border: '1px solid',
+				}}
+				onClick={(e) => e.stopPropagation()}
+				role="dialog"
+				aria-modal="true"
+				aria-label="Git Diff Preview"
+				tabIndex={-1}
+				ref={(el) => el?.focus()}
+			>
+				{/* Header */}
+				<div
+					className="flex items-center justify-between px-6 py-4 border-b"
+					style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgSidebar }}
+				>
+					<div className="flex items-center gap-3">
+						<span className="text-lg font-semibold" style={{ color: theme.colors.textMain }}>
+							Git Diff
+						</span>
+						<span
+							className="text-xs px-2 py-1 rounded"
+							style={{ backgroundColor: theme.colors.bgActivity, color: theme.colors.textDim }}
+						>
+							{cwd}
+						</span>
+						<span className="text-xs" style={{ color: theme.colors.textDim }}>
+							{parsedFiles.length} {parsedFiles.length === 1 ? 'file' : 'files'} changed
+						</span>
+					</div>
+					<button
+						onClick={onClose}
+						className="px-3 py-1 rounded text-sm hover:bg-white/10 transition-colors"
+						style={{ color: theme.colors.textDim }}
+					>
+						Close (Esc)
+					</button>
+				</div>
+
+				{/* Tabs */}
+				<div
+					className="flex gap-0 border-b overflow-x-auto scrollbar-thin"
+					style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgSidebar }}
+				>
+					{parsedFiles.map((file, index) => {
+						const fileStats = getDiffStats(file.parsedDiff);
+						const displayPath = file.newPath || file.oldPath || `file-${index}`;
+						return (
+							<button
+								key={displayPath}
+								ref={(el) => (tabRefs.current[index] = el)}
+								onClick={() => setActiveTab(index)}
+								className={`px-4 py-3 text-sm whitespace-nowrap transition-colors ${
+									activeFileIndex === index ? 'border-b-2' : 'hover:bg-white/5'
+								}`}
+								style={{
+									color: activeFileIndex === index ? theme.colors.accent : theme.colors.textDim,
+									borderColor: activeFileIndex === index ? theme.colors.accent : 'transparent',
+									backgroundColor: activeFileIndex === index ? theme.colors.bgMain : 'transparent',
+								}}
+							>
+								<div className="flex items-center gap-2">
+									{file.isImage && (
+										<ImageIcon className="w-3.5 h-3.5" style={{ color: theme.colors.textDim }} />
+									)}
+									<span className="font-mono">{getFileName(displayPath)}</span>
+									<div className="flex items-center gap-1 text-xs">
+										{file.isBinary ? (
+											<span style={{ color: theme.colors.textDim }}>binary</span>
+										) : (
+											<>
+												{fileStats.additions > 0 && (
+													<span className="text-green-500 flex items-center gap-0.5">
+														<Plus className="w-3 h-3" />
+														{fileStats.additions}
+													</span>
+												)}
+												{fileStats.deletions > 0 && (
+													<span className="text-red-500 flex items-center gap-0.5">
+														<Minus className="w-3 h-3" />
+														{fileStats.deletions}
+													</span>
+												)}
+											</>
+										)}
+									</div>
+								</div>
+							</button>
+						);
+					})}
+				</div>
+
+				{/* Diff Content */}
+				<div className="flex-1 overflow-auto p-6">
+					{activeFile && activeFile.isImage ? (
+						// Image diff view - side-by-side comparison
+						<ImageDiffViewer
+							oldPath={activeFile.oldPath}
+							newPath={activeFile.newPath}
+							cwd={cwd}
+							theme={theme}
+							isNewFile={activeFile.isNewFile}
+							isDeletedFile={activeFile.isDeletedFile}
+						/>
+					) : activeFile && activeFile.isBinary ? (
+						// Non-image binary file
+						<div className="flex flex-col items-center justify-center h-full gap-2">
+							<p className="text-sm" style={{ color: theme.colors.textDim }}>
+								Binary file changed
+							</p>
+							<p className="text-xs" style={{ color: theme.colors.textDim }}>
+								{activeFile.newPath}
+							</p>
+						</div>
+					) : activeFile && activeFile.parsedDiff.length > 0 ? (
+						<div className="font-mono text-sm">
+							<style>{generateDiffViewStyles(theme)}</style>
+							{activeFile.parsedDiff.map((file, fileIndex) => (
+								<div key={fileIndex}>
+									{/* File header */}
+									<div
+										className="mb-4 p-2 rounded font-semibold text-xs"
+										style={{
+											backgroundColor: theme.colors.bgActivity,
+											color: theme.colors.textMain,
+										}}
+									>
+										{file.oldPath} → {file.newPath}
+									</div>
+
+									{/* Render each hunk */}
+									<Diff viewType="unified" diffType={file.type} hunks={file.hunks}>
+										{(hunks) => hunks.map((hunk) => <Hunk key={hunk.content} hunk={hunk} />)}
+									</Diff>
+								</div>
+							))}
+						</div>
+					) : (
+						<div className="flex items-center justify-center h-full">
+							<p className="text-sm" style={{ color: theme.colors.textDim }}>
+								Unable to parse diff for this file
+							</p>
+						</div>
+					)}
+				</div>
+
+				{/* Footer with stats */}
+				<div
+					className="flex items-center justify-between px-6 py-3 border-t text-xs"
+					style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgSidebar }}
+				>
+					<div className="flex items-center gap-4">
+						<span style={{ color: theme.colors.textDim }}>
+							Current file:{' '}
+							<span className="font-mono" style={{ color: theme.colors.textMain }}>
+								{getFileName(activeFile.newPath || activeFile.oldPath || `file-${activeFileIndex}`)}
+							</span>
+						</span>
+						{activeFile.isBinary ? (
+							<span style={{ color: theme.colors.textDim }}>
+								{activeFile.isImage ? 'Image file' : 'Binary file'}
+							</span>
+						) : (
+							<div className="flex items-center gap-2">
+								<span className="text-green-500 flex items-center gap-1">
+									<Plus className="w-3 h-3" />
+									{stats.additions} additions
+								</span>
+								<span className="text-red-500 flex items-center gap-1">
+									<Minus className="w-3 h-3" />
+									{stats.deletions} deletions
+								</span>
+							</div>
+						)}
+					</div>
+					<span style={{ color: theme.colors.textDim }}>
+						File {activeFileIndex + 1} of {parsedFiles.length}
+					</span>
+				</div>
+			</div>
+		</div>
+	);
+});
