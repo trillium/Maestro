@@ -1090,12 +1090,10 @@ All three paths return the seeded data correctly sorted. Status: **PASS** for en
 #### Decisions
 
 - **Pattern: rewrite-with-primitives for both tabs.** Per the L3.x lift-vs-rewrite rule.
-
   - **DisplayTab.** Renderer source is 715 LOC and fans out into ≥1 IPC namespace beyond `settings` (specifically `fonts:detect` for system font enumeration in `loadFonts()`). That puts it over the "lift if ≤ 1 IPC namespace beyond settings" threshold; rewrite-with-primitives, not verbatim lift.
   - **ShortcutsTab.** Renderer source is 212 LOC and uses ZERO `window.maestro.*` IPC. By the rule it is technically liftable, but rewriting keeps the L3.x catalog uniform and avoids a cross-tree import from `src/renderer/utils/shortcutFormatter.ts` (a utility not part of the L2.x lifted primitives). Inlined a ~20-line platform-aware key formatter in the webFull tab — pure function, no IPC.
 
 - **DisplayTab deferred IPC / Electron-only surface (surfaced inline, NOT silently dropped):**
-
   - `fontFamily` picker + custom-font management (`fonts:detect` — Electron-only system font enumeration).
   - "Window Chrome" toggles (`useNativeTitleBar`, `autoHideMenuBar`) — affect Electron's BrowserWindow chrome; no browser equivalent. Settings keys themselves still writable from a future port.
   - Bionify info modal (non-essential algorithm reference popup). Algorithm input itself stays editable.
@@ -1716,7 +1714,6 @@ Plan-reeval-2 flagged the mini2 deploy execution path as the HIGHEST open risk: 
 1. **`package.json` postinstall — guarded, not removed.** The `postinstall` script that runs `electron-rebuild -f -w node-pty,better-sqlite3` is now wrapped in a shell conditional on `MAESTRO_HEADLESS=1`. Desktop dev (`npm install` with the env var unset) keeps the original behavior — node-pty + better-sqlite3 rebuild against Electron's Node ABI. Headless deploys (`MAESTRO_HEADLESS=1 npm ci`, which `infra/deploy.sh` now exports automatically) print `[postinstall] MAESTRO_HEADLESS=1; skipping electron-rebuild` and proceed without invoking electron-rebuild at all. This avoids the "NODE_MODULE_VERSION mismatch" crash that would have hit `node dist/server/index.js` on first boot of mini2, because the headless server uses system Node's ABI, not Electron's. Choosing a guard over removal preserves the desktop dev workflow unchanged and lets the next plan-reeval consider whether removal is actually warranted now that the env-var gate exists.
 
 2. **`infra/deploy.sh` gains `--probe` and `--auto-probe` modes.** The script previously only had one mode (deploy + curl health check). It now accepts:
-
    - `./infra/deploy.sh` — original behavior (deploy + curl).
    - `./infra/deploy.sh --probe` — skip the deploy entirely; only execute `infra/probe-pty-survival.sh` against the running mini2 environment. Use to re-verify L6.3 persistence without churning the launchd service or rebuilding.
    - `./infra/deploy.sh --auto-probe` — full deploy + curl + run the falsification probe immediately after a green health check. The script propagates the probe's exit code, so a green `--auto-probe` run proves both "service is up on :45678" and "PTY scrollback round-trips through a simulated kill" in one invocation. This wires L6.3's falsification probe into the deploy pipeline rather than leaving it as a parallel manual step.
@@ -2069,6 +2066,7 @@ ISC-44.layer-2.5.rename_groupchat flipped `[ ]` → `[x]` CLOSED. Sibling lift t
 3. ISC-44.general.sync flips `[ ]` → `[x]` CLOSED on merge.
 
 **Open question for Trillium.** Is the text-input UX acceptable, or do you want to explore a third option (e.g. server-side filesystem browser endpoint that returns directory listings the browser renders as a clickable tree)? The latter is ~150 LOC server-side + a non-trivial browser component; significantly more work but closer to picker-feel. Default recommendation: go with text-input + validate, ship it, revisit if friction surfaces.
+
 ### 2026-06-08 — Layer 2.5 evidence (leaf-parade batch #5 — DeleteAgentConfirmModal lift)
 
 Branch `leaf-delete-agent-confirm` originally cut off `main @ f9d29340a`; rebased onto current `main @ d916dd254` (which now includes the merged L2.5 batches #1–#4: `PlaybookDeleteConfirmModal` on `7cbe10596`, `DeleteGroupChatModal` on `11c253049`, `RenameGroupChatModal` and `RenameGroupModal` on subsequent merges). This branch is the L2.5 leaf-parade batch #5. Lifts `src/renderer/components/DeleteAgentConfirmModal.tsx` verbatim into `src/webFull/components/` and ships a parity catalog.
