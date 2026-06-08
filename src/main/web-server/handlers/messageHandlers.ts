@@ -67,6 +67,31 @@ export interface LiveSessionInfo {
 }
 
 /**
+ * Layer 6.1: raw PTY callbacks. Implemented server-side by wiring through
+ * RawPtyMultiplexer + ProcessManager. The MessageHandler stays decoupled
+ * from those concretions via this callback shape. All four are optional —
+ * a deployment that hasn't wired the multiplexer (e.g. the desktop Electron
+ * server) simply doesn't receive any pty_* messages.
+ */
+export interface PtyMessageCallbacks {
+	/**
+	 * Subscribe a client to a session's raw PTY stream. Implementations
+	 * should: (a) register the client with the multiplexer using
+	 * `subscribe(sessionId, clientId, lastSeq)`, (b) immediately deliver
+	 * any backfill bytes via `broadcastPtyBackfill`, and (c) deliver a
+	 * `broadcastPtyDropped` marker first if the ring rotated past lastSeq.
+	 * Returns true if the session exists / subscription succeeded.
+	 */
+	ptySubscribe: (clientId: string, sessionId: string, lastSeq?: number) => boolean;
+	/** Drop the client from one session. */
+	ptyUnsubscribe: (clientId: string, sessionId: string) => void;
+	/** Write decoded bytes to the PTY's stdin (delegates to processManager.write). */
+	ptyInput: (sessionId: string, data: string) => boolean;
+	/** Forward a SIGWINCH-equivalent resize to the PTY (processManager.resize). */
+	ptyResize: (sessionId: string, cols: number, rows: number) => boolean;
+}
+
+/**
  * Callbacks required by the message handler
  */
 export interface MessageHandlerCallbacks {
@@ -96,6 +121,11 @@ export interface MessageHandlerCallbacks {
 	}>;
 	getLiveSessionInfo: (sessionId: string) => LiveSessionInfo | undefined;
 	isSessionLive: (sessionId: string) => boolean;
+	// Layer 6.1 raw PTY surface (optional — Electron desktop server omits)
+	ptySubscribe?: PtyMessageCallbacks['ptySubscribe'];
+	ptyUnsubscribe?: PtyMessageCallbacks['ptyUnsubscribe'];
+	ptyInput?: PtyMessageCallbacks['ptyInput'];
+	ptyResize?: PtyMessageCallbacks['ptyResize'];
 }
 
 /**
@@ -192,6 +222,23 @@ export class WebSocketMessageHandler {
 
 			case 'toggle_bookmark':
 				this.handleToggleBookmark(client, message);
+				break;
+
+			// Layer 6.1: raw PTY protocol — see scoping doc §2.
+			case 'pty_subscribe':
+				this.handlePtySubscribe(client, message);
+				break;
+
+			case 'pty_unsubscribe':
+				this.handlePtyUnsubscribe(client, message);
+				break;
+
+			case 'pty_input':
+				this.handlePtyInput(client, message);
+				break;
+
+			case 'pty_resize':
+				this.handlePtyResize(client, message);
 				break;
 
 			default:
@@ -633,6 +680,119 @@ export class WebSocketMessageHandler {
 			.catch((error) => {
 				this.sendError(client, `Failed to toggle bookmark: ${error.message}`);
 			});
+	}
+
+	/**
+	 * Layer 6.1: handle pty_subscribe — register client for raw-byte stream
+	 * on a session, deliver backfill, ack with `pty_subscribed`.
+	 *
+	 * Protocol shape:
+	 *   { type: 'pty_subscribe', sessionId, lastSeq? }
+	 *
+	 * The server-side `ptySubscribe` callback is responsible for emitting
+	 * the backfill `pty_backfill` and (if needed) the preceding `pty_dropped`
+	 * marker BEFORE its return — this handler only acks the subscribe.
+	 */
+	private handlePtySubscribe(client: WebClient, message: WebClientMessage): void {
+		const sessionId = message.sessionId as string | undefined;
+		const lastSeqRaw = message.lastSeq;
+		const lastSeq = typeof lastSeqRaw === 'number' ? lastSeqRaw : undefined;
+		if (!sessionId) {
+			this.sendError(client, 'Missing sessionId');
+			return;
+		}
+		if (!this.callbacks.ptySubscribe) {
+			this.sendError(client, 'PTY subscription not configured', { sessionId });
+			return;
+		}
+		const ok = this.callbacks.ptySubscribe(client.id, sessionId, lastSeq);
+		this.send(client, { type: 'pty_subscribed', sessionId, success: ok, lastSeq });
+	}
+
+	/**
+	 * Layer 6.1: handle pty_unsubscribe — drop client from the multiplexer's
+	 * subscriber set for one session. Idempotent.
+	 *
+	 * Protocol shape:
+	 *   { type: 'pty_unsubscribe', sessionId }
+	 */
+	private handlePtyUnsubscribe(client: WebClient, message: WebClientMessage): void {
+		const sessionId = message.sessionId as string | undefined;
+		if (!sessionId) {
+			this.sendError(client, 'Missing sessionId');
+			return;
+		}
+		if (this.callbacks.ptyUnsubscribe) {
+			this.callbacks.ptyUnsubscribe(client.id, sessionId);
+		}
+		this.send(client, { type: 'pty_unsubscribed', sessionId });
+	}
+
+	/**
+	 * Layer 6.1: handle pty_input — decode bytes and write to PTY stdin.
+	 *
+	 * Protocol shape:
+	 *   { type: 'pty_input', sessionId, bytes, encoding?: 'base64' | 'utf8' }
+	 *
+	 * Default encoding is 'base64' (safe for control bytes like \x1b, \x03).
+	 * 'utf8' is accepted for human-typed strings; per-keystroke input from
+	 * xterm.js will use 'base64'.
+	 */
+	private handlePtyInput(client: WebClient, message: WebClientMessage): void {
+		const sessionId = message.sessionId as string | undefined;
+		const bytes = message.bytes as string | undefined;
+		const encoding = (message.encoding as string | undefined) ?? 'base64';
+		if (!sessionId || typeof bytes !== 'string') {
+			this.sendError(client, 'Missing sessionId or bytes');
+			return;
+		}
+		if (!this.callbacks.ptyInput) {
+			this.sendError(client, 'PTY input not configured', { sessionId });
+			return;
+		}
+		let decoded: string;
+		try {
+			decoded =
+				encoding === 'utf8'
+					? bytes
+					: Buffer.from(bytes, 'base64').toString('utf-8');
+		} catch (err) {
+			this.sendError(client, `Failed to decode pty_input bytes: ${String(err)}`, { sessionId });
+			return;
+		}
+		const ok = this.callbacks.ptyInput(sessionId, decoded);
+		if (!ok) {
+			logger.debug(
+				`[Web] pty_input write failed for session ${sessionId}`,
+				LOG_CONTEXT
+			);
+		}
+	}
+
+	/**
+	 * Layer 6.1: handle pty_resize — forward cols/rows to the PTY.
+	 *
+	 * Protocol shape:
+	 *   { type: 'pty_resize', sessionId, cols, rows }
+	 *
+	 * Per scoping doc §2.6: a web-driven resize affects only the bytes the
+	 * PTY emits; the desktop renderer ignores raw bytes and its parsed view
+	 * is row-agnostic, so resize from web is safe even with desktop attached.
+	 */
+	private handlePtyResize(client: WebClient, message: WebClientMessage): void {
+		const sessionId = message.sessionId as string | undefined;
+		const cols = message.cols as number | undefined;
+		const rows = message.rows as number | undefined;
+		if (!sessionId || typeof cols !== 'number' || typeof rows !== 'number') {
+			this.sendError(client, 'Missing sessionId, cols, or rows');
+			return;
+		}
+		if (!this.callbacks.ptyResize) {
+			this.sendError(client, 'PTY resize not configured', { sessionId });
+			return;
+		}
+		const ok = this.callbacks.ptyResize(sessionId, cols, rows);
+		this.send(client, { type: 'pty_resize_result', sessionId, success: ok, cols, rows });
 	}
 
 	/**

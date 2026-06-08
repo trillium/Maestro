@@ -457,9 +457,11 @@ export class WebServer {
 					`Client disconnected: ${clientId} (total: ${this.webClients.size})`,
 					LOG_CONTEXT
 				);
+				this.fireClientDisconnectHook(clientId);
 			},
 			onClientError: (clientId) => {
 				this.webClients.delete(clientId);
+				this.fireClientDisconnectHook(clientId);
 			},
 			handleMessage: (clientId, message) => {
 				this.handleWebClientMessage(clientId, message);
@@ -564,6 +566,93 @@ export class WebServer {
 
 	broadcastUserInput(sessionId: string, command: string, inputMode: 'ai' | 'terminal'): void {
 		this.broadcastService.broadcastUserInput(sessionId, command, inputMode);
+	}
+
+	// ============ Layer 6.1: raw PTY broadcast surface ============
+
+	/**
+	 * Point-to-point send of a `pty_data` chunk to a single client.
+	 * Wired by the headless server's RawPtyMultiplexer broadcaster shim.
+	 */
+	broadcastPtyData(
+		clientId: string,
+		sessionId: string,
+		bytes: Buffer,
+		seq: number,
+		tabId?: string
+	): void {
+		this.broadcastService.broadcastPtyData(clientId, sessionId, bytes, seq, tabId);
+	}
+
+	/** Notify one client that the ring rotated past its `lastSeq`. */
+	broadcastPtyDropped(
+		clientId: string,
+		sessionId: string,
+		droppedBytes: number,
+		lastSeq: number
+	): void {
+		this.broadcastService.broadcastPtyDropped(clientId, sessionId, droppedBytes, lastSeq);
+	}
+
+	/** Deliver a backfill slice on subscribe. */
+	broadcastPtyBackfill(
+		clientId: string,
+		sessionId: string,
+		bytes: Buffer,
+		fromSeq: number,
+		toSeq: number
+	): void {
+		this.broadcastService.broadcastPtyBackfill(clientId, sessionId, bytes, fromSeq, toSeq);
+	}
+
+	/**
+	 * Layer 6.1: install the four pty_* callbacks that the WS message handler
+	 * dispatches into. Kept separate from `setupMessageHandlerCallbacks()`
+	 * (which is private and wires the always-present surface) so a server
+	 * deployment that does not run a multiplexer can simply skip this call.
+	 */
+	setPtyMessageCallbacks(callbacks: {
+		ptySubscribe: (clientId: string, sessionId: string, lastSeq?: number) => boolean;
+		ptyUnsubscribe: (clientId: string, sessionId: string) => void;
+		ptyInput: (sessionId: string, data: string) => boolean;
+		ptyResize: (sessionId: string, cols: number, rows: number) => boolean;
+	}): void {
+		this.messageHandler.setCallbacks(callbacks);
+	}
+
+	/**
+	 * Layer 6.1: snapshot of currently-connected web client IDs. The
+	 * multiplexer uses this to GC subscribers when a client disconnects
+	 * without explicitly unsubscribing.
+	 */
+	getConnectedClientIds(): string[] {
+		return Array.from(this.webClients.keys());
+	}
+
+	// Layer 6.1: optional hook fired whenever a WS client disconnects.
+	// Used by the headless server to drop the client from all multiplexer
+	// subscriber sets. Kept private to the post-construction wire-up path.
+	private onClientDisconnectHook: ((clientId: string) => void) | null = null;
+
+	/**
+	 * Layer 6.1: register a hook that fires whenever a WS client disconnects.
+	 * The hook is invoked AFTER the client is removed from `webClients` so
+	 * GC routines see a consistent snapshot. Subsequent calls overwrite the
+	 * previous hook.
+	 */
+	setClientDisconnectHook(hook: (clientId: string) => void): void {
+		this.onClientDisconnectHook = hook;
+	}
+
+	/** Internal: fire the disconnect hook if installed. Invoked by wsRoute callbacks. */
+	private fireClientDisconnectHook(clientId: string): void {
+		if (this.onClientDisconnectHook) {
+			try {
+				this.onClientDisconnectHook(clientId);
+			} catch (err) {
+				logger.warn(`onClientDisconnectHook threw for ${clientId}: ${String(err)}`, LOG_CONTEXT);
+			}
+		}
 	}
 
 	// ============ Server Lifecycle ============

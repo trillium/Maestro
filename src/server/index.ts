@@ -41,10 +41,11 @@ import { WebServer } from '../main/web-server/WebServer';
 import { getThemeById } from '../main/themes';
 import { FileStore } from '../shared/file-store';
 import { getDataDir } from '../shared/data-dir';
-import { ServerProcessManagerAdapter } from './process-manager-adapter';
+import { ServerProcessManagerAdapter, resolveProcessId } from './process-manager-adapter';
 import * as mutator from './sessions-mutator';
 import { initSentry, captureException } from './sentry';
 import { getHistoryManager } from './history-manager';
+import { RawPtyMultiplexer } from './raw-pty-multiplexer';
 
 type StoredSession = {
 	id: string;
@@ -539,6 +540,123 @@ server.setToggleBookmarkCallback(async (sessionId: string): Promise<boolean> => 
 // (returns `null` not `false`). Suppressed-unused below.
 void notImplementedWrite;
 
+// ============ Layer 6.1: raw PTY multiplexer ============
+//
+// Wires up the RawPtyMultiplexer between ProcessManager (producer, emits
+// 'raw-pty-data' events on every PTY chunk via PtySpawner) and the WS
+// broadcast surface (consumer, fans bytes out to subscribed web clients
+// via WebServer.broadcastPtyData).
+//
+// Architecture (per scoping doc §1, §2, §3):
+//   - Additive: the existing stripped-output path through DataBufferManager
+//     stays exactly as before. Desktop renders the same as it always has.
+//     This multiplexer is a parallel raw-byte path consumed only by web
+//     clients with an active `pty_subscribe`.
+//   - Location: in src/server/, not src/main/. The multiplexer is a
+//     server-side concern (lives where the broadcaster lives) and never
+//     runs in the Electron desktop process.
+//   - Encoding (B): base64 over JSON. Single-protocol WS surface; ~33%
+//     wire overhead accepted for simplicity. Binary frames deferred to
+//     L6.3 if bandwidth measurements demand it.
+//   - Budgets: 4 MB soft / 8 MB hard ring; 5 ms flush / 32 KB threshold
+//     (see RAW_PTY_* constants in raw-pty-multiplexer.ts).
+//
+// Session-id resolution: the PtySpawner emits raw bytes keyed by the
+// underlying process id (e.g. `<sessionId>-terminal`). WS clients send
+// `pty_subscribe` with the bare `sessionId`. Both the client→multiplexer
+// translation and the multiplexer→client translation use resolveProcessId
+// so a single bare sessionId maps to the `-terminal`-suffixed multiplexer
+// key. AI sessions (toolType !== 'terminal') do not use PTY in the
+// shouldUsePty() sense, so pty_subscribe on a non-terminal session simply
+// produces an empty backfill — harmless.
+
+const rawPtyMultiplexer = new RawPtyMultiplexer();
+
+// Map a bare-sessionId from the WS protocol to the multiplexer / PtySpawner
+// key. Terminal sessions are 1:1 with PTYs in this codebase, so always
+// suffix `-terminal` for the multiplexer lookup; this matches what
+// PtySpawner emits (PtySpawner.spawn() is invoked with the suffixed id by
+// the renderer-side spawn pipeline).
+function ptyKeyForSession(sessionId: string): string {
+	const session = sessionsStore
+		.get<StoredSession[]>('sessions', [])
+		.find((s) => s.id === sessionId);
+	// Prefer the session's inputMode if known; otherwise default to
+	// 'terminal' (raw PTY only matters for terminal-backed sessions anyway).
+	return resolveProcessId(sessionId, session?.inputMode ?? 'terminal');
+}
+
+// Producer side: subscribe the multiplexer to ProcessManager's emitter so
+// every `raw-pty-data` event (sent by PtySpawner.onData) lands in the ring.
+rawPtyMultiplexer.attachProducer(processManagerAdapter.processManager);
+
+// Consumer side: install the WS broadcaster shim. The multiplexer calls
+// `sendData` / `sendDropped` per-subscriber; we route those through the
+// WebServer's point-to-point broadcast helpers.
+rawPtyMultiplexer.setBroadcaster({
+	sendData: (clientId, ptyKey, bytes, seq) => {
+		// Strip the trailing `-terminal` / `-ai` suffix when reporting the
+		// sessionId back to the client — clients only know bare IDs.
+		const bareSessionId = ptyKey.replace(/-(terminal|ai)$/, '');
+		server.broadcastPtyData(clientId, bareSessionId, bytes, seq);
+	},
+	sendDropped: (clientId, ptyKey, droppedBytes, lastSeq) => {
+		const bareSessionId = ptyKey.replace(/-(terminal|ai)$/, '');
+		server.broadcastPtyDropped(clientId, bareSessionId, droppedBytes, lastSeq);
+	},
+});
+
+// Message-handler side: install the four pty_* callbacks. Each translates
+// the bare sessionId to the multiplexer key, delegates to the right
+// underlying primitive (multiplexer.subscribe / processManager.write etc.),
+// and (for subscribe) emits the backfill + dropped marker BEFORE returning.
+server.setPtyMessageCallbacks({
+	ptySubscribe: (clientId, sessionId, lastSeq) => {
+		const key = ptyKeyForSession(sessionId);
+		const slice = rawPtyMultiplexer.subscribe(key, clientId, lastSeq);
+		if (slice.droppedBeforeBackfill > 0 && typeof lastSeq === 'number') {
+			server.broadcastPtyDropped(clientId, sessionId, slice.droppedBeforeBackfill, lastSeq);
+		}
+		if (slice.bytes.length > 0 && slice.fromSeq !== null && slice.toSeq !== null) {
+			server.broadcastPtyBackfill(clientId, sessionId, slice.bytes, slice.fromSeq, slice.toSeq);
+		}
+		// Note: subscribe always succeeds — the multiplexer auto-creates session
+		// state on first reference (a PTY may publish before any client
+		// subscribes). The boolean is "session exists in store" for client UX.
+		const sessionExists = sessionsStore
+			.get<StoredSession[]>('sessions', [])
+			.some((s) => s.id === sessionId);
+		console.log(
+			`[maestro-server] pty_subscribe client=${clientId} session=${sessionId} key=${key} ` +
+				`lastSeq=${lastSeq ?? 'none'} backfill=${slice.bytes.length}B ` +
+				`dropped=${slice.droppedBeforeBackfill}`
+		);
+		return sessionExists;
+	},
+	ptyUnsubscribe: (clientId, sessionId) => {
+		const key = ptyKeyForSession(sessionId);
+		rawPtyMultiplexer.unsubscribe(key, clientId);
+		console.log(`[maestro-server] pty_unsubscribe client=${clientId} session=${sessionId}`);
+	},
+	ptyInput: (sessionId, data) => {
+		// Reuses the existing L0b write path — handles suffix resolution and
+		// `lastCommand` snapshot for the stripped-output echo filter.
+		const ok = processManagerAdapter.write(sessionId, data);
+		return ok;
+	},
+	ptyResize: (sessionId, cols, rows) => {
+		const key = ptyKeyForSession(sessionId);
+		return processManagerAdapter.processManager.resize(key, cols, rows);
+	},
+});
+
+// Disconnect GC: when a WS client drops, evict it from every session's
+// subscriber set so the multiplexer doesn't try to send to a closed socket.
+// Idempotent — safe even when the client never called pty_subscribe.
+server.setClientDisconnectHook((clientId) => {
+	rawPtyMultiplexer.unsubscribeAll(clientId);
+});
+
 // ============ Lifecycle ============
 
 async function main() {
@@ -571,6 +689,9 @@ async function main() {
 			'L0d: newTab via sessions store + broadcast, lazy process spawn on first command). ' +
 			'L0f also wires Sentry init for error capture (no-op without MAESTRO_SENTRY_DSN).'
 	);
+	console.log(
+		'[maestro-server] Layer 6.1: raw PTY multiplexer ready (subscribe/publish over WS)'
+	);
 }
 
 main().catch((err) => {
@@ -583,6 +704,11 @@ main().catch((err) => {
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 	process.on(signal, () => {
 		console.log(`[maestro-server] received ${signal}, shutting down`);
+		try {
+			rawPtyMultiplexer.detachProducer();
+		} catch (err) {
+			console.error('[maestro-server] rawPtyMultiplexer.detachProducer() threw', err);
+		}
 		try {
 			processManagerAdapter.shutdown();
 		} catch (err) {

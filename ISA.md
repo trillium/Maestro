@@ -1146,3 +1146,83 @@ Branch `docs-isa-hygiene-cleanup` off `main` at `b82c60841`. Doc-only turn — n
 - **Expected:** matches ISC-42 (line ~130 after this cleanup's ISC-45 append shifts numbering).
 - **ISC-45 placement check:** appended at the end of the "Anti-criteria & guard-rails" subsection, immediately after ISC-21 (the existing antecedent ISC). ISC-44.x is left untouched as the reserved per-feature parity-catalog namespace (see Test Strategy § Per-feature function-parity ISCs).
 - Files modified in this turn: `ISA.md` (ISC-42 line fix + ISC-45 append + 8 reference rewrites + this Decisions entry + this Verification entry) and `PLAN.md` (2 reference rewrites). Exactly the authorized set.
+### 2026-06-08 — Layer 6.1 evidence (RawPtyMultiplexer + pty_* WS protocol — server side)
+
+#### Decisions
+
+- **Additive, not replacement.** The existing stripped-output path (PtySpawner → `stripControlSequences` → DataBufferManager → `data` event → renderer `TerminalOutput.tsx`) stays exactly as before. Desktop renders the same byte-for-byte as it did pre-L6.1. The raw-byte path is a parallel emission from the same `PtySpawner.onData` callback, consumed by a new server-side `RawPtyMultiplexer`. Per scoping doc §1.1 / §6.1 — additive is the answer to the "replace vs both paths" dichotomy. Rationale: the renderer at `src/renderer/components/TerminalOutput.tsx` (1923 LOC) is the largest UI surface in Maestro and lives downstream of the strip; replacing it would break desktop. Additive also keeps search-across-sessions working (parsed output is already strip-clean and indexable; xterm raw bytes are not).
+- **Multiplexer location:** `src/server/raw-pty-multiplexer.ts`, NOT under `src/main/process-manager/handlers/`. Rationale: the multiplexer is a server-side concern (fans bytes to WS clients via the server's BroadcastService). Electron desktop runs the same ProcessManager but never instantiates the multiplexer, so no desktop-side coupling. PtySpawner's emission is unconditional (always emits `raw-pty-data` on `this.emitter`); when no multiplexer is attached, it's one EventEmitter dispatch with zero listeners — sub-microsecond cost.
+- **Budget parameters:** 4 MB soft ring / 8 MB hard ring (drop-oldest with `pty_dropped` marker), 5 ms flush interval / 32 KB threshold for coalesced live broadcast (whichever fires first). Per scoping doc §1.6 + §3.1. Exposed as `RAW_PTY_*` constants so ops can tune without code changes. Memory ceiling at 50 concurrent terminals × 8 MB = 400 MB worst case — acceptable on developer machines, flagged for mini2 hosting.
+- **Encoding (B): base64 over JSON, NOT binary WS frames.** Per scoping doc §6.4 Option B — single-protocol simplicity beats the ~33% wire overhead at L6.1 scale. The token-bucket cap (32 KB / 5 ms) yields ~6.4 MB/s sustained × 1.33 base64 = ~8.5 MB/s wire, comfortably under any LAN link. Binary frames deferred to L6.3 if measured bandwidth on Tailscale shows pressure.
+- **WS protocol additions (six message types per scoping doc §2):**
+  - Client → server: `pty_subscribe { sessionId, lastSeq? }`, `pty_unsubscribe { sessionId }`, `pty_input { sessionId, bytes, encoding }`, `pty_resize { sessionId, cols, rows }`.
+  - Server → client: `pty_data { sessionId, seq, bytes }` (point-to-point per subscriber), `pty_backfill { sessionId, fromSeq, toSeq, bytes, isFinal }` (single-message form — split-message form deferred to L6.3), `pty_dropped { sessionId, droppedBytes, lastSeq }` (ring-rotation marker).
+- **`pty_exit` overload, not new type.** The existing `session_exit` semantics already cover PTY lifecycle exit per scoping doc §2.7. Adding `pty_exit` would duplicate surface — kept the protocol minimal.
+- **Per-subscriber slicing in flush.** A subscriber that registers AFTER some bytes were queued in the per-session pending buffer must not receive those older seqs (would either re-render bytes the subscriber already got via backfill OR receive bytes it never asked for). The flush path slices `pending` per subscriber by `entry.seq > lastSent` before coalescing. Caught during test development — see `does not deliver duplicate live messages for backfilled bytes` in the vitest suite.
+- **Session-id resolution.** PtySpawner keys raw emissions by the underlying process id (e.g. `<sessionId>-terminal`); WS clients send `pty_subscribe` with the bare sessionId. The server wire-up uses `resolveProcessId()` from `src/server/process-manager-adapter.ts` for both directions — client→multiplexer (bare → suffixed) and multiplexer→client (suffix stripped before broadcast). Reuses the L0b suffix-resolution helper so the mapping stays in one place.
+- **Disconnect GC.** When a WS client drops without explicit unsubscribe, `WebServer.setClientDisconnectHook` fires and the server calls `multiplexer.unsubscribeAll(clientId)`. New hook surface on `WebServer` is additive (no breaking change to existing wiring); installed only when L6.1 is in use.
+- **`src/main/` edits are authorized for this brief.** The scoping doc explicitly requires additive emission at the PTY source. Three files under `src/main/` touched:
+  - `src/main/process-manager/spawners/PtySpawner.ts` — one new `this.emitter.emit('raw-pty-data', sessionId, Buffer.from(data, 'utf-8'))` call before the existing `stripControlSequences` branch. Wrapped in try/catch so a misbehaving listener cannot break the stripped path. Listener-less cost: one EventEmitter dispatch + one Buffer.from per chunk. Path otherwise byte-identical to pre-L6.1.
+  - `src/main/web-server/handlers/messageHandlers.ts` — four new switch cases (`pty_subscribe`, `pty_unsubscribe`, `pty_input`, `pty_resize`) with handler methods; new `PtyMessageCallbacks` interface; four optional fields on `MessageHandlerCallbacks` so the Electron desktop server (which doesn't wire L6.1) silently omits them.
+  - `src/main/web-server/services/broadcastService.ts` — three new methods (`broadcastPtyData`, `broadcastPtyDropped`, `broadcastPtyBackfill`) — point-to-point sends keyed by clientId, not session-wide audience. Existing broadcasts unchanged.
+  - `src/main/web-server/WebServer.ts` — three public broadcast methods that delegate to the new BroadcastService surface, `setPtyMessageCallbacks` setter, `setClientDisconnectHook` setter, and a `getConnectedClientIds` helper. Disconnect-hook firing is wired into the existing `onClientDisconnect` / `onClientError` callbacks. All additive — existing setters and broadcasts untouched.
+- **`lastCommand` echo-filter mitigation deferred.** Per scoping doc §8.3, per-keystroke `pty_input` never sets `managedProc.lastCommand`, so the stripped path's command-echo filter silently degrades for xterm-mode sessions. Documented as a TODO in `raw-pty-multiplexer.ts` for L6.2+ scope. Not a regression for desktop or for parsed-mode web clients — only affects the parsed path while a web client is driving the PTY via xterm.
+- **Rebase note.** L0h (HistoryManager port) edits `src/server/index.ts`; if it merges to main before this branch, a minor rebase will be required because L6.1 also edits `src/server/index.ts` (multiplexer wire-up section). The conflict is mechanical — different sections of the same file. Documented here so the rebase doesn't surprise.
+
+#### Files added (new)
+
+- `src/server/raw-pty-multiplexer.ts` (~330 LOC) — `RawPtyMultiplexer` class. Per-session ring buffer, monotonic seq, subscriber set, token-bucket coalesced flush, `RawPtyBroadcaster` interface for WS wire-up, `attachProducer` for EventEmitter binding, `setBroadcaster`, `subscribe` (returns backfill slice + drop count), `unsubscribe`, `unsubscribeAll`, `removeSession`, `getSessionStats`, `getActiveSessionIds`. Constants exported: `RAW_PTY_SOFT_RING_BYTES`, `RAW_PTY_HARD_RING_BYTES`, `RAW_PTY_FLUSH_INTERVAL_MS`, `RAW_PTY_FLUSH_THRESHOLD_BYTES`.
+- `src/server/__tests__/raw-pty-multiplexer.test.ts` (~260 LOC) — 15 vitest tests covering monotonic seq, backfill ordering, ring wraparound at hard cap, drop-with-marker semantics, per-subscriber live filtering, multi-subscriber fanout, `unsubscribeAll`, threshold-triggered flush, EventEmitter producer attach/detach, empty publish no-op, multi-session independence, late-broadcaster wiring, removeSession purge. Threshold-tuned constructor opts (1 KB soft / 2 KB hard / 256 B threshold) so wraparound exercises with tens of bytes rather than MBs.
+
+#### Files edited (additive)
+
+- `src/main/process-manager/spawners/PtySpawner.ts` — `onData` callback now emits `'raw-pty-data'` event with `Buffer.from(data, 'utf-8')` before the existing strip branch. Stripped path unchanged.
+- `src/main/web-server/handlers/messageHandlers.ts` — new `PtyMessageCallbacks` interface; four optional callbacks added to `MessageHandlerCallbacks`; four switch cases + handler methods (`handlePtySubscribe`, `handlePtyUnsubscribe`, `handlePtyInput`, `handlePtyResize`).
+- `src/main/web-server/services/broadcastService.ts` — three new point-to-point broadcast methods.
+- `src/main/web-server/WebServer.ts` — three new `broadcastPty*` delegates, `setPtyMessageCallbacks`, `setClientDisconnectHook`, `getConnectedClientIds`, `fireClientDisconnectHook` (private), and disconnect-hook firing wired into the existing `onClientDisconnect`/`onClientError` callbacks.
+- `src/server/index.ts` — `RawPtyMultiplexer` import + instantiation, `ptyKeyForSession` helper using `resolveProcessId`, `attachProducer` to ProcessManager, `setBroadcaster` shim mapping multiplexer → `WebServer.broadcastPty*`, four `setPtyMessageCallbacks` implementations (subscribe / unsubscribe / input / resize), `setClientDisconnectHook` to drop dead clients from multiplexer subscribers, multiplexer `detachProducer` in SIGINT/SIGTERM shutdown path, and the boot log line `[maestro-server] Layer 6.1: raw PTY multiplexer ready (subscribe/publish over WS)`.
+
+#### Files deferred (NOT touched this brief)
+
+- `src/webFull/components/Terminal.tsx` and supporting renderer wiring — L6.2 scope.
+- Scrollback persistence to disk + replay across server restarts — L6.3 scope (current ring is in-memory only).
+- `src/renderer/components/TerminalOutput.tsx`, `src/main/utils/terminalFilter.ts` — desktop path stays untouched per the reject-bailout rule.
+- `tsconfig.server.json` — no changes needed; existing `src/server/**/*.ts` glob picked up `raw-pty-multiplexer.ts` without modification.
+
+#### Verification — TypeScript compile
+
+- `eval "$(/opt/homebrew/bin/fnm env --shell bash)" && fnm use 22.22.1 && npx tsc -p tsconfig.server.json` → exit 0. Compiled artifacts under `dist/server/`: `raw-pty-multiplexer.js` + `.js.map`, updated `index.js`. No tsc diagnostics anywhere in the L6.1 surface.
+
+#### Verification — vitest suite
+
+- `npx vitest run src/server/__tests__/raw-pty-multiplexer.test.ts` → **15/15 PASS** in 186 ms (650 ms total inc. setup).
+- Suite covers: (1) monotonic seq, (2) backfill ordering, (3) live broadcaster delivery, (4) ring wraparound at hard cap, (5) drop-with-marker on `lastSeq < oldestSeq`, (6) empty backfill on `lastSeq === tail`, (7) per-client unsubscribe, (8) `unsubscribeAll`, (9) threshold-triggered flush, (10) EventEmitter producer wiring, (11) empty publish no-op, (12) `removeSession` purge, (13) per-subscriber slicing prevents duplicate delivery of backfilled bytes, (14) multi-session independence, (15) late-broadcaster wiring.
+
+#### Verification — boot smoke
+
+- `MAESTRO_DATA_DIR=/tmp/maestro-l6.1 MAESTRO_WEB_PORT=45692 node dist/server/index.js` boots cleanly and emits the expected log line ahead of clean SIGTERM shutdown:
+
+```
+[maestro-server] Layer 0f: 10/10 WRITE callbacks active (...)
+[maestro-server] Layer 6.1: raw PTY multiplexer ready (subscribe/publish over WS)
+[maestro-server] received SIGTERM, shutting down
+```
+
+- Shutdown path correctly detaches the producer before tearing down `processManagerAdapter` and the WebServer.
+
+#### Verification — anti-electron import
+
+- `grep -r "from 'electron'" dist/server/; echo "exit=$?"` → exit 1 (no match). The L6.1 surface pulls zero electron dependencies into the compiled server tree. Pattern unchanged from L0f baseline.
+
+#### Verification — scope guards
+
+- `git diff main..HEAD -- src/web/ | wc -c` → `0`.
+- `git diff main..HEAD -- src/renderer/ | wc -c` → `0`.
+- `git diff HEAD -- src/web/ src/renderer/ | wc -c` → `0`.
+- `src/main/` edits are explicitly authorized for this brief (scoping doc requires additive emission at PTY source). Three files touched, all additive: `PtySpawner.ts`, `messageHandlers.ts`, `broadcastService.ts`, `WebServer.ts`. Existing methods, types, and event paths unchanged.
+- `node_modules` symlink (used for build + tests) untracked; not in commit.
+
+#### What this closes / leaves open
+
+- **ISC-13 (PTY survives disconnect):** partial PASS. Ring-buffer scrollback is now live in-memory; backfill on `pty_subscribe { lastSeq }` works (test coverage confirms). Persistence across server restarts is L6.3.
+- **ISC-42 (xterm scope gate):** server-protocol half complete. Client-side renderer (L6.2) and persistence (L6.3) remain.
