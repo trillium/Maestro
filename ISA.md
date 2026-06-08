@@ -5169,3 +5169,5 @@ The rest (`react`, `lucide-react`, `react-markdown`, `rehype-slug`) resolves ide
 - `grep -c 'window\.maestro' src/webFull/hooks/useAutoRunImageHandling.ts` filtered via the same comment-strip → 0 (all 9 remaining hits are inside the docblock).
 
 **Branch.** `leaf-autorun-main`. Commit pending — not pushed per the brief's "no push" rule.
+
+- 2026-06-08 catalog-flaw fix wave C: 1 catalog edit — ThinkingStatusPill `'1.3k'` → `'1.3K'` to match formatTokensCompact's uppercase output.
