@@ -1414,3 +1414,59 @@ Branch `layer-2.3-platform-shim-and-3-lifts` off `main` at `d7bbd4b9f`. The L2.2
 - `git diff main..HEAD -- src/renderer/ | wc -c` → `0`.
 - ISC-44.global.settings_broadcast: flipped `[ ]` → `[x]`; closure text references `Decisions 2026-06-08` Decision entry above.
 - Wire-shape contract: `{type:'settings_changed', changedKeys:string[], newValues:Record<string,unknown>, timestamp:number}`. `changedKeys` equals `Object.keys(newValues)` by construction at the producer (apiRoutes PATCH handler); consumer (useSettings merge) iterates `changedKeys` and skips any key absent from `newValues` so producer bugs don't corrupt the cache (covered by the "ghostKey" negative-path vitest case).
+### 2026-06-08 — Layer 6.3 evidence (disk-backed PTY scrollback + ISC-45 falsification probe)
+
+#### Decisions
+
+- **Disk format: per-session append-only `.log` + fixed-width `.seq` index + JSON `.meta` rotation marker, all under `<dataDir>/pty-scrollback/<sessionId>.{log,seq,meta}`.** The append-only log is the canonical byte stream; the seq index is a 16-byte-per-record file (`seq | offset | length | reserved`, all u32 BE) that lets `subscribe(lastSeq)` find the exact byte range to return without scanning the log. The `.meta` carries the rotation generation's `startSeq` and `startOffset` so a cross-restart subscribe with `lastSeq < startSeq` can report a `droppedBeforeBackfill` marker honestly. Fixed-width records over a varint encoding because the seq index never grows past a few KB per session in practice (one record per publish; coalesced chunks are typically 1-32 KB per record) and O(1) random access matters for future binary-search subscribes.
+- **Additive extension, not method replacement.** Per the brief's reject bailout: `publish()` keeps its existing in-memory ring behavior; disk append is inserted between seq assignment and ring eviction. `subscribe()` keeps its existing in-memory backfill computation; disk read is consulted ONLY when `effectiveLastSeq + 1 < inMemoryOldestSeq` (i.e. the in-memory ring rotated past what the client asked for). The L6.1 public API is unchanged; the new behavior is enabled by passing `dataDir` to the constructor. Default constructor (no `dataDir`) preserves L6.1 in-memory-only semantics, which is why all 15 pre-existing tests continue to pass unchanged.
+- **Synchronous fs writes on the publish path.** `fs.writeSync` to a held-open append-fd, not `fs.appendFileSync` (which re-opens per call). Synchronous over async because (a) a `kill -9` immediately after `publish()` returns must have the bytes durable on disk, and async-with-queue would leak in-flight writes; (b) the producer side is already paced by the L6.1 5 ms coalesce timer, so per-chunk fs syscalls are not on the hot path; (c) the seq index is 16 B per record — a single write — and the log chunk is bounded by the L6.1 coalesce threshold (32 KB), well under any reasonable per-write latency on SSD. Trade-off acknowledged: a slow disk could backpressure the multiplexer's `publish()` call; if profiling on mini2 shows the disk is the bottleneck, an async write queue with a fail-fast-on-overflow policy is the upgrade path.
+- **Rotation policy: keep youngest-half by byte count.** When `.log` exceeds `diskHardCapBytes` (default 8 MB, matching the in-memory hard cap), the rotation walks the seq index backward from the tail and keeps records whose cumulative byte size stays ≤ `diskHardCapBytes / 2`. The remaining records form the new generation; the `.meta` `startSeq` advances to the first surviving record's seq. Half-cap survival (rather than just-fit) leaves room for more publishes before the next rotation, so a steady-state session rotates ~once per `(hardCap / 2) / publish_rate` window instead of on every publish.
+- **Boot-time scan vs. lazy load.** On construction, the multiplexer scans `<dataDir>/pty-scrollback/` once and registers a SessionState for every `<id>.log + <id>.seq` pair found. The in-memory ring stays empty for these "disk-only" sessions — bytes are only read off disk when a client actually subscribes. Cheap because the scan only reads `.meta` + the last 16 B of `.seq` per session (to recover `nextSeq` and `startSeq`); no log bytes are loaded. This bounds boot time at O(sessions × small-constant), not O(total-scrollback).
+- **Two-stage probe: in-process unit + manual end-to-end.** `infra/probe-pty-survival.sh` exercises the persistence layer in isolation (publish marker → simulated SIGKILL via `process.exit(137)` → fresh process subscribes → assert markers present). This is fast (5 s) and runs on any host. The end-to-end mini2 probe (phone Safari → real PTY → `kill -9` server → launchd restart → phone reload) is documented as a manual runbook in `infra/PROBE_ISC45.md`. Two probes because each falsifies a different layer of the claim: the local probe falsifies the disk layer; the mini2 probe falsifies the full integration. Both must pass to close ISC-45. The local probe runs in CI; the mini2 probe runs once manually after deploy.
+
+#### Files added (new)
+
+- `infra/probe-pty-survival.sh` (~140 LOC, executable) — ISC-45 falsification probe (local in-process variant). Bash + a generated Node.js harness. Asserts markers are recovered after `process.exit(137)` simulates SIGKILL. Exits 0 on PASS, 1 on FAIL (preserves dataDir for forensics), 2 on environment error.
+- `infra/PROBE_ISC45.md` (~110 LOC) — manual end-to-end probe runbook for the mini2 variant. Pass criteria, fail modes, on-disk inspection commands, and the relationship to the local probe.
+
+#### Files edited (additive)
+
+- `src/server/raw-pty-multiplexer.ts` — additive extension. Constructor accepts `dataDir?: string` and `diskHardCapBytes?: number`. `publish()` calls a new `appendToDisk()` (synchronous `writeSync` to held-open append fds; updates `.meta` after each publish; rotates if over cap). `subscribe()` calls a new `readDiskScrollback()` when the in-memory ring rotated past the client's `lastSeq`. `removeSession()` calls a new `closeDiskFds()` to release fds (does NOT delete disk files — those are load-bearing for cross-restart). Two new constants exported: `RAW_PTY_DISK_HARD_CAP_BYTES`, plus an internal `SEQ_RECORD_BYTES`. No method renames, no signature changes, no behavioral changes for the L6.1-only path (`dataDir` unset).
+- `src/server/__tests__/raw-pty-multiplexer.test.ts` — 7 new tests appended in a second `describe('… L6.3 disk-backed scrollback', …)` block. Each test creates a temp dataDir via `mkdtempSync` and cleans up in `afterEach`. Covers: disk-append correctness, disk-read on subscribe-after-rotation, seq-index byte-offset alignment, rotation at hard cap, cross-restart survival (the load-bearing test for ISC-45), concurrent publish-subscribe ordering, and boot-time scan of pre-existing scrollback. The 15 L6.1 tests continue to pass unchanged.
+- `src/server/index.ts` — two-line change. Constructor call now `new RawPtyMultiplexer({ dataDir })` (was no-arg), and the boot log line now mentions "Layer 6.3 … disk-backed scrollback (data dir: …)" so an operator inspecting `journalctl` / `log show` output can confirm the persistence is wired.
+
+#### Files NOT touched (scope discipline)
+
+- `src/main/`, `src/web/`, `src/renderer/`, `src/webFull/` — all forbidden per the brief. Working-tree `git diff HEAD -- <forbidden>` returns 0 bytes for all four. The non-zero `git diff main..HEAD -- src/main/` count is pre-existing L6.1 / L6.2 / earlier-layer commits that landed on this branch's base, not L6.3 work.
+- `node_modules` — symlinked from the main checkout during build/test only; removed before commit.
+
+#### Verification — build
+
+- `eval "$(/opt/homebrew/bin/fnm env --shell bash)" && fnm use 22.22.1 && npx tsc -p tsconfig.server.json` → exit 0, no diagnostics.
+
+#### Verification — tests
+
+- `npx vitest run src/server/__tests__/raw-pty-multiplexer.test.ts` → **22/22 PASS** in 259 ms (15 L6.1 + 7 L6.3). 7 new L6.3 tests: `publish writes append-only log and seq index to disk`, `subscribe with fromSeq older than in-memory ring reads from disk`, `seq index byte offsets line up with the log file across appends`, `rotates disk log when it exceeds the hard cap`, `cross-restart survival — fresh multiplexer with same dataDir reads pre-existing scrollback`, `concurrent publish + subscribe ordering preserves seq monotonicity`, `scans pty-scrollback/ on construction and registers disk-only sessions`.
+
+#### Verification — boot smoke
+
+- `MAESTRO_DATA_DIR=/tmp/maestro-l6.3 MAESTRO_WEB_PORT=45696 node dist/server/index.js` produces the boot line: `[maestro-server] Layer 6.3: raw PTY multiplexer ready with disk-backed scrollback (data dir: /tmp/maestro-l6.3/pty-scrollback)`. Server bound to port 45696 (`Server listening at http://0.0.0.0:45696`); shutdown via SIGTERM clean.
+
+#### Verification — falsification probe (the ISC-45 gate)
+
+- `bash infra/probe-pty-survival.sh` → exit 0. Phase A producer publishes marker bytes and exits with code 137 (simulated SIGKILL). On-disk artifacts (`probe-session.log` 161 B, `probe-session.seq` 48 B, `probe-session.meta` 30 B) all present. Phase B consumer (fresh Node process, same dataDir, no overlapping state with Phase A) reads back exactly 161 B containing all three markers (BEGIN, middle-payload, END). Output: `[probe] PASS — scrollback survived kill -9 + restart`.
+
+#### Verification — scope guards (working tree only; main..HEAD shows prior layers' commits)
+
+- `git diff HEAD -- src/main/ | wc -c` → `0`.
+- `git diff HEAD -- src/web/ | wc -c` → `0`.
+- `git diff HEAD -- src/renderer/ | wc -c` → `0`.
+- `git diff HEAD -- src/webFull/ | wc -c` → `0`.
+- `git diff HEAD --name-only` → exactly `src/server/__tests__/raw-pty-multiplexer.test.ts`, `src/server/index.ts`, `src/server/raw-pty-multiplexer.ts` (plus new files under `infra/` and this ISA append).
+
+#### What this closes / leaves open
+
+- **ISC-13 (PTY survives disconnect):** closure conditional. The on-disk format is correct (local probe PASS), so the unit-level claim is verified. End-to-end re-attach on the mini2 deploy requires the WS path to also use the persisted `lastSeq` (L6.2 client-side already does; L6.1 server-side `pty_subscribe` already routes through the multiplexer). Closure pending the manual mini2 probe per `infra/PROBE_ISC45.md`.
+- **ISC-45 (falsification probe):** local-layer falsification: NOT TRIGGERED. The persistence layer round-trips scrollback across a simulated SIGKILL exactly as required. Full closure also pending the manual mini2 probe; if that probe passes ISC-45 closes; if it fails, the failure is in the integration path (WS dispatch, session-id resolution, or client-side `lastSeq` persistence) — the disk layer is sound. Both probes share the same disk format so a passing local probe + failing mini2 probe localizes the bug cleanly.
+- **L6.3 remaining work (out of scope for this brief, tracked for follow-on):** fsync on rotation (currently a fire-and-forget write; under power loss a rotation could leave the `.log`+`.seq` mid-update — the `.meta` write is atomic via `writeFileSync` but the surrounding files aren't). gzip compression on rotated files. Per-session retention configurability (currently one global `diskHardCapBytes`). These are polish items, not gate-blockers.
