@@ -89,3 +89,4 @@ export type {
 export { FirstRunCelebration } from './FirstRunCelebration';
 export { GroupChatMessages } from './GroupChatMessages';
 export type { GroupChatMessagesHandle } from './GroupChatMessages';
+export { ThemePicker } from './ThemePicker';
