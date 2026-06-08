@@ -48,9 +48,16 @@ const VERBS_REQUIRING_BACKEND = new Set([
 function isAbsenceSelector(selector: string): boolean {
 	// Stories assert "element should NOT be present" by targeting either:
 	//   `body:not(:has(<inner>))`   (no inner anywhere in body)
+	//   `body:not(:has-text("X"))`  (no element with text X anywhere)
 	// or `<a>, body:not(:has(<a>))` (presence-OR-absence guard).
 	// The first form is a strict absence; the second is satisfied by either.
-	return selector.includes(':not(:has(');
+	// Surfaced by the batch-1 adoption wave (ThemePicker / CsvTableRenderer
+	// catalogs use `:not(:has-text(...))` for absence assertions; the
+	// previous `:not(:has(` substring check missed those and routed them
+	// to the visibility branch, which then failed because the selector
+	// matches an ancestor that may itself be invisible by Playwright's
+	// strict heuristics).
+	return selector.includes(':not(:has(') || selector.includes(':not(:has-text(');
 }
 
 async function assertHasElement(page: Page, storyName: string, target: string): Promise<void> {
@@ -59,19 +66,41 @@ async function assertHasElement(page: Page, storyName: string, target: string): 
 	if (isAbsenceSelector(target)) {
 		// Absence selectors are evaluated against the document; existence is
 		// the assertion's meaning ("there is a body matching this not-has
-		// selector"). expect().toHaveCount(>=1) suits this.
-		await expect(
-			locator,
-			`[${storyName}] expected absence-selector to match (target=${target})`
-		).toHaveCount(1, { timeout: 2000 });
+		// selector"). The exact match COUNT is not load-bearing — the
+		// harness's outer wrappers (`<body>`, `<div id="root">`, the
+		// component's own outer `<div>`) all qualify as ancestors that
+		// satisfy `div:not(:has(<inner>))`-shape selectors, so insisting on
+		// `toHaveCount(1)` produces false negatives whenever the harness has
+		// more than one ancestor matching the outer-tag. We assert
+		// "at least one match" instead, mirroring the catalog's semantic
+		// intent ("there exists a body matching this not-has selector").
+		// Surfaced by the batch-1 adoption wave (ToggleButtonGroup +
+		// WelcomeContent stories returning N>1 against the harness's
+		// nested div wrappers); see batch-1 commit body.
+		await expect
+			.poll(async () => await locator.count(), {
+				message: `[${storyName}] expected absence-selector to match at least once (target=${target})`,
+				timeout: 2000,
+			})
+			.toBeGreaterThanOrEqual(1);
 		return;
 	}
+	// `hasElement` is semantically "element exists in the DOM at the given
+	// selector" — NOT "element is currently visible to the user". Use
+	// `toBeAttached` so that legitimately-attached but-not-visually-
+	// rendered nodes pass (e.g. `<option>` / `<optgroup>` inside a
+	// `<select>` are part of the document but hidden until the dropdown
+	// opens; Tailwind utility-class-only empty `<span>`s render at 0×0;
+	// the catalog vocabulary's `hasText` verb is the right primitive for
+	// "this text is visible to the user"). Surfaced by the batch-1
+	// adoption wave (FontConfigurationPanel's `optgroup` / `option`
+	// assertions all reported "hidden"). The inside-root sanity check
+	// uses the same `toBeAttached` for consistency.
 	await expect(
 		locator.first(),
-		`[${storyName}] expected target to be visible (target=${target})`
-	).toBeVisible({ timeout: 2000 });
-	// Sanity: target must live inside the harness root (not outside the mount).
-	await expect(root.locator(target).first()).toBeVisible();
+		`[${storyName}] expected target to be attached (target=${target})`
+	).toBeAttached({ timeout: 2000 });
+	await expect(root.locator(target).first()).toBeAttached();
 }
 
 async function assertHasText(
