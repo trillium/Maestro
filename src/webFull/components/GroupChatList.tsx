@@ -76,7 +76,7 @@ import {
 } from 'lucide-react';
 import type { Theme } from '../../shared/theme-types';
 import type { GroupChat, GroupChatState } from '../../shared/group-chat-types';
-import { useClickOutside } from '../../renderer/hooks/ui/useClickOutside';
+import { useClickOutside } from '../../shared/hooks/useClickOutside';
 import { useContextMenuPosition } from '../../renderer/hooks/ui/useContextMenuPosition';
 import { getStatusColor } from '../../renderer/utils/theme';
 

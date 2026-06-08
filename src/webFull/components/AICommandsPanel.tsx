@@ -96,7 +96,7 @@ import {
 import type { Theme } from '../../shared/theme-types';
 import type { CustomAICommand } from '../../renderer/types';
 import { TEMPLATE_VARIABLES_GENERAL } from '../../renderer/utils/templateVariables';
-import { useTemplateAutocomplete } from '../../renderer/hooks/input/useTemplateAutocomplete';
+import { useTemplateAutocomplete } from '../../shared/hooks/useTemplateAutocomplete';
 import { TemplateAutocompleteDropdown } from './TemplateAutocompleteDropdown';
 
 interface AICommandsPanelProps {

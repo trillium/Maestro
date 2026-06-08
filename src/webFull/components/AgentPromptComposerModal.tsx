@@ -72,7 +72,7 @@ import type { Theme } from '../../shared/theme-types';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { TEMPLATE_VARIABLES } from '../../shared/templateVariables';
-import { useTemplateAutocomplete } from '../../renderer/hooks/input/useTemplateAutocomplete';
+import { useTemplateAutocomplete } from '../../shared/hooks/useTemplateAutocomplete';
 import { TemplateAutocompleteDropdown } from './TemplateAutocompleteDropdown';
 import { estimateTokenCount } from '../../shared/formatters';
 
