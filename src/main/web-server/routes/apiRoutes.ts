@@ -510,6 +510,18 @@ export interface AutorunProvider {
 	 * so the route layer surfaces a 500.
 	 */
 	deleteImage: (folderPath: string, relativePath: string) => Promise<{ removed: boolean }>;
+	/**
+	 * Delete the entire AutoRun Docs folder (recursively) — backs the wizard
+	 * "start fresh" / ExistingDocsModal flow. The route pre-validates that
+	 * the folder basename is `'Auto Run Docs'` so this method cannot be used
+	 * to recursively delete arbitrary directories; the manager re-enforces
+	 * the same rule belt-and-suspenders. Returns `{ removed: true }` when the
+	 * folder was present and deleted; `{ removed: false }` when the folder
+	 * was already absent (ENOENT) so the wizard tolerates repeated calls.
+	 * Other failures (permission, not-a-directory) throw so the route layer
+	 * surfaces a 500.
+	 */
+	deleteFolder: (folderPath: string) => Promise<{ removed: boolean }>;
 }
 
 let autorunProvider: AutorunProvider | null = null;
@@ -2828,6 +2840,110 @@ export class ApiRoutes {
 					return reply.code(500).send({
 						error: 'Internal Server Error',
 						message: `Failed to delete image: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// DELETE /api/autorun/delete-folder — mirrors the renderer-side
+		// `autorun:deleteFolder` IPC handler (`src/main/ipc/handlers/autorun.ts`
+		// :754-797). Backs the Wizard "start fresh" / ExistingDocsModal flow
+		// (lift Phase 2, the 4th component skipped pending this route).
+		//
+		// Body: `{ folder: string }` — absolute path to an `Auto Run Docs`
+		// folder. Reply: `{ removed: boolean, timestamp }` (`removed: true`
+		// when deleted, `false` when already absent so the modal can call
+		// idempotently).
+		//
+		// Validation matches delete-image:
+		//   1. `validateFsPath()` on the folder string (absolute, no NUL, no `..`).
+		//   2. Hard basename check: `path.basename(folder) === 'Auto Run Docs'`.
+		//      The IPC handler at autorun.ts:786-789 does the same check; we
+		//      inline the literal here rather than import the renderer-side
+		//      `AUTO_RUN_FOLDER_NAME` constant for the same reason
+		//      `validateFsPath()` is inlined — the routes module deliberately
+		//      avoids depending on `src/renderer/` or `src/server/`. The
+		//      literal MUST stay in sync with the renderer-side
+		//      `AUTO_RUN_FOLDER_NAME` at
+		//      `src/renderer/utils/existingDocsDetector.ts:11` and the IPC
+		//      handler at `src/main/ipc/handlers/autorun.ts:786`.
+		//
+		// SSH remote support is out of scope (matches the delete-image
+		// posture); `sshRemoteId` returns 501.
+		//
+		// Accepts inputs from EITHER body or query string for the same
+		// reason as delete-image — some HTTP clients can't easily send a
+		// DELETE body.
+		server.delete(
+			`/${token}/api/autorun/delete-folder`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.maxPost,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getAutorunProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Autorun provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const body =
+					(request.body as
+						| {
+								folder?: unknown;
+								sshRemoteId?: unknown;
+						  }
+						| undefined) ?? {};
+				const query = request.query as {
+					folder?: string;
+					sshRemoteId?: string;
+				};
+				const folder = typeof body.folder === 'string' ? body.folder : query.folder;
+				const sshRemoteId =
+					typeof body.sshRemoteId === 'string' ? body.sshRemoteId : query.sshRemoteId;
+				if (sshRemoteId) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side autorun routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const folderReason = validateFsPath(folder);
+				if (folderReason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: `folder: ${folderReason}`,
+						timestamp: Date.now(),
+					});
+				}
+				// Safety check: only allow deletion of folders named
+				// `Auto Run Docs`. Mirrors the IPC handler at
+				// `src/main/ipc/handlers/autorun.ts:786-789`.
+				if (path.basename(folder as string) !== 'Auto Run Docs') {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: `folder: basename must be 'Auto Run Docs'`,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.deleteFolder(folder as string);
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to delete folder: ${error.message}`,
 						timestamp: Date.now(),
 					});
 				}

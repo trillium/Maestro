@@ -20,6 +20,8 @@ import {
 	type RateLimitConfig,
 	registerProcessesProvider,
 	type ProcessesProvider,
+	registerAutorunProvider,
+	type AutorunProvider,
 } from '../../../../main/web-server/routes/apiRoutes';
 
 // Mock the logger
@@ -772,6 +774,86 @@ describe('ApiRoutes', () => {
 						message: expect.stringContaining('lookup failure'),
 					})
 				);
+			});
+		});
+	});
+
+	// ============ Autorun routes (delete-folder) ============
+	//
+	// Server-side companion to the renderer-side `autorun:deleteFolder` IPC
+	// (`src/main/ipc/handlers/autorun.ts:754-797`). Backs the Wizard "start
+	// fresh" / ExistingDocsModal flow. We test the route handler in isolation
+	// by registering a mocked AutorunProvider — the provider's deleteFolder
+	// success path returns `{ removed: true }`, and the basename-mismatch
+	// failure path is enforced at the route layer (400 before the provider is
+	// invoked).
+	describe('Autorun routes', () => {
+		afterEach(() => {
+			// Always clear so a later test doesn't inherit a stale provider.
+			registerAutorunProvider(null);
+		});
+
+		const makeProvider = (overrides: Partial<AutorunProvider> = {}): AutorunProvider => ({
+			listImages: vi.fn().mockResolvedValue({ images: [] }),
+			saveImage: vi.fn().mockResolvedValue({ filename: '', relativePath: '' }),
+			deleteImage: vi.fn().mockResolvedValue({ removed: true }),
+			deleteFolder: vi.fn().mockResolvedValue({ removed: true }),
+			...overrides,
+		});
+
+		describe('DELETE /api/autorun/delete-folder', () => {
+			it('should register the route with the security token prefix', () => {
+				expect(mockFastify.routes.has(`DELETE:/${securityToken}/api/autorun/delete-folder`)).toBe(
+					true
+				);
+			});
+
+			it('should delete the folder and return { removed: true } on success', async () => {
+				const deleteFolder = vi.fn().mockResolvedValue({ removed: true });
+				const provider = makeProvider({ deleteFolder });
+				registerAutorunProvider(provider);
+
+				const route = mockFastify.getRoute('DELETE', `/${securityToken}/api/autorun/delete-folder`);
+				const reply = createMockReply();
+				const result = await route!.handler(
+					{
+						body: { folder: '/tmp/some-project/Auto Run Docs' },
+						query: {},
+					},
+					reply
+				);
+
+				expect(deleteFolder).toHaveBeenCalledWith('/tmp/some-project/Auto Run Docs');
+				expect(result.removed).toBe(true);
+				expect(result.timestamp).toBeDefined();
+				// No error reply was sent — 200 path returns the result directly.
+				expect(reply.code).not.toHaveBeenCalled();
+			});
+
+			it('should return 400 when the folder basename is not `Auto Run Docs`', async () => {
+				const deleteFolder = vi.fn();
+				const provider = makeProvider({ deleteFolder });
+				registerAutorunProvider(provider);
+
+				const route = mockFastify.getRoute('DELETE', `/${securityToken}/api/autorun/delete-folder`);
+				const reply = createMockReply();
+				await route!.handler(
+					{
+						body: { folder: '/tmp/some-project/Other Folder' },
+						query: {},
+					},
+					reply
+				);
+
+				expect(reply.code).toHaveBeenCalledWith(400);
+				expect(reply.send).toHaveBeenCalledWith(
+					expect.objectContaining({
+						error: 'Bad Request',
+						message: expect.stringContaining("basename must be 'Auto Run Docs'"),
+					})
+				);
+				// Provider must NOT be invoked when the safety check fails.
+				expect(deleteFolder).not.toHaveBeenCalled();
 			});
 		});
 	});
