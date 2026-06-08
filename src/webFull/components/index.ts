@@ -362,3 +362,57 @@ export type {
 
 export { WizardConversationView } from './InlineWizard/WizardConversationView';
 export type { WizardConversationViewProps } from './InlineWizard/WizardConversationView';
+
+// ============================================================================
+// Wizard Phase 3A — WizardContext + conversationManager (engine files)
+// ----------------------------------------------------------------------------
+// Lifted from `src/renderer/components/Wizard/{WizardContext.tsx,services/
+// conversationManager.ts}` per WIZARD_LIFT_PLAN.md Phase 3A.
+//
+// WizardContext: 6 settings IPC sites replaced with settingsStoreWebFull.
+// conversationManager: 7 IPC + process.spawn replaced with the WS process-
+// lifecycle client (`src/webFull/services/processLifecycle.webfull.ts`),
+// plus 1 host-injected agent resolver (REST route `/api/agents/get/:id` does
+// not yet exist — stubbed via `setAgentResolver()` with a one-time warn).
+// `wizardDebugLogger` was extracted from `phaseGenerator.ts` into its own
+// Phase-1 leaf per plan §368 to avoid forcing a same-PR `phaseGenerator`
+// rewrite.
+// ============================================================================
+export {
+	WizardProvider,
+	useWizard,
+	STEP_INDEX,
+	INDEX_TO_STEP,
+	WIZARD_TOTAL_STEPS,
+} from './Wizard/contexts/WizardContext';
+export type {
+	WizardStep,
+	WizardMessage,
+	GeneratedDocument,
+	WizardState,
+	SerializableWizardState,
+	WizardContextAPI,
+} from './Wizard/contexts/WizardContext';
+
+export {
+	conversationManager,
+	createUserMessage,
+	createAssistantMessage,
+	shouldAutoProceed,
+	convertWizardMessagesToLogEntries,
+	createProjectDiscoveryLogs,
+	setProcessLifecycleClient as setWizardProcessLifecycleClient,
+	setAgentResolver as setWizardAgentResolver,
+	PROJECT_DISCOVERY_TAB_NAME,
+} from './Wizard/services/conversationManager';
+export type {
+	ConversationConfig,
+	ConversationCallbacks,
+	SendMessageResult,
+	OutputChunkCallback,
+	WizardAgentInfo,
+	AgentResolver,
+} from './Wizard/services/conversationManager';
+
+export { wizardDebugLogger } from './Wizard/services/wizardDebugLogger';
+export type { WizardDebugLogEntry } from './Wizard/services/wizardDebugLogger';
