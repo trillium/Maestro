@@ -212,3 +212,46 @@ export type { RemotePathValidate, RemotePathValidateResult } from './NewInstance
 // `./Settings/SettingsModal` path.
 export { SettingsModal } from './Settings/SettingsModal';
 export type { SettingsModalProps, SettingsTabId } from './Settings/SettingsModal';
+
+// ============================================================================
+// UsageDashboard Phase-1 leaf wave — 0-IPC presentational components
+// ============================================================================
+//
+// Lifted from src/renderer/components/UsageDashboard/ as the first wave of the
+// Usage Dashboard lift (catalog: USAGE_DASHBOARD_LIFT_PLAN.md). All exports
+// here are pure presentational components with zero IPC dependencies — they
+// consume `Theme` + `StatsAggregation` props from a parent and render SVG /
+// HTML only. The orchestrator (`UsageDashboardModal`) and engine hook
+// (`useStats`) land in later phases together with their REST + WS routes.
+//
+// Tier A (zero-dep leaves):
+//   - EmptyState
+//   - ChartErrorBoundary  (logger swap: renderer's IPC `logger` → `webLogger`)
+//   - ChartSkeletons      (Theme path swap only)
+//
+// Tier B (depends on Tier A + colorblindPalettes):
+//   - ActivityHeatmap, AgentUsageChart, AgentComparisonChart,
+//     DurationTrendsChart, SourceDistributionChart
+//
+// Transitively lifted alongside this wave:
+//   - src/webFull/constants/colorblindPalettes.ts (verbatim from renderer)
+//   - src/webFull/components/UsageDashboard/types.ts
+//     (extracts `StatsTimeRange` + `StatsAggregation` from the renderer's
+//     `useStats` hook so charts can land ahead of the engine hook)
+export { EmptyState as UsageDashboardEmptyState } from './UsageDashboard/EmptyState';
+export { ChartErrorBoundary } from './UsageDashboard/ChartErrorBoundary';
+export {
+	SummaryCardsSkeleton,
+	AgentComparisonChartSkeleton,
+	SourceDistributionChartSkeleton,
+	ActivityHeatmapSkeleton,
+	DurationTrendsChartSkeleton,
+	AutoRunStatsSkeleton,
+	DashboardSkeleton,
+} from './UsageDashboard/ChartSkeletons';
+export { ActivityHeatmap } from './UsageDashboard/ActivityHeatmap';
+export { AgentUsageChart } from './UsageDashboard/AgentUsageChart';
+export { AgentComparisonChart } from './UsageDashboard/AgentComparisonChart';
+export { DurationTrendsChart } from './UsageDashboard/DurationTrendsChart';
+export { SourceDistributionChart } from './UsageDashboard/SourceDistributionChart';
+export type { StatsTimeRange, StatsAggregation } from './UsageDashboard/types';
