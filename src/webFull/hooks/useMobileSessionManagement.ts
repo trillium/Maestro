@@ -51,10 +51,44 @@ export interface LogEntry {
 }
 
 /**
- * Session logs state structure
+ * Sentinel bucket key for AI log entries that arrive WITHOUT a `tabId`.
+ *
+ * Origins for tab-less entries:
+ *   - In-flight `session_output` frames from a pre-bucketing server build
+ *     (back-compat for rolling deploys where the server hasn't been updated
+ *     yet — see `src/main/process-listeners/data-listener.ts`, which already
+ *     emits `tabId` but historically did not).
+ *   - User-input frames (`type: 'user_input'`) that carry only `sessionId` +
+ *     `inputMode` — the desktop doesn't track which tab a user-typed command
+ *     belongs to in that frame.
+ *   - Locally added user log entries via `addUserLogEntry()` invoked outside
+ *     a tab-aware code path (e.g. before any tab is selected).
+ *
+ * Entries in this bucket are surfaced as part of the active tab's logs (via
+ * the derived `aiLogs` view) so they remain visible during the back-compat
+ * window. New code SHOULD always tag with the current `activeTabId`.
+ */
+export const AI_LOGS_NO_TAB_BUCKET = '__notab__';
+
+/**
+ * Session logs state structure.
+ *
+ * `aiLogs` is the LEGACY flat view kept for back-compat with consumers that
+ * read AI logs at the session level (e.g. `inputMode === 'ai' ? aiLogs : shellLogs`
+ * in `App.tsx`). It is derived from `aiLogsByTab` at update time and reflects
+ * the union of (a) the currently-active tab's bucket and (b) the no-tab
+ * fallback bucket (`AI_LOGS_NO_TAB_BUCKET`).
+ *
+ * `aiLogsByTab` is the per-tab source of truth. The TerminalOutput adapter in
+ * `App.tsx` reads from this map to populate each `aiTab.logs[]` independently
+ * so multi-tab sessions show the correct conversation per tab.
+ *
+ * `shellLogs` stays session-level — shell output is not multiplexed across
+ * tabs (every session has at most one shell channel).
  */
 export interface SessionLogsState {
 	aiLogs: LogEntry[];
+	aiLogsByTab: Record<string, LogEntry[]>;
 	shellLogs: LogEntry[];
 }
 
@@ -213,6 +247,7 @@ export function useMobileSessionManagement(
 	// Session logs state
 	const [sessionLogs, setSessionLogs] = useState<SessionLogsState>({
 		aiLogs: [],
+		aiLogsByTab: {},
 		shellLogs: [],
 	});
 	const [isLoadingLogs, setIsLoadingLogs] = useState(false);
@@ -253,7 +288,7 @@ export function useMobileSessionManagement(
 	// Fetch session logs when active session or active tab changes
 	useEffect(() => {
 		if (!activeSessionId || isOffline) {
-			setSessionLogs({ aiLogs: [], shellLogs: [] });
+			setSessionLogs({ aiLogs: [], aiLogsByTab: {}, shellLogs: [] });
 			return;
 		}
 
@@ -267,15 +302,42 @@ export function useMobileSessionManagement(
 				if (response.ok) {
 					const data = await response.json();
 					const session = data.session;
-					setSessionLogs({
-						aiLogs: session?.aiLogs || [],
-						shellLogs: session?.shellLogs || [],
+					const fetchedAiLogs: LogEntry[] = session?.aiLogs || [];
+					// The REST `/api/session/:id?tabId=<tab>` route filters logs to
+					// the requested tab server-side (see
+					// `server.setGetSessionDetailCallback` in src/server/index.ts:567
+					// and the analogous web-server-factory branch). Bucket the
+					// returned logs into THIS tab's slot so per-tab multiplexing
+					// stays consistent even on tab switches.
+					//
+					// Merge into the existing bucket map rather than overwriting:
+					// preserves other tabs' streaming state. We replace only the
+					// fetched tab's bucket (or `AI_LOGS_NO_TAB_BUCKET` if the
+					// session has no tab tracking yet — single-tab legacy case).
+					const bucketKey =
+						(session?.activeTabId as string | undefined) ?? activeTabId ?? AI_LOGS_NO_TAB_BUCKET;
+					setSessionLogs((prev) => {
+						const nextByTab = { ...prev.aiLogsByTab, [bucketKey]: fetchedAiLogs };
+						// Derived flat view: the fetched tab's logs followed by
+						// any pending no-tab fallback entries (only when the
+						// fetched tab IS the active tab — which it is here, since
+						// this fetch is triggered by the active tab changing).
+						const nextFlat =
+							bucketKey === AI_LOGS_NO_TAB_BUCKET
+								? fetchedAiLogs
+								: [...fetchedAiLogs, ...(nextByTab[AI_LOGS_NO_TAB_BUCKET] ?? [])];
+						return {
+							aiLogs: nextFlat,
+							aiLogsByTab: nextByTab,
+							shellLogs: session?.shellLogs || [],
+						};
 					});
 					webLogger.debug('Fetched session logs:', 'Mobile', {
-						aiLogs: session?.aiLogs?.length || 0,
+						aiLogs: fetchedAiLogs.length,
 						shellLogs: session?.shellLogs?.length || 0,
 						requestedTabId: activeTabId,
 						returnedTabId: session?.activeTabId,
+						bucketKey,
 					});
 				}
 			} catch (err) {
@@ -410,7 +472,12 @@ export function useMobileSessionManagement(
 		[sendRef, setSessions]
 	);
 
-	// Add a user input log entry to session logs
+	// Add a user input log entry to session logs.
+	// For AI mode: appends to the active tab's bucket in `aiLogsByTab` AND
+	// keeps the flat `aiLogs` view in sync (back-compat). When `activeTabId`
+	// is null (no tab selected yet — single-tab legacy session pre-tab-creation),
+	// the entry is appended to the `AI_LOGS_NO_TAB_BUCKET` fallback so it
+	// remains visible on whichever tab becomes active first.
 	const addUserLogEntry = useCallback((text: string, inputMode: 'ai' | 'terminal') => {
 		const userLogEntry: LogEntry = {
 			id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -419,8 +486,21 @@ export function useMobileSessionManagement(
 			source: 'user',
 		};
 		setSessionLogs((prev) => {
-			const logKey = inputMode === 'ai' ? 'aiLogs' : 'shellLogs';
-			return { ...prev, [logKey]: [...prev[logKey], userLogEntry] };
+			if (inputMode === 'terminal') {
+				return { ...prev, shellLogs: [...prev.shellLogs, userLogEntry] };
+			}
+			const bucketKey = activeTabIdRef.current ?? AI_LOGS_NO_TAB_BUCKET;
+			const existingBucket = prev.aiLogsByTab[bucketKey] ?? [];
+			const updatedBucket = [...existingBucket, userLogEntry];
+			const nextByTab = { ...prev.aiLogsByTab, [bucketKey]: updatedBucket };
+			// Flat view = active tab's bucket ∪ no-tab fallback (for back-compat
+			// consumers reading `sessionLogs.aiLogs` directly).
+			const activeKey = activeTabIdRef.current ?? AI_LOGS_NO_TAB_BUCKET;
+			const nextFlat =
+				activeKey === AI_LOGS_NO_TAB_BUCKET
+					? (nextByTab[AI_LOGS_NO_TAB_BUCKET] ?? [])
+					: [...(nextByTab[activeKey] ?? []), ...(nextByTab[AI_LOGS_NO_TAB_BUCKET] ?? [])];
+			return { ...prev, aiLogs: nextFlat, aiLogsByTab: nextByTab };
 		});
 	}, []);
 
@@ -529,7 +609,8 @@ export function useMobileSessionManagement(
 				source: 'ai' | 'terminal',
 				tabId?: string
 			) => {
-				// Real-time output from AI or terminal - append to session logs
+				// Real-time output from AI or terminal — bucket into per-tab AI
+				// logs (or session-level shell logs).
 				const currentActiveId = activeSessionIdRef.current;
 				const currentActiveTabId = activeTabIdRef.current;
 				webLogger.debug(`Session output: ${sessionId} (${source}) ${data.length} chars`, 'Mobile');
@@ -542,7 +623,10 @@ export function useMobileSessionManagement(
 					dataLen: data?.length || 0,
 				});
 
-				// Only update if this is the active session
+				// Only update if this is the active session.
+				// (Future enhancement: bucket cross-session output too, so
+				// background sessions accumulate scrollback. For now matches the
+				// pre-bucketing behavior: only mutate the active session's state.)
 				if (currentActiveId !== sessionId) {
 					webLogger.debug('Skipping output - not active session', 'Mobile', {
 						sessionId,
@@ -551,54 +635,79 @@ export function useMobileSessionManagement(
 					return;
 				}
 
-				// For AI output with tabId, only update if this is the active tab
-				// This prevents output from newly created tabs appearing in the wrong tab's logs
-				if (source === 'ai' && tabId && currentActiveTabId && tabId !== currentActiveTabId) {
-					webLogger.debug('Skipping output - not active tab', 'Mobile', {
-						sessionId,
-						outputTabId: tabId,
-						activeTabId: currentActiveTabId,
-					});
-					return;
-				}
-
 				setSessionLogs((prev) => {
-					const logKey = source === 'ai' ? 'aiLogs' : 'shellLogs';
-					const existingLogs = prev[logKey];
-
-					// Check if the last entry is a streaming entry we should append to
-					const lastLog = existingLogs[existingLogs.length - 1];
-					const isStreamingAppend =
-						lastLog && lastLog.source === 'stdout' && Date.now() - lastLog.timestamp < 5000; // Within 5 seconds
-
-					if (isStreamingAppend) {
-						// Append to existing entry
-						const updatedLogs = [...existingLogs];
-						updatedLogs[updatedLogs.length - 1] = {
-							...lastLog,
-							text: lastLog.text + data,
-						};
-						webLogger.debug('Appended to existing log entry', 'Mobile', {
-							sessionId,
-							source,
-							newLength: updatedLogs[updatedLogs.length - 1].text.length,
-						});
-						return { ...prev, [logKey]: updatedLogs };
-					} else {
-						// Create new entry
+					if (source === 'terminal') {
+						const existingLogs = prev.shellLogs;
+						const lastLog = existingLogs[existingLogs.length - 1];
+						const isStreamingAppend =
+							lastLog && lastLog.source === 'stdout' && Date.now() - lastLog.timestamp < 5000;
+						if (isStreamingAppend) {
+							const updatedLogs = [...existingLogs];
+							updatedLogs[updatedLogs.length - 1] = {
+								...lastLog,
+								text: lastLog.text + data,
+							};
+							return { ...prev, shellLogs: updatedLogs };
+						}
 						const newEntry: LogEntry = {
 							id: `stream-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
 							timestamp: Date.now(),
 							source: 'stdout',
 							text: data,
 						};
+						return { ...prev, shellLogs: [...existingLogs, newEntry] };
+					}
+
+					// AI source — bucket by tabId. Frames without a `tabId`
+					// (back-compat for older server builds in-flight during a
+					// rolling deploy) land in the no-tab fallback bucket and are
+					// surfaced via the active tab's derived view.
+					const bucketKey = tabId ?? AI_LOGS_NO_TAB_BUCKET;
+					const existingBucket = prev.aiLogsByTab[bucketKey] ?? [];
+					const lastLog = existingBucket[existingBucket.length - 1];
+					const isStreamingAppend =
+						lastLog && lastLog.source === 'stdout' && Date.now() - lastLog.timestamp < 5000;
+
+					let updatedBucket: LogEntry[];
+					if (isStreamingAppend) {
+						updatedBucket = [...existingBucket];
+						updatedBucket[updatedBucket.length - 1] = {
+							...lastLog,
+							text: lastLog.text + data,
+						};
+						webLogger.debug('Appended to existing log entry', 'Mobile', {
+							sessionId,
+							source,
+							bucketKey,
+							newLength: updatedBucket[updatedBucket.length - 1].text.length,
+						});
+					} else {
+						const newEntry: LogEntry = {
+							id: `stream-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+							timestamp: Date.now(),
+							source: 'stdout',
+							text: data,
+						};
+						updatedBucket = [...existingBucket, newEntry];
 						webLogger.debug('Created new log entry', 'Mobile', {
 							sessionId,
 							source,
+							bucketKey,
 							dataLength: data.length,
 						});
-						return { ...prev, [logKey]: [...existingLogs, newEntry] };
 					}
+
+					const nextByTab = { ...prev.aiLogsByTab, [bucketKey]: updatedBucket };
+					// Recompute the flat `aiLogs` view: active tab's bucket
+					// concatenated with the no-tab fallback so older consumers
+					// reading `sessionLogs.aiLogs` still see streaming entries
+					// from in-flight legacy frames during the back-compat window.
+					const activeKey = currentActiveTabId ?? AI_LOGS_NO_TAB_BUCKET;
+					const nextFlat =
+						activeKey === AI_LOGS_NO_TAB_BUCKET
+							? (nextByTab[AI_LOGS_NO_TAB_BUCKET] ?? [])
+							: [...(nextByTab[activeKey] ?? []), ...(nextByTab[AI_LOGS_NO_TAB_BUCKET] ?? [])];
+					return { ...prev, aiLogs: nextFlat, aiLogsByTab: nextByTab };
 				});
 			},
 			onSessionExit: (sessionId: string, exitCode: number) => {
@@ -637,8 +746,22 @@ export function useMobileSessionManagement(
 					source: 'user',
 				};
 				setSessionLogs((prev) => {
-					const logKey = inputMode === 'ai' ? 'aiLogs' : 'shellLogs';
-					return { ...prev, [logKey]: [...prev[logKey], userLogEntry] };
+					if (inputMode === 'terminal') {
+						return { ...prev, shellLogs: [...prev.shellLogs, userLogEntry] };
+					}
+					// AI mode — `user_input` frames don't carry a `tabId`, so the
+					// best signal is the current `activeTabIdRef`. Falls back to
+					// the no-tab bucket if no tab is active yet.
+					const bucketKey = activeTabIdRef.current ?? AI_LOGS_NO_TAB_BUCKET;
+					const existingBucket = prev.aiLogsByTab[bucketKey] ?? [];
+					const updatedBucket = [...existingBucket, userLogEntry];
+					const nextByTab = { ...prev.aiLogsByTab, [bucketKey]: updatedBucket };
+					const activeKey = activeTabIdRef.current ?? AI_LOGS_NO_TAB_BUCKET;
+					const nextFlat =
+						activeKey === AI_LOGS_NO_TAB_BUCKET
+							? (nextByTab[AI_LOGS_NO_TAB_BUCKET] ?? [])
+							: [...(nextByTab[activeKey] ?? []), ...(nextByTab[AI_LOGS_NO_TAB_BUCKET] ?? [])];
+					return { ...prev, aiLogs: nextFlat, aiLogsByTab: nextByTab };
 				});
 			},
 			onThemeUpdate: (theme: Theme) => {
