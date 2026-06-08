@@ -25,13 +25,21 @@
  */
 
 import { memo, useState } from 'react';
-import { Settings as SettingsIcon, Monitor, Keyboard as KeyboardIcon } from 'lucide-react';
+import {
+	Settings as SettingsIcon,
+	Monitor,
+	Keyboard as KeyboardIcon,
+	Palette,
+	Clapperboard,
+} from 'lucide-react';
 import type { Theme } from '../../../shared/theme-types';
 import { Modal } from '../ui/Modal';
 import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
 import { GeneralTab } from './tabs/GeneralTab';
 import { DisplayTab } from './tabs/DisplayTab';
 import { ShortcutsTab } from './tabs/ShortcutsTab';
+import { ThemeTab } from './tabs/ThemeTab';
+import { EncoreTab } from './tabs/EncoreTab';
 
 /**
  * Tabs the webFull SettingsModal supports today. Grows as subsequent
@@ -42,7 +50,7 @@ import { ShortcutsTab } from './tabs/ShortcutsTab';
  * shortcuts, theme, …) minus the LLM/theme/etc. tabs that are still
  * deferred.
  */
-export type SettingsTabId = 'general' | 'display' | 'shortcuts';
+export type SettingsTabId = 'general' | 'display' | 'shortcuts' | 'theme' | 'encore';
 
 interface TabDef {
 	id: SettingsTabId;
@@ -54,6 +62,8 @@ const TABS: TabDef[] = [
 	{ id: 'general', label: 'General', icon: SettingsIcon },
 	{ id: 'display', label: 'Display', icon: Monitor },
 	{ id: 'shortcuts', label: 'Shortcuts', icon: KeyboardIcon },
+	{ id: 'theme', label: 'Themes', icon: Palette },
+	{ id: 'encore', label: 'Encore Features', icon: Clapperboard },
 ];
 
 export interface SettingsModalProps {
@@ -63,6 +73,17 @@ export interface SettingsModalProps {
 	onClose: () => void;
 	/** Active theme threaded down to primitives (renderer convention). */
 	theme: Theme;
+	/**
+	 * All available themes, keyed by id — required by the Theme tab so the
+	 * picker grid can render every dark/light/vibe option. When omitted the
+	 * Theme tab still renders but with an empty picker (only the Custom
+	 * builder is usable).
+	 */
+	themes?: Record<string, Theme>;
+	/** Optional toast hook fired when a custom-theme import fails. */
+	onThemeImportError?: (message: string) => void;
+	/** Optional toast hook fired when a custom-theme import succeeds. */
+	onThemeImportSuccess?: (message: string) => void;
 	/** Initial tab to open on (defaults to 'general'). */
 	initialTab?: SettingsTabId;
 	/** Test ID hook for e2e probes. */
@@ -70,7 +91,16 @@ export interface SettingsModalProps {
 }
 
 export const SettingsModal = memo(function SettingsModal(props: SettingsModalProps) {
-	const { isOpen, onClose, theme, initialTab = 'general', testId } = props;
+	const {
+		isOpen,
+		onClose,
+		theme,
+		themes,
+		onThemeImportError,
+		onThemeImportSuccess,
+		initialTab = 'general',
+		testId,
+	} = props;
 	const [activeTab, setActiveTab] = useState<SettingsTabId>(initialTab);
 
 	if (!isOpen) return null;
@@ -136,6 +166,15 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 				{activeTab === 'general' && <GeneralTab theme={theme} isOpen={isOpen} />}
 				{activeTab === 'display' && <DisplayTab theme={theme} isOpen={isOpen} />}
 				{activeTab === 'shortcuts' && <ShortcutsTab theme={theme} isOpen={isOpen} />}
+				{activeTab === 'theme' && (
+					<ThemeTab
+						theme={theme}
+						themes={themes ?? {}}
+						onThemeImportError={onThemeImportError}
+						onThemeImportSuccess={onThemeImportSuccess}
+					/>
+				)}
+				{activeTab === 'encore' && <EncoreTab theme={theme} isOpen={isOpen} />}
 			</div>
 		</Modal>
 	);
