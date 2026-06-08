@@ -73,3 +73,5 @@ export { HistoryHelpModal } from './HistoryHelpModal';
 export { QuitConfirmModal } from './QuitConfirmModal';
 export { AutoRunnerHelpModal } from './AutoRunnerHelpModal';
 export { ShortcutsHelpModal } from './ShortcutsHelpModal';
+export { ToggleButtonGroup } from './ToggleButtonGroup';
+export type { ToggleButtonOption } from './ToggleButtonGroup';
