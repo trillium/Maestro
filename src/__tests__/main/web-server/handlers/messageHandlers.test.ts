@@ -64,6 +64,7 @@ function createMockCallbacks(): MessageHandlerCallbacks {
 		selectSession: vi.fn().mockResolvedValue(true),
 		selectTab: vi.fn().mockResolvedValue(true),
 		newTab: vi.fn().mockResolvedValue({ tabId: 'new-tab-123' }),
+		createSession: vi.fn().mockResolvedValue({ sessionId: 'new-session-xyz' }),
 		closeTab: vi.fn().mockResolvedValue(true),
 		renameTab: vi.fn().mockResolvedValue(true),
 		starTab: vi.fn().mockResolvedValue(true),
@@ -521,6 +522,146 @@ describe('WebSocketMessageHandler', () => {
 				const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
 				expect(response.type).toBe('error');
 				expect(response.message).toContain('New tab failed');
+			});
+		});
+	});
+
+	describe('Create Session (Web → Desktop) [audit #13]', () => {
+		it('should create session and return sessionId', async () => {
+			handler.handleMessage(client, {
+				type: 'create_session',
+				agentId: 'claude-code',
+				workingDir: '/tmp/proj',
+				name: 'My Agent',
+			} as WebClientMessage);
+
+			await vi.waitFor(() => {
+				expect(callbacks.createSession).toHaveBeenCalledWith(
+					expect.objectContaining({
+						agentId: 'claude-code',
+						workingDir: '/tmp/proj',
+						name: 'My Agent',
+					})
+				);
+			});
+
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response.type).toBe('create_session_result');
+			expect(response.success).toBe(true);
+			expect(response.sessionId).toBe('new-session-xyz');
+		});
+
+		it('should forward customPath / customArgs / SSH config when provided', async () => {
+			handler.handleMessage(client, {
+				type: 'create_session',
+				agentId: 'opencode',
+				workingDir: '/x',
+				name: 'Custom',
+				customPath: '/usr/local/bin/opencode',
+				customArgs: '--verbose',
+				customEnvVars: { FOO: 'bar' },
+				customModel: 'gpt-4',
+				customContextWindow: 200000,
+				sessionSshRemoteConfig: { enabled: true, remoteId: 'r1' },
+				groupId: 'g1',
+			} as WebClientMessage);
+
+			await vi.waitFor(() => {
+				expect(callbacks.createSession).toHaveBeenCalledWith(
+					expect.objectContaining({
+						customPath: '/usr/local/bin/opencode',
+						customArgs: '--verbose',
+						customEnvVars: { FOO: 'bar' },
+						customModel: 'gpt-4',
+						customContextWindow: 200000,
+						sessionSshRemoteConfig: { enabled: true, remoteId: 'r1' },
+						groupId: 'g1',
+					})
+				);
+			});
+		});
+
+		it('should reject create_session with missing agentId', () => {
+			handler.handleMessage(client, {
+				type: 'create_session',
+				workingDir: '/tmp',
+				name: 'x',
+			} as WebClientMessage);
+
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response.type).toBe('error');
+			expect(callbacks.createSession).not.toHaveBeenCalled();
+		});
+
+		it('should reject create_session with missing workingDir', () => {
+			handler.handleMessage(client, {
+				type: 'create_session',
+				agentId: 'claude-code',
+				name: 'x',
+			} as WebClientMessage);
+
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response.type).toBe('error');
+			expect(callbacks.createSession).not.toHaveBeenCalled();
+		});
+
+		it('should reject create_session with missing name', () => {
+			handler.handleMessage(client, {
+				type: 'create_session',
+				agentId: 'claude-code',
+				workingDir: '/tmp',
+			} as WebClientMessage);
+
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response.type).toBe('error');
+			expect(callbacks.createSession).not.toHaveBeenCalled();
+		});
+
+		it('should report when session creation is not configured', () => {
+			const handlerNoCallbacks = new WebSocketMessageHandler();
+
+			handlerNoCallbacks.handleMessage(client, {
+				type: 'create_session',
+				agentId: 'claude-code',
+				workingDir: '/tmp',
+				name: 'x',
+			} as WebClientMessage);
+
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response.type).toBe('error');
+			expect(response.message).toContain('Session creation not configured');
+		});
+
+		it('should report failure when callback returns null', async () => {
+			(callbacks.createSession as any).mockResolvedValue(null);
+			handler.handleMessage(client, {
+				type: 'create_session',
+				agentId: 'claude-code',
+				workingDir: '/tmp',
+				name: 'x',
+			} as WebClientMessage);
+
+			await vi.waitFor(() => {
+				const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+				expect(response.type).toBe('create_session_result');
+				expect(response.success).toBe(false);
+				expect(response.sessionId).toBeUndefined();
+			});
+		});
+
+		it('should send error frame on callback exception', async () => {
+			(callbacks.createSession as any).mockRejectedValue(new Error('boom'));
+			handler.handleMessage(client, {
+				type: 'create_session',
+				agentId: 'claude-code',
+				workingDir: '/tmp',
+				name: 'x',
+			} as WebClientMessage);
+
+			await vi.waitFor(() => {
+				const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+				expect(response.type).toBe('error');
+				expect(response.message).toContain('boom');
 			});
 		});
 	});

@@ -53,6 +53,7 @@ function makeCallbacks(): MessageHandlerCallbacks {
 		selectSession: vi.fn(async () => true),
 		selectTab: vi.fn(async () => true),
 		newTab: vi.fn(async () => ({ tabId: 'new-tab-1' })),
+		createSession: vi.fn(async () => ({ sessionId: 'new-session-1' })),
 		closeTab: vi.fn(async () => true),
 		renameTab: vi.fn(async () => true),
 		starTab: vi.fn(async () => true),

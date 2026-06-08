@@ -867,6 +867,85 @@ server.setNewTabCallback(async (sessionId: string): Promise<{ tabId: string } | 
 	return { tabId: result.newTabId };
 });
 
+// createSession — Audit #13. webFull `NewInstanceModal` `onCreate` wiring.
+// Mirrors the renderer's `useSessionCrud.createNewSession`: append a new
+// session to the store (with one initial idle tab), persist, broadcast
+// `session_added` so connected clients hydrate the new row. NO pty/process
+// is spawned here — first command-send into the initial tab triggers
+// `ProcessManager` on-demand spawn through the existing
+// `writeToSession` / `executeCommand` callback chain (same lazy-spawn pattern
+// as `newTab`).
+//
+// Server-side ID generation. The webFull client does not pass an id — the
+// server mints one with `crypto.randomUUID()` so the lazy-spawn path has a
+// stable handle. Mirrors the renderer's `generateId()` semantics (UUID v4).
+//
+// `groupId` is forwarded verbatim — webFull's NewInstanceModal does not yet
+// expose group selection, so this stays `undefined` end-to-end in practice;
+// when it ships, no server change is needed.
+//
+// Returns `null` (client gets `success: false`) when the mutator rejects:
+// missing required fields or duplicate id collision.
+server.setCreateSessionCallback(async (request): Promise<{ sessionId: string } | null> => {
+	const sessionId = randomUUID();
+	const sessions = sessionsStore.get<StoredSession[]>('sessions', []);
+	const result = mutator.createSession(sessions, {
+		id: sessionId,
+		name: request.name,
+		toolType: request.agentId,
+		cwd: request.workingDir,
+		groupId: request.groupId,
+		customPath: request.customPath,
+		customArgs: request.customArgs,
+		customEnvVars: request.customEnvVars,
+		customModel: request.customModel,
+		customContextWindow: request.customContextWindow,
+		customProviderPath: request.customProviderPath,
+		nudgeMessage: request.nudgeMessage,
+		sessionSshRemoteConfig: request.sessionSshRemoteConfig,
+	});
+	if (!result) {
+		console.warn(
+			`[maestro-server] createSession: rejected (agent=${request.agentId}, name=${request.name})`
+		);
+		return null;
+	}
+	try {
+		sessionsStore.set('sessions', result.sessions);
+	} catch (err) {
+		console.error(`[maestro-server] createSession ${sessionId}: failed to persist`, err);
+		return null;
+	}
+	try {
+		const groups = groupsStore.get<StoredGroup[]>('groups', []);
+		const group = result.session.groupId
+			? groups.find((g) => g.id === result.session.groupId)
+			: null;
+		server.broadcastSessionAdded({
+			id: result.session.id,
+			name: result.session.name ?? request.name,
+			toolType: result.session.toolType ?? request.agentId,
+			state: result.session.state ?? 'idle',
+			inputMode: result.session.inputMode ?? 'ai',
+			cwd: (result.session.cwd as string) ?? request.workingDir,
+			groupId: result.session.groupId ?? null,
+			groupName: group?.name ?? null,
+			groupEmoji: group?.emoji ?? null,
+			parentSessionId: null,
+			worktreeBranch: null,
+		});
+	} catch (err) {
+		console.error(
+			`[maestro-server] createSession ${sessionId}: broadcast threw (session already persisted)`,
+			err
+		);
+	}
+	console.log(
+		`[maestro-server] createSession ${sessionId} (agent=${request.agentId}, name=${request.name})`
+	);
+	return { sessionId };
+});
+
 // closeTab — (A) drop the tab from aiTabs, broadcast new tab array.
 server.setCloseTabCallback(async (sessionId: string, tabId: string): Promise<boolean> => {
 	const ok = applyMutation(

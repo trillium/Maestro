@@ -1571,16 +1571,62 @@ export default function MobileApp() {
 		return null;
 	}, []);
 	const handleNewInstanceCreate = useCallback(
-		(agentId: string, workingDir: string, name: string, ..._rest: any[]) => {
-			// host-data TODO: wire to the create-session WS frame
-			// (`type: 'create_session'`) once the server-side surface accepts
-			// the full agent + customPath + customArgs + ssh-remote shape.
-			// Today's webFull WS protocol only carries a thin create-session
-			// frame; the rich shape needs a follow-up brief.
-			webLogger.warn(
-				`[NewInstanceModal] onCreate stub fired (agent=${agentId} name=${name} cwd=${workingDir}) — no session created`,
-				'Mobile'
-			);
+		(
+			agentId: string,
+			workingDir: string,
+			name: string,
+			nudgeMessage?: string,
+			customPath?: string,
+			customArgs?: string,
+			customEnvVars?: Record<string, string>,
+			customModel?: string,
+			customContextWindow?: number,
+			customProviderPath?: string,
+			sessionSshRemoteConfig?: {
+				enabled: boolean;
+				remoteId: string | null;
+				workingDirOverride?: string;
+			},
+			groupId?: string
+		) => {
+			// Audit #13 / ISC-44.wiring.new_instance_modal_create_wired —
+			// forward the modal's submission to the server-side `create_session`
+			// WS frame. The server mints the session id, applies the mutator,
+			// persists, and broadcasts `session_added` so this client (and any
+			// peers) hydrate the new row via the existing
+			// `handleSessionAdded` handler in useSessions.
+			//
+			// Fire-and-forget: the modal's onCreate contract is `void`, and
+			// the client doesn't need to await — the broadcast lands as the
+			// authoritative confirmation. If the WS isn't connected the send
+			// returns false; we log and still hide the gate so the user isn't
+			// trapped in a non-responsive modal.
+			const sent = wsSendRef.current?.({
+				type: 'create_session',
+				agentId,
+				workingDir,
+				name,
+				nudgeMessage,
+				customPath,
+				customArgs,
+				customEnvVars,
+				customModel,
+				customContextWindow,
+				customProviderPath,
+				sessionSshRemoteConfig,
+				groupId,
+			});
+			if (!sent) {
+				webLogger.warn(
+					`[NewInstanceModal] create_session frame NOT sent (WS not connected) — agent=${agentId} name=${name}`,
+					'Mobile'
+				);
+			} else {
+				webLogger.info(
+					`[NewInstanceModal] create_session frame sent — agent=${agentId} name=${name} cwd=${workingDir}`,
+					'Mobile'
+				);
+			}
 			newInstanceGate.hide();
 		},
 		[newInstanceGate]
@@ -2233,18 +2279,18 @@ export default function MobileApp() {
 				{/* ============================================================ */}
 
 				{/* NewInstanceModal — Cmd+Shift+N triggers (debug).               */}
-				{/* All 9 strip-and-promoted props are stubbed with safe defaults  */}
-				{/* per the wave-2 brief: empty `agentConfigs` / `availableModels` */}
-				{/* maps, no-op `onAgentConfigSave` / `onRefreshModels`, a `valid: */}
-				{/* false` `onRemotePathValidate`, and a `null` `onFolderPick`.    */}
-				{/* `existingSessions` is `[]` because the webFull Session shape   */}
-				{/* differs from the renderer Session shape the modal expects;     */}
-				{/* shape impedance + the no-op `onCreate` keep this strictly a    */}
-				{/* reachability proof, not a real session-creation flow. The     */}
-				{/* lifted modal does not crash with `[]` (validateNewSession      */}
-				{/* iterates and dedup-checks — an empty array is the trivial     */}
-				{/* "no conflicts" case). Host-data TODO: thread real sessions     */}
-				{/* + wire `onCreate` to the create-session WS frame.              */}
+				{/* `onCreate` IS WIRED to the `create_session` WS frame (audit    */}
+				{/* #13 / ISC-44.wiring.new_instance_modal_create_wired). The      */}
+				{/* server applies the mutator, persists, and broadcasts          */}
+				{/* `session_added`; the client hydrates via the existing          */}
+				{/* `handleSessionAdded` handler in useSessions. Other 8 props    */}
+				{/* remain stubbed (agentConfigs / availableModels empty, no-op    */}
+				{/* onAgentConfigSave / onRefreshModels, valid:false               */}
+				{/* onRemotePathValidate, null onFolderPick). `existingSessions`   */}
+				{/* is `[]` because the webFull Session shape differs from the    */}
+				{/* renderer Session shape — empty array is the trivial            */}
+				{/* "no conflicts" case for validateNewSession. Host-data TODO:    */}
+				{/* thread real sessions for duplicate-name detection.             */}
 				{newInstanceGate.open && (
 					<NewInstanceModal
 						isOpen={newInstanceGate.open}
