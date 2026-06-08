@@ -1,0 +1,28 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "commonjs",
+		"moduleResolution": "node",
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"resolveJsonModule": true,
+		"strict": false,
+		"noImplicitAny": false,
+		"outDir": "dist/server",
+		"rootDir": "src",
+		"declaration": false,
+		"sourceMap": true,
+		"baseUrl": ".",
+		"types": ["node"]
+	},
+	"include": [
+		"src/server/**/*.ts",
+		"src/shared/**/*.ts",
+		"src/main/web-server/**/*.ts",
+		"src/main/themes.ts",
+		"src/main/utils/logger.ts",
+		"src/main/utils/networkUtils.ts",
+		"src/main/utils/sentry.ts"
+	],
+	"exclude": ["node_modules", "dist", "**/*.test.ts", "**/__tests__/**"]
+}
