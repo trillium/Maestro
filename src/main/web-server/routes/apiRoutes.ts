@@ -323,11 +323,13 @@ export function getFontsProvider(): FontsProvider | null {
 // Electron, and the routes here do NOT touch them. Both stacks can run
 // side-by-side because the underlying filesystem is the cross-mode contract.
 //
-// Route surface (4 endpoints) per the umbrella big_3_ipc_strategy Decision:
-//   GET  /api/fs/home-dir         — return server-side os.homedir()
-//   GET  /api/fs/stat?path=…      — stat result + exists flag
-//   GET  /api/fs/read-file?path=… — UTF-8 file contents (rejects binary)
-//   POST /api/autorun/write-doc   — write content to absolute path, mkdir -p
+// Route surface (5 endpoints) per the umbrella big_3_ipc_strategy Decision
+// plus the 2026-06-08 audit-correction route (read-image):
+//   GET  /api/fs/home-dir          — return server-side os.homedir()
+//   GET  /api/fs/stat?path=…       — stat result + exists flag
+//   GET  /api/fs/read-file?path=…  — UTF-8 file contents (rejects binary)
+//   GET  /api/fs/read-image?path=… — `data:image/<ext>;base64,…` URL string
+//   POST /api/autorun/write-doc    — write content to absolute path, mkdir -p
 //
 // The last route lives under `/api/autorun/*` namespace by Decision (the
 // AutoRun shell is the only consumer of writeDoc, and a future
@@ -359,6 +361,30 @@ export interface FsProvider {
 	 * returns 400 rather than a corrupt string.
 	 */
 	readFile: (path: string) => Promise<string | null>;
+	/**
+	 * Read an image file as a `data:image/<ext>;base64,<payload>` URL string.
+	 *
+	 * Image-aware sibling of `readFile()` for the AutoRun shell's
+	 * `useAutoRunImageHandling` hook — the renderer-side `fs:readFile` IPC
+	 * handler at `src/main/ipc/handlers/filesystem.ts:166-175` returns a
+	 * `data:` URL for image extensions, but the text-only `/api/fs/read-file`
+	 * route 400s on binary payloads. This method ports the image branch 1:1.
+	 *
+	 * Returns `null` for ENOENT/EISDIR so the route layer surfaces a 404.
+	 * Throws an error tagged with `unsupportedExtension: true` when the
+	 * extension isn't in the W3-autorun-images allowlist
+	 * (png / jpg / jpeg / gif / webp / svg) so the route layer returns 400.
+	 *
+	 * Optional (`?`) because Electron-host paths that register a custom
+	 * FsProvider (e.g. tests) may not need the image branch — the route
+	 * layer 501s when the provider is registered but `readImage` is absent,
+	 * so callers fail loud rather than silently get a corrupt response.
+	 *
+	 * Added 2026-06-08 to close `ISC-44.shim.fs_read_image_route` — the
+	 * audit-correction route the AutoRun lift discovered was missing after
+	 * the W3-autorun-images cluster shipped.
+	 */
+	readImage?: (path: string) => Promise<{ dataUrl: string } | null>;
 	/**
 	 * Write content to an absolute path. Creates parent dirs on demand.
 	 * Returns `{path, bytes}` — byte count is UTF-8 byte length.
@@ -589,6 +615,39 @@ function validateImageExtension(p: unknown): string | null {
  * Returns `null` if the path passes all checks; otherwise returns a short
  * human-readable reason the route includes in the 400 reply body.
  */
+/**
+ * Image extension allowlist for the `/api/fs/read-image` route. Mirrors
+ * `READ_IMAGE_ALLOWED_EXTENSIONS` in `src/server/fs-manager.ts` byte-for-byte —
+ * same defense-in-depth rule as `validateFsPath()` ↔ `isValidFsPath()`. The
+ * two lists MUST stay in sync; any change to one is a change to both.
+ *
+ * Deliberately narrower than the renderer-side `IMAGE_EXTENSIONS` at
+ * `src/main/ipc/handlers/filesystem.ts:41` (which also accepts `bmp` + `ico`)
+ * because the W3-autorun-images cluster gates save/list/delete on this exact
+ * set; gating read-image on the broader set would create a corner where the
+ * server returns a `data:` URL for a `bmp` that the webFull save path
+ * cannot round-trip.
+ */
+const READ_IMAGE_ALLOWED_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] as const;
+
+/**
+ * Validate an absolute path's extension against the image allowlist. Returns
+ * `null` if accepted, otherwise a short human-readable reason string the
+ * route layer includes in the 400 reply body. The path-shape validation
+ * (absolute, no NUL, no `..`) is the caller's responsibility — this validator
+ * is the EXTENSION check only, and `validateFsPath()` runs first in the
+ * read-image route handler.
+ */
+function validateReadImageExtension(p: string): string | null {
+	const dot = p.lastIndexOf('.');
+	if (dot < 0 || dot === p.length - 1) return 'path must end in a supported image extension';
+	const ext = p.slice(dot + 1).toLowerCase();
+	if (!(READ_IMAGE_ALLOWED_EXTENSIONS as readonly string[]).includes(ext)) {
+		return `extension must be one of ${READ_IMAGE_ALLOWED_EXTENSIONS.join(', ')} (got ${JSON.stringify(ext)})`;
+	}
+	return null;
+}
+
 function validateFsPath(p: unknown): string | null {
 	if (typeof p !== 'string' || p.length === 0) return 'path must be a non-empty string';
 	if (!path.isAbsolute(p)) return 'path must be absolute';
@@ -1775,11 +1834,14 @@ export class ApiRoutes {
 		// authorized. NO touch to `src/main/ipc/handlers/filesystem.ts`,
 		// `src/main/ipc/handlers/autorun.ts`, or the renderer-side preload bridges.
 		//
-		// Route surface (4 endpoints):
-		//   GET  /api/fs/home-dir         — `{path: string, timestamp}`
-		//   GET  /api/fs/stat?path=…      — `{exists, isDir, isFile, size?, mtime?, timestamp}`
+		// Route surface (5 endpoints — the umbrella's 4 plus the 2026-06-08
+		// audit-correction read-image route under
+		// `ISC-44.shim.fs_read_image_route`):
+		//   GET  /api/fs/home-dir          — `{path: string, timestamp}`
+		//   GET  /api/fs/stat?path=…       — `{exists, isDir, isFile, size?, mtime?, timestamp}`
 		//   GET  /api/fs/read-file?path=… — file contents (text/plain or 404 / 400)
-		//   POST /api/autorun/write-doc   — body `{path, content}`, reply `{path, bytes, timestamp}`
+		//   GET  /api/fs/read-image?path=… — `data:image/<ext>;base64,…` URL (text/plain or 404 / 400)
+		//   POST /api/autorun/write-doc    — body `{path, content}`, reply `{path, bytes, timestamp}`
 		//
 		// All path-accepting routes validate the input via `validateFsPath()`
 		// BEFORE invoking the provider, so traversal / NUL bytes / non-absolute
@@ -1957,6 +2019,129 @@ export class ApiRoutes {
 					return reply.code(500).send({
 						error: 'Internal Server Error',
 						message: `Failed to read file: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/fs/read-image?path=<absolute> — image-aware sibling of
+		// `/api/fs/read-file`. Returns the file contents as a `data:image/<ext>;base64,<payload>`
+		// URL string (text/plain wire body, NOT JSON-wrapped — same wire-parity
+		// pattern as read-file). Closes `ISC-44.shim.fs_read_image_route`
+		// (audit-correction route 2026-06-08): the W3-fs cluster shipped a
+		// text-only readFile route that 400s on binary content, but the AutoRun
+		// shell's `useAutoRunImageHandling` hook calls `window.maestro.fs.readFile()`
+		// on image paths and expects a `data:` URL (see
+		// `src/renderer/hooks/batch/useAutoRunImageHandling.ts:175-186` which
+		// inspects `dataUrl.startsWith('data:')`). The image branch of the
+		// renderer-side `fs:readFile` IPC handler at
+		// `src/main/ipc/handlers/filesystem.ts:166-175` is what this route
+		// ports server-side.
+		//
+		// Extension allowlist: png / jpg / jpeg / gif / webp / svg — mirrors
+		// the W3-autorun-images save/list/delete contract byte-for-byte. Other
+		// extensions return 400 so callers don't accidentally pull arbitrary
+		// binary blobs through this surface.
+		//
+		// Format choice — bare text body, not JSON: matches `/api/fs/read-file`
+		// wire parity (both are bare-string in the renderer-side IPC reply).
+		// Clients consume `await response.text()` and the result drops directly
+		// into an `<img src>` attribute. JSON-wrapping (`{dataUrl}`) would force
+		// callers to parse + extract before the same use, with no security or
+		// extensibility benefit (the only payload is the URL itself).
+		server.get(
+			`/${token}/api/fs/read-image`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getFsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Fs provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				if (typeof provider.readImage !== 'function') {
+					// Provider registered but read-image is not implemented.
+					// 501 (not 503) because the surface IS available — just not
+					// on this provider — so callers fail loud rather than silently
+					// retrying as if the manager were missing.
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message: 'readImage is not implemented by the registered FsProvider',
+						timestamp: Date.now(),
+					});
+				}
+				const { path: queryPath, sshRemoteId } = request.query as {
+					path?: string;
+					sshRemoteId?: string;
+				};
+				if (sshRemoteId) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side fs routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const pathReason = validateFsPath(queryPath);
+				if (pathReason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: pathReason,
+						timestamp: Date.now(),
+					});
+				}
+				const extReason = validateReadImageExtension(queryPath as string);
+				if (extReason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: extReason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.readImage(queryPath as string);
+					if (result === null) {
+						return reply.code(404).send({
+							error: 'Not Found',
+							message: 'Image file does not exist or is a directory',
+							timestamp: Date.now(),
+						});
+					}
+					// Bare text body — matches `/api/fs/read-file` wire parity.
+					// Client reads via `await response.text()` and drops the
+					// string directly into `<img src>`. See format-choice note
+					// in the route-comment block above.
+					return reply
+						.code(200)
+						.header('Content-Type', 'text/plain; charset=utf-8')
+						.send(result.dataUrl);
+				} catch (error: any) {
+					if (error?.unsupportedExtension === true) {
+						// Defense-in-depth: the route-layer extension check
+						// above already 400s for this case, but if the manager
+						// re-validates and rejects (e.g. a future addition to
+						// the manager-side allowlist that the route doesn't
+						// know about), surface it as a 400 with the manager's
+						// reason string rather than a 500.
+						return reply.code(400).send({
+							error: 'Bad Request',
+							message: error.message,
+							timestamp: Date.now(),
+						});
+					}
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to read image: ${error.message}`,
 						timestamp: Date.now(),
 					});
 				}

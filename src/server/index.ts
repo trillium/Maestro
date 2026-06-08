@@ -263,6 +263,13 @@ registerFsProvider({
 	getHomeDir: () => fsManager.getHomeDir(),
 	stat: (p: string) => fsManager.stat(p),
 	readFile: (p: string) => fsManager.readFile(p),
+	// Audit-correction route 2026-06-08 (ISC-44.shim.fs_read_image_route): the
+	// AutoRun lift discovered useAutoRunImageHandling needs the renderer's
+	// image-branch behavior (data: URL) that the text-only `/api/fs/read-file`
+	// route can't satisfy. Wiring readImage here means the W3-autorun-images
+	// cluster's image-handling hook can target `/api/fs/read-image` 1:1 when
+	// ported to webFull.
+	readImage: (p: string) => fsManager.readImage(p),
 	writeDoc: (p: string, content: string) => fsManager.writeDoc(p, content),
 });
 
