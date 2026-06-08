@@ -27,3 +27,10 @@ export { FormInput } from './ui/FormInput';
 export type { FormInputProps } from './ui/FormInput';
 
 export { ConfirmModal } from './ConfirmModal';
+
+// ============================================================================
+// Layer 2.2 lifted primitives (verbatim from renderer with relative-path adapts)
+// ============================================================================
+
+export { EmojiPickerField } from './ui/EmojiPickerField';
+export type { EmojiPickerFieldProps } from './ui/EmojiPickerField';

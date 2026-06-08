@@ -670,3 +670,38 @@ After this commit, any future change to `MODAL_PRIORITIES` (e.g. a new modal kin
 3. Once both calls land, re-run the L0a/L0e probes and flip ISC-33 from partial PASS ("not in dist") to full PASS ("explicitly replaced with `@sentry/node` for server and `@sentry/browser` for webFull").
 
 This split (scaffold now, init later) was chosen to avoid colliding with the in-flight `layer-0c-remaining-writes` work on `src/server/index.ts`.
+
+### 2026-06-08 — Layer 2.2 evidence (additional 0-IPC primitives lift)
+
+#### Decisions
+
+- **Lifted (verbatim):** `src/renderer/components/ui/EmojiPickerField.tsx` → `src/webFull/components/ui/EmojiPickerField.tsx`. Implementation copied byte-for-byte except the `Theme` import path (`'../../types'` → `'../../../shared/theme-types'`), matching the L2.1 pattern established by `ui/Modal.tsx` and `ui/FormInput.tsx`. Keeps the renderer's `theme: Theme` prop convention — webFull consumers resolve `useTheme()` at the feature-component level and thread `theme` down. 0-IPC verified: zero `window.maestro.*` callsites; the only `dialog` references are ARIA semantics (`aria-haspopup="dialog"`, `role="dialog"`), not Electron `dialog` IPC.
+- **Re-export barrel:** appended Layer 2.2 section to `src/webFull/components/index.ts` exporting `EmojiPickerField` + `EmojiPickerFieldProps` from `./ui/EmojiPickerField`.
+- **Skipped — not present in renderer tree:** `Spinner.tsx`, `Button.tsx` (under `ui/`), `Tooltip.tsx`. Confirmed via `ls src/renderer/components/ui/` → only `EmojiPickerField.tsx`, `FormInput.tsx`, `Modal.tsx`, `index.ts`. Renderer's design is deliberately "primitives over compositions" (per audit B1 at `/tmp/web-ui-lift-scope.md`) — buttons/spinners/tooltips are styled inline at callsites, not extracted as files. No 0-IPC check needed; the files don't exist to lift. WebFull already has its own `Button.tsx` (forwardRef-based, variants/sizes/states), so no parallel primitive was needed anyway.
+- **Skipped — has IPC:** `src/renderer/components/Toast.tsx` (one line of audit-candidate review). `grep -nE "window\.maestro"` returned a hit at line 227 (`window.maestro.shell.openExternal(toast.actionUrl!)`). Candidate failed 0-IPC check; defer to rewrite pattern (would need either a `shell:openExternal` WS message type or an HTTP `POST /shell/open-external` route on the server, neither of which exists today — out of scope for this layer).
+- **Skipped — not a primitive:** `ThinkingStatusPill.tsx` (586 lines — too large/composed to be a primitive). `ErrorBoundary.tsx` (163 lines, 0-IPC, but not on the audit's primitive list and `~/.claude/skills/Delegation/templates/lift-renderer-component.md` directs the lift wave to focus on items the audit names). Per parent brief "Don't aggressively lift — pick the small set of clear winners. Quality over quantity," these were left untouched.
+
+#### Pattern used
+
+Verbatim copy (not re-export). Rationale: `EmojiPickerField.tsx` contains real component logic (state, callbacks, JSX) that the webFull tree may evolve independently. The re-export pattern (`export * from '../../renderer/<path>'`) cited by Architect 2026-06-08 audit risk A is reserved for **non-divergent constants/types** like `MODAL_PRIORITIES` and `Layer` (see `src/webFull/constants/modalPriorities.ts` and `src/webFull/types/layer.ts`). For a stateful React component, the verbatim-copy + relative-path-adapt pattern from L2.1 (Modal, FormInput) is correct.
+
+#### Verification
+
+- **Files added** under `src/webFull/components/ui/`:
+  - `src/webFull/components/ui/EmojiPickerField.tsx` (201 lines — verbatim from renderer source, only the `Theme` import path adapted and a doc-comment paragraph appended noting the lift + 0-IPC verification).
+- **Files modified** in `src/webFull/components/`:
+  - `src/webFull/components/index.ts` — appended Layer 2.2 section re-exporting `EmojiPickerField` + `EmojiPickerFieldProps`.
+
+#### Build — `npm run build:webfull`
+
+- **Probe:** `eval "$(/opt/homebrew/bin/fnm env --shell bash)" && fnm use 22.22.1 && npm run build:webfull` (node_modules symlinked from `/Users/trilliumsmith/code/maestro/node_modules` for the build, removed before commit).
+- **Result:** Exit 0. `vite v5.4.21 building for production... ✓ 2532 modules transformed. ✓ built in 3.89s`. Bundle output: `index.html` 3.54 kB, `mobile-DWpJmM3c.css` 47.56 kB, `main-Boi2EcHi.js` 0.81 kB, `react-Dl6t4piS.js` 141.58 kB, `mobile-Bju1GwAh.js` 962.75 kB. **Bit-for-bit identical to Layer 0e's bundle sizes** — Vite's tree-shaker correctly dropped the new `ui/EmojiPickerField.tsx` because no webFull consumer imports it yet (matching the "primitive available, awaiting first consumer" scaffold intent). The pre-existing CSS minification warning (`Expected identifier but found "-"` at line 2707) carried over from upstream's CSS source; not a regression.
+- **Mount check:** `grep -c '<div id="root">' dist/webfull/index.html` → `1`. The webfull bundle still mounts the React root at `<div id="root">`, unchanged by this layer.
+
+#### Scope check
+
+- `git diff main..HEAD -- src/web/ | wc -c` → `0` (zero bytes — `src/web/` untouched).
+- `git diff main..HEAD -- src/main/ | wc -c` → `0` (zero bytes — `src/main/` untouched).
+- `git diff main..HEAD -- src/renderer/ | wc -c` → `0` (zero bytes — `src/renderer/` untouched; the source `EmojiPickerField.tsx` lives at `src/renderer/components/ui/EmojiPickerField.tsx` and was read-only — only the destination `src/webFull/components/ui/EmojiPickerField.tsx` was written).
+- Working-tree changes for this layer (before commit): `M src/webFull/components/index.ts`, `?? src/webFull/components/ui/EmojiPickerField.tsx`, plus this `M ISA.md` append. Exactly the authorized set.
+- `node_modules` symlink (created for the build) removed before commit; not tracked.
