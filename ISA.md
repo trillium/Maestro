@@ -1546,3 +1546,73 @@ Branch `layer-2.4-more-modals` off `main @ 89fd6f797`. Continuation of the L2.3 
 - Lifting consumers (`AutoRun/`, `BatchRunner/`, `SessionList/` features) that would actually wire these modals into the webFull tree — those have transitive store / IPC dependencies and are downstream-layer scope.
 - Building a `src/webFull/components/ui/index.ts` barrel to mirror the renderer's barrel pattern — punted (no current consumer needs it; adding it now is unjustified surface area).
 - Backfilling re-exports for `src/renderer/utils/ids.ts` siblings (the file has only `generateId` today, so the shim is exhaustive).
+
+---
+
+### Decisions — mini2 deploy execution debt closed (2026-06-07)
+
+Plan-reeval-2 flagged the mini2 deploy execution path as the HIGHEST open risk: ISCs 8/9/10/11/12/13/45 are gated on Trillium running `./infra/deploy.sh` on mini2, but a first-time run would fail in three predictable ways the audit named explicitly. This entry closes those three gaps with non-source changes (infra files + a guarded `package.json` script line) so the first deploy has the highest probability of green on the first try.
+
+#### Decisions
+
+1. **`package.json` postinstall — guarded, not removed.** The `postinstall` script that runs `electron-rebuild -f -w node-pty,better-sqlite3` is now wrapped in a shell conditional on `MAESTRO_HEADLESS=1`. Desktop dev (`npm install` with the env var unset) keeps the original behavior — node-pty + better-sqlite3 rebuild against Electron's Node ABI. Headless deploys (`MAESTRO_HEADLESS=1 npm ci`, which `infra/deploy.sh` now exports automatically) print `[postinstall] MAESTRO_HEADLESS=1; skipping electron-rebuild` and proceed without invoking electron-rebuild at all. This avoids the "NODE_MODULE_VERSION mismatch" crash that would have hit `node dist/server/index.js` on first boot of mini2, because the headless server uses system Node's ABI, not Electron's. Choosing a guard over removal preserves the desktop dev workflow unchanged and lets the next plan-reeval consider whether removal is actually warranted now that the env-var gate exists.
+
+2. **`infra/deploy.sh` gains `--probe` and `--auto-probe` modes.** The script previously only had one mode (deploy + curl health check). It now accepts:
+   - `./infra/deploy.sh` — original behavior (deploy + curl).
+   - `./infra/deploy.sh --probe` — skip the deploy entirely; only execute `infra/probe-pty-survival.sh` against the running mini2 environment. Use to re-verify L6.3 persistence without churning the launchd service or rebuilding.
+   - `./infra/deploy.sh --auto-probe` — full deploy + curl + run the falsification probe immediately after a green health check. The script propagates the probe's exit code, so a green `--auto-probe` run proves both "service is up on :45678" and "PTY scrollback round-trips through a simulated kill" in one invocation. This wires L6.3's falsification probe into the deploy pipeline rather than leaving it as a parallel manual step.
+   - The script also now `export MAESTRO_HEADLESS=1` unconditionally, so the postinstall guard fires automatically for every script-driven deploy. Manual `npm install` from a fresh shell still requires the user to set the env var (documented in §1 of FIRST_DEPLOY_BRIEF.md).
+
+3. **`infra/FIRST_DEPLOY_BRIEF.md` — new file, first-time-only focus.** `DEPLOY_SPIKE.md` was the exhaustive runbook (every subsequent deploy, rollback, six open questions), but it did not foreground the first-time-only gotchas. The new brief is structured as a linear checklist (§0 prereqs → §1 first run → §2 local smoke → §3 tailnet smoke → §4 local falsification probe → §5 launchd bootstrap → §6 plist edits and data-dir migration → §7 full ISC-45 phone happy path → §8 failure table → §9 post-deploy report). Specifically tunes for: (a) the postinstall env-var requirement, (b) the `dist/webfull/` build-trigger that's required for the phone UI to render (caught by reading `WebServer.ts:167`'s `resolveWebAssetsPath` — without `build:webfull`, the server boots but logs "Web assets not found"), (c) the plist's hardcoded fnm node path that the Architect audit flagged as likely-to-differ, (d) the data-dir migration question (`~/.config/maestro` vs `~/Library/Application Support/maestro` and the `customSyncPath` setting that `src/shared/data-dir.ts` does not consult).
+
+#### Additional first-deploy gotchas captured in FIRST_DEPLOY_BRIEF.md beyond the brief's named list
+
+- **`npm run build:webfull` requirement.** `WebServer.ts:167`'s `resolveWebAssetsPath` walks `dist/web/` candidates; without a build, server boots cleanly but the phone Safari tab loads to "Web assets not found" instead of the Maestro UI. Captured in §1 + §8 failure table.
+- **`customSyncPath` Electron-settings field not consulted by `src/shared/data-dir.ts`.** If Trillium ever set this in his Electron install, the headless server will read the wrong dir and look like a fresh install. Captured in §6 with the exact `jq` query.
+- **`mkdir -p ~/.config/maestro`** before bootstrap — launchd does not create the data-dir parent, and a missing dir produces a silent `state = exited`. Captured in the §9 quick-reference command list.
+- **Token persistence.** `src/server/index.ts:107` reads `webAuthToken` from settings; if missing, a UUID-v4 ephemeral token is generated and logged. The brief documents capturing the token from `server.out.log` and bookmarking the `/<token>/` URL once. Captured in §8.
+- **`Cannot find module '@sentry/electron'` boot crash.** Not expected — `src/server/sentry.ts:88` uses `require('@sentry/node')` inside a try/catch, so an absent dep degrades to a no-op. If it ever surfaces, it's a sign of a stale dist or a corrupted lazy guard. Captured in §8 with the "rm -rf dist && npm run build:server" remediation.
+
+#### Files added / modified
+
+- `package.json` — postinstall script line ONLY. Old line replaced with:
+
+  ```
+  "postinstall": "if [ \"${MAESTRO_HEADLESS:-0}\" = \"1\" ]; then echo '[postinstall] MAESTRO_HEADLESS=1; skipping electron-rebuild'; else electron-rebuild -f -w node-pty,better-sqlite3; fi",
+  ```
+
+  No other keys in `package.json` were touched. The semicolon-separated single-line form preserves npm's `bash -c` parsing (npm uses `sh -c` on POSIX, and the `if/then/else/fi` runs in any POSIX shell). Validated with `bash -n` (syntax-check only, no execution).
+
+- `infra/deploy.sh` — mode parsing (`--probe`, `--auto-probe`), an `export MAESTRO_HEADLESS=1` near the top, and the auto-probe hook at the end of the green-deploy branch. Original behavior (zero-arg invocation) is preserved bit-for-bit modulo the env-var export, which is a no-op for any subsequent process that doesn't read it. Validated with `bash -n`.
+
+- `infra/FIRST_DEPLOY_BRIEF.md` — NEW file. ~270 lines. Trillium-facing, linear-checklist structure.
+
+- `ISA.md` — append-only (this block).
+
+#### Verification
+
+- `git diff main..HEAD -- src/ | wc -c` → expect `0` (no source touched in this layer).
+- `bash -n infra/deploy.sh` → exit 0.
+- `jq '.scripts.postinstall' package.json` → returns the new guarded one-liner.
+- `ls infra/FIRST_DEPLOY_BRIEF.md infra/deploy.sh infra/probe-pty-survival.sh package.json` → all four present.
+
+#### Risk closure mapping (plan-reeval-2 → this entry)
+
+| Plan-reeval-2 finding | Closed by |
+|-----------------------|-----------|
+| HIGH — `package.json:45` postinstall would crash first headless boot | Decision 1 (postinstall guard) |
+| HIGH — `probe-pty-survival.sh` not wired into deploy.sh | Decision 2 (`--probe` and `--auto-probe` modes) |
+| HIGH — no first-deploy-focused brief; `DEPLOY_SPIKE.md` is reference, not checklist | Decision 3 (`FIRST_DEPLOY_BRIEF.md`) |
+
+#### Files NOT touched
+
+- `src/main/`, `src/server/`, `src/web/`, `src/renderer/`, `src/webFull/` — `git diff main..HEAD -- src/ | wc -c` → `0`.
+- `infra/com.maestro.server.plist` — flagged in the brief's §5/§6 because the Architect noted the hardcoded fnm node path may differ on mini2, but editing the plist on mini2 is part of the first-deploy ritual (cannot guess what `readlink -f "$(command -v node)"` returns on mini2 from this worktree). The brief documents the verify-and-edit step explicitly.
+- `infra/DEPLOY_SPIKE.md` — left as the exhaustive reference runbook. The new brief is the first-time-only superset focus.
+- `infra/PROBE_ISC45.md` — already complete; referenced from §4/§7 of the new brief.
+
+#### Deferred / out-of-scope for this brief
+
+- Removing the `electron-rebuild` postinstall hook entirely (vs guarding it) — defer until after the first headless deploy validates that the guard works as intended. Removal is a follow-up if mini2 confirms `electron-rebuild` is dead weight even for desktop dev (it isn't, but a future split into a separate `prepare:electron` script may be cleaner than the inline guard).
+- Tag-on-success in `deploy.sh` (per `DEPLOY_SPIKE.md` Q4) — still deferred; the first real spike should decide whether tagging is the rollback strategy or `git reflog` suffices.
+- `tailscale serve` proxy mode for stricter interface binding (per `DEPLOY_SPIKE.md` Q6) — defer to second deploy iteration once §3 of the brief confirms the default `0.0.0.0:45678` bind works over the tailnet on mini2 specifically.

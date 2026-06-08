@@ -17,14 +17,67 @@
 # Idempotent: re-running after a no-op `git pull` still rebuilds and reloads.
 # Exit code 0 = server responding on the configured port; non-zero = inspect
 # logs.
+#
+# Modes:
+#   ./infra/deploy.sh              — full deploy + basic curl health check
+#                                    (default; original behavior).
+#   ./infra/deploy.sh --probe      — SKIP deploy; only run the falsification
+#                                    probe against the on-disk scrollback
+#                                    layer. Use to verify L6.3 persistence
+#                                    on the running mini2 without touching
+#                                    the launchd service or the running
+#                                    server.
+#   ./infra/deploy.sh --auto-probe — full deploy + curl health check, then
+#                                    run infra/probe-pty-survival.sh to
+#                                    confirm PTY scrollback survives a
+#                                    simulated kill -9 + restart.
+#
+# MAESTRO_HEADLESS=1 is exported automatically by this script so the
+# postinstall hook in package.json skips `electron-rebuild` (broken on a
+# headless host because the Electron Node ABI is not the same as the
+# system Node ABI used by `node dist/server/index.js`). Desktop dev
+# workflows that invoke `npm install` outside this script keep the
+# original behavior because the env var is unset.
 
 set -euo pipefail
+
+# ─── Mode parsing ────────────────────────────────────────────────────────
+MODE="deploy"
+case "${1:-}" in
+  --probe)
+    MODE="probe-only"
+    ;;
+  --auto-probe)
+    MODE="deploy-and-probe"
+    ;;
+  "")
+    MODE="deploy"
+    ;;
+  *)
+    echo "[deploy] unknown argument: $1"
+    echo "[deploy] usage: $0 [--probe | --auto-probe]"
+    exit 2
+    ;;
+esac
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 echo "[deploy] repo root: $REPO_ROOT"
 echo "[deploy] user: $(id -un) (uid=$(id -u))"
+echo "[deploy] mode: $MODE"
+
+# Headless gate: this script targets the mini2 headless server, so we skip
+# the electron-rebuild postinstall hook. The guard lives in package.json's
+# `postinstall` script and triggers on MAESTRO_HEADLESS=1.
+export MAESTRO_HEADLESS=1
+
+# ─── --probe shortcut: skip deploy, just run the falsification probe ────
+if [ "$MODE" = "probe-only" ]; then
+  echo "[deploy] --probe: skipping pull/install/build/launchctl"
+  echo "[deploy] running infra/probe-pty-survival.sh"
+  exec bash "$REPO_ROOT/infra/probe-pty-survival.sh"
+fi
 
 # ─── Pin Node version ────────────────────────────────────────────────────
 # fnm is the assumed Node manager on mini2. If a different manager is in
@@ -118,6 +171,19 @@ case "$HTTP_CODE" in
     echo "[deploy] OK: server listening on :${PORT} (HTTP $HTTP_CODE)"
     echo "[deploy] HEAD=$CURRENT_SHA"
     echo "[deploy] next: verify Tailscale-reachable URL from another host on the tailnet"
+
+    # ─── --auto-probe: run the PTY survival probe after a green deploy ────
+    if [ "$MODE" = "deploy-and-probe" ]; then
+      echo "[deploy] --auto-probe: running infra/probe-pty-survival.sh"
+      if bash "$REPO_ROOT/infra/probe-pty-survival.sh"; then
+        echo "[deploy] OK: PTY survival probe PASSED"
+      else
+        PROBE_EXIT=$?
+        echo "[deploy] FAIL: PTY survival probe exited $PROBE_EXIT"
+        exit "$PROBE_EXIT"
+      fi
+    fi
+
     exit 0
     ;;
   *)
