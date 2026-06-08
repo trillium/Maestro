@@ -1,0 +1,764 @@
+/**
+ * ExecutionQueueBrowser — webFull lift
+ *
+ * Layer 2.5 leaf-parade lift. Verbatim copy of
+ * `src/renderer/components/ExecutionQueueBrowser.tsx` (618 LOC) with
+ * three narrow type-resolution adapts matching the L2.5 precedent set
+ * by `QueuedItemsList`, `ExecutionQueueIndicator`, and
+ * `DeleteWorktreeModal`. 0 IPC namespaces touched, 0 Electron-only APIs
+ * touched, 0 `src/main/` / `src/web/` / `src/renderer/` / `src/server/`
+ * files modified.
+ *
+ * **Reference oracle:** `src/renderer/components/ExecutionQueueBrowser.tsx`
+ * — modal for browsing and managing the execution queue across all
+ * sessions. Supports filtering by current project vs global view; HTML5
+ * drag-and-drop reordering of items within a session; per-item Remove
+ * affordance gated on hover; click-to-switch-session affordance on the
+ * tab-name pill and session-header button.
+ *
+ * **Pre-flight contract (matches audit):**
+ * `grep -E "window\.maestro\.|from ['\"]electron['\"]|shell\.openExternal|shell\.openPath|ipcRenderer" src/renderer/components/ExecutionQueueBrowser.tsx`
+ * → empty (exit 1). No module-load-time IPC, no Electron API surface,
+ * no clipboard touch, no settings store self-source. The component is
+ * pure presentational chrome — every side effect flows through caller-
+ * owned prop callbacks (`onClose`, `onRemoveItem`, `onSwitchSession`,
+ * `onReorderItems`).
+ *
+ * **Import-path adapts (three — matching the L2.5 precedent):**
+ *
+ * - `useLayerStack` resolves from `'../contexts/LayerStackContext'`,
+ *   which now points at the webFull L2.1 LayerStack lift (not the
+ *   renderer module). Standard L2.5 swap — established by every
+ *   layer-stack-registering lift in the wave (`LightboxModal`,
+ *   `ConfirmModal`, `Modal` primitive, etc.).
+ *
+ * - `MODAL_PRIORITIES` resolves from `'../constants/modalPriorities'`,
+ *   which is the webFull re-export shim at
+ *   `src/webFull/constants/modalPriorities.ts` (per Architect 2026-06-08
+ *   audit risk A — non-divergent constants stay re-exported to prevent
+ *   silent drift). Uses `MODAL_PRIORITIES.EXECUTION_QUEUE_BROWSER`
+ *   (670) — the canonical priority value lives in the renderer source
+ *   under the "standard modals" range, and is reachable through the
+ *   re-export shim.
+ *
+ * - `Session`, `Theme`, and `QueuedItem` are NOT pulled from `'../types'`.
+ *
+ *   - `Theme` resolves from `'../../shared/theme-types'` — standard
+ *     L2.5 swap (webFull has no `types/` aggregator; the renderer
+ *     aggregator re-exports from the same canonical source anyway).
+ *
+ *   - `Session` is defined inline as a narrow `ExecutionQueueSession`
+ *     type that captures only the four fields this view reads
+ *     (`id`, `name`, `executionQueue`). The renderer's full `Session`
+ *     interface carries `executionQueue: QueuedItem[]` alongside ~80
+ *     other fields including Electron-bound surfaces (e.g.
+ *     `claudeSession`, `agentSessionId` plumbing) that webFull does
+ *     not model in its wire-protocol `SessionData`. Importing the
+ *     renderer `Session` here would drag the entire renderer types
+ *     graph into the webFull tree — the opposite of the lift's goal.
+ *     This matches the `ExecutionQueueIndicator` precedent.
+ *
+ *   - `QueuedItem` is defined inline covering the 9 fields this view
+ *     actually reads (`id`, `type`, `command`, `commandDescription`,
+ *     `text`, `images`, `tabName`, `timestamp`). The renderer's full
+ *     `QueuedItem` carries additional fields (`tabId`, `commandArgs`,
+ *     `readOnlyMode`) that this view doesn't touch. Matches the
+ *     `QueuedItemsList` precedent of pulling only the specific data
+ *     shape each lifted module consumes rather than copying the entire
+ *     renderer aggregator into `src/shared/` (which would create the
+ *     silent-drift surface audit risk A explicitly warns against).
+ *
+ *   When/if the webFull `SessionData` grows an `executionQueue` field
+ *   over the WebSocket protocol, these narrow types become a
+ *   structural-subtype of the wider Session and callers can pass the
+ *   real Session directly without changes here.
+ *
+ * **What's IN this lift (verbatim from the renderer):**
+ *
+ * - Modal chrome (backdrop with blur, max-width-2xl card, header with
+ *   total-count badge and X close button, footer with reorder hint).
+ * - View-mode toggle (Current Agent vs All Agents) with per-mode item
+ *   counts.
+ * - Per-session item rendering with session-header button (global view
+ *   only) that fires `onSwitchSession` then `onClose`.
+ * - HTML5-style synthetic drag-and-drop (`mousedown` + `mousemove` +
+ *   `mouseup` dance with a 150ms press-and-hold gate before drag
+ *   initiates, drop-zone indicators between items, escape-key cancel,
+ *   global mouseup cleanup).
+ * - Per-item Type icon (`Command` for command items, `MessageSquare`
+ *   for messages), tab-name pill (click → `onSwitchToSession`), time-
+ *   since-queued chip, item content with 100-char truncation for
+ *   messages, command-description chip, image-count chip, Remove
+ *   affordance (hover-gated, fires `onRemoveItem`).
+ * - Drag-active visual states (scale + rotate + shadow + cursor +
+ *   shimmer animation overlay).
+ * - Layer-stack registration with `priority: MODAL_PRIORITIES.EXECUTION_QUEUE_BROWSER`,
+ *   `blocksLowerLayers: true`, `capturesFocus: true`, `focusTrap:
+ *   'strict'`, `onEscape: () => onClose()`.
+ *
+ * **What's OUT (no behavior changed, only consumer wire deferred):**
+ *
+ * - The execution-queue dispatcher / runtime that the parent owns —
+ *   the browser's contract ends at the four prop callbacks.
+ * - Cross-session item move (the renderer source already only supports
+ *   intra-session reorder; cross-session would require a different
+ *   action surface).
+ *
+ * **Theme access pattern:** kept the renderer's `theme: Theme` prop
+ * convention, consistent with every L2.x lift. Callers in webFull call
+ * `const { theme } = useTheme()` at the feature-component level and
+ * thread the theme down.
+ *
+ * **0 IPC namespaces touched. 0 Electron-only APIs touched.**
+ */
+
+import React, { useState, useEffect, useRef } from 'react';
+import { X, MessageSquare, Command, Trash2, Clock, Folder, FolderOpen } from 'lucide-react';
+import { useLayerStack } from '../contexts/LayerStackContext';
+import { MODAL_PRIORITIES } from '../constants/modalPriorities';
+import type { Theme } from '../../shared/theme-types';
+
+/**
+ * Narrow queued-item shape the browser reads. The renderer's full
+ * `QueuedItem` (see `src/renderer/types/index.ts`) carries additional
+ * fields (`tabId`, `commandArgs`, `readOnlyMode`) — none of which this
+ * view touches. Keeping this surface narrow means future wire-
+ * protocol additions to webFull's `SessionData` are structurally
+ * compatible without rewriting callers. Matches the
+ * `QueuedItemsList` / `ExecutionQueueIndicator` precedent.
+ */
+export interface QueuedItem {
+	id: string;
+	type: 'message' | 'command';
+	command?: string;
+	commandDescription?: string;
+	text?: string;
+	images?: unknown[];
+	tabName?: string;
+	timestamp: number;
+}
+
+/**
+ * Narrow session shape the browser reads. The renderer passes its
+ * full `Session` (~80 fields); webFull's `SessionData` does not yet
+ * carry `executionQueue` over the wire — the browser only needs the
+ * four fields below, so the lift uses the narrow contract.
+ */
+export interface ExecutionQueueSession {
+	id: string;
+	name: string;
+	executionQueue: QueuedItem[];
+}
+
+interface ExecutionQueueBrowserProps {
+	isOpen: boolean;
+	onClose: () => void;
+	sessions: ExecutionQueueSession[];
+	activeSessionId: string | null;
+	theme: Theme;
+	onRemoveItem: (sessionId: string, itemId: string) => void;
+	onSwitchSession: (sessionId: string) => void;
+	onReorderItems?: (sessionId: string, fromIndex: number, toIndex: number) => void;
+}
+
+interface DragState {
+	sessionId: string;
+	itemId: string;
+	fromIndex: number;
+}
+
+interface DropIndicator {
+	sessionId: string;
+	index: number;
+}
+
+/**
+ * Modal for browsing and managing the execution queue across all sessions.
+ * Supports filtering by current project vs global view.
+ */
+export function ExecutionQueueBrowser({
+	isOpen,
+	onClose,
+	sessions,
+	activeSessionId,
+	theme,
+	onRemoveItem,
+	onSwitchSession,
+	onReorderItems,
+}: ExecutionQueueBrowserProps) {
+	const [viewMode, setViewMode] = useState<'current' | 'global'>('current');
+	const [dragState, setDragState] = useState<DragState | null>(null);
+	const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
+	const { registerLayer, unregisterLayer } = useLayerStack();
+	const onCloseRef = useRef(onClose);
+	onCloseRef.current = onClose;
+
+	// Drag handlers
+	const handleDragStart = (sessionId: string, itemId: string, index: number) => {
+		setDragState({ sessionId, itemId, fromIndex: index });
+	};
+
+	const handleDragOver = (sessionId: string, index: number) => {
+		// Allow dropping within the same session only (cross-session would require moving items)
+		if (dragState && dragState.sessionId === sessionId) {
+			setDropIndicator({ sessionId, index });
+		}
+	};
+
+	const handleDragEnd = () => {
+		if (dragState && dropIndicator && onReorderItems) {
+			const { sessionId, fromIndex } = dragState;
+			const toIndex = dropIndicator.index;
+
+			// Only reorder if indices differ
+			if (fromIndex !== toIndex && fromIndex !== toIndex - 1) {
+				// Adjust toIndex if dropping after the dragged item
+				const adjustedToIndex = toIndex > fromIndex ? toIndex - 1 : toIndex;
+				onReorderItems(sessionId, fromIndex, adjustedToIndex);
+			}
+		}
+		setDragState(null);
+		setDropIndicator(null);
+	};
+
+	const handleDragCancel = () => {
+		setDragState(null);
+		setDropIndicator(null);
+	};
+
+	// Register with layer stack for proper escape handling
+	useEffect(() => {
+		if (isOpen) {
+			const id = registerLayer({
+				type: 'modal',
+				priority: MODAL_PRIORITIES.EXECUTION_QUEUE_BROWSER,
+				blocksLowerLayers: true,
+				capturesFocus: true,
+				focusTrap: 'strict',
+				onEscape: () => onCloseRef.current(),
+			});
+			return () => unregisterLayer(id);
+		}
+	}, [isOpen, registerLayer, unregisterLayer]);
+
+	if (!isOpen) return null;
+
+	// Get sessions with queued items
+	const sessionsWithQueues = sessions.filter(
+		(s) => s.executionQueue && s.executionQueue.length > 0
+	);
+
+	// Filter based on view mode
+	const filteredSessions =
+		viewMode === 'current'
+			? sessionsWithQueues.filter((s) => s.id === activeSessionId)
+			: sessionsWithQueues;
+
+	// Get total queue count for display
+	const totalQueuedItems = sessionsWithQueues.reduce((sum, s) => sum + s.executionQueue.length, 0);
+
+	const currentSessionItems = activeSessionId
+		? sessions.find((s) => s.id === activeSessionId)?.executionQueue?.length || 0
+		: 0;
+
+	return (
+		<div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+			{/* Backdrop */}
+			<div className="absolute inset-0 bg-black/60" style={{ backdropFilter: 'blur(2px)' }} />
+
+			{/* Modal */}
+			<div
+				className="relative w-full max-w-2xl max-h-[80vh] rounded-lg border shadow-2xl flex flex-col"
+				style={{
+					backgroundColor: theme.colors.bgMain,
+					borderColor: theme.colors.border,
+				}}
+				onClick={(e) => e.stopPropagation()}
+			>
+				{/* Header */}
+				<div
+					className="flex items-center justify-between px-4 py-3 border-b"
+					style={{ borderColor: theme.colors.border }}
+				>
+					<div className="flex items-center gap-3">
+						<h2 className="text-lg font-semibold" style={{ color: theme.colors.textMain }}>
+							Execution Queue
+						</h2>
+						<span
+							className="text-xs px-2 py-0.5 rounded"
+							style={{ backgroundColor: theme.colors.bgActivity, color: theme.colors.textDim }}
+						>
+							{totalQueuedItems} total
+						</span>
+					</div>
+					<button
+						onClick={onClose}
+						className="p-1.5 rounded-md hover:opacity-80 transition-opacity"
+						style={{ color: theme.colors.textDim }}
+					>
+						<X className="w-5 h-5" />
+					</button>
+				</div>
+
+				{/* View Toggle */}
+				<div
+					className="px-4 py-2 border-b flex items-center gap-2"
+					style={{ borderColor: theme.colors.border }}
+				>
+					<button
+						onClick={() => setViewMode('current')}
+						className={`px-3 py-1.5 rounded-md text-sm font-medium flex items-center gap-1.5 transition-colors ${
+							viewMode === 'current' ? '' : 'opacity-60 hover:opacity-80'
+						}`}
+						style={{
+							backgroundColor: viewMode === 'current' ? theme.colors.accent : 'transparent',
+							color: viewMode === 'current' ? theme.colors.bgMain : theme.colors.textMain,
+						}}
+					>
+						<Folder className="w-3.5 h-3.5" />
+						Current Agent
+						{currentSessionItems > 0 && (
+							<span className="ml-1 text-xs opacity-80">({currentSessionItems})</span>
+						)}
+					</button>
+					<button
+						onClick={() => setViewMode('global')}
+						className={`px-3 py-1.5 rounded-md text-sm font-medium flex items-center gap-1.5 transition-colors ${
+							viewMode === 'global' ? '' : 'opacity-60 hover:opacity-80'
+						}`}
+						style={{
+							backgroundColor: viewMode === 'global' ? theme.colors.accent : 'transparent',
+							color: viewMode === 'global' ? theme.colors.bgMain : theme.colors.textMain,
+						}}
+					>
+						<FolderOpen className="w-3.5 h-3.5" />
+						All Agents
+						<span className="ml-1 text-xs opacity-80">({totalQueuedItems})</span>
+					</button>
+				</div>
+
+				{/* Queue List */}
+				<div className="flex-1 overflow-y-auto p-4 space-y-4">
+					{filteredSessions.length === 0 ? (
+						<div className="text-center py-12 text-sm" style={{ color: theme.colors.textDim }}>
+							No items queued{viewMode === 'current' ? ' for this agent' : ''}
+						</div>
+					) : (
+						filteredSessions.map((session) => (
+							<div key={session.id} className="space-y-2">
+								{/* Session Header - only show in global view */}
+								{viewMode === 'global' && (
+									<button
+										onClick={() => {
+											onSwitchSession(session.id);
+											onClose();
+										}}
+										className="text-sm font-medium flex items-center gap-2 hover:underline"
+										style={{ color: theme.colors.accent }}
+									>
+										<Folder className="w-3.5 h-3.5" />
+										{session.name}
+										<span
+											className="text-xs px-1.5 py-0.5 rounded"
+											style={{
+												backgroundColor: theme.colors.bgActivity,
+												color: theme.colors.textDim,
+											}}
+										>
+											{session.executionQueue.length}
+										</span>
+									</button>
+								)}
+
+								{/* Queue Items */}
+								<div className="space-y-0">
+									{session.executionQueue.map((item, index) => (
+										<React.Fragment key={item.id}>
+											{/* Drop indicator before this item */}
+											<DropZone
+												theme={theme}
+												isActive={
+													dropIndicator?.sessionId === session.id && dropIndicator?.index === index
+												}
+												onDragOver={() => handleDragOver(session.id, index)}
+											/>
+											<QueueItemRow
+												item={item}
+												index={index}
+												theme={theme}
+												onRemove={() => onRemoveItem(session.id, item.id)}
+												onSwitchToSession={() => {
+													onSwitchSession(session.id);
+													onClose();
+												}}
+												isDragging={dragState?.itemId === item.id}
+												canDrag={!!onReorderItems && session.executionQueue.length > 1}
+												isAnyDragging={!!dragState}
+												onDragStart={() => handleDragStart(session.id, item.id, index)}
+												onDragEnd={handleDragEnd}
+												onDragCancel={handleDragCancel}
+												onDragOverItem={(dropIndex) => handleDragOver(session.id, dropIndex)}
+											/>
+										</React.Fragment>
+									))}
+									{/* Final drop zone after all items */}
+									<DropZone
+										theme={theme}
+										isActive={
+											dropIndicator?.sessionId === session.id &&
+											dropIndicator?.index === session.executionQueue.length
+										}
+										onDragOver={() => handleDragOver(session.id, session.executionQueue.length)}
+									/>
+								</div>
+							</div>
+						))
+					)}
+				</div>
+
+				{/* Footer */}
+				<div
+					className="px-4 py-3 border-t text-xs"
+					style={{ borderColor: theme.colors.border, color: theme.colors.textDim }}
+				>
+					Drag and drop to reorder. Items are processed sequentially per agent to prevent file
+					conflicts.
+				</div>
+			</div>
+		</div>
+	);
+}
+
+interface DropZoneProps {
+	theme: Theme;
+	isActive: boolean;
+	onDragOver: () => void;
+}
+
+function DropZone({ theme, isActive, onDragOver }: DropZoneProps) {
+	return (
+		<div className="relative h-1 -my-0.5 z-10" onMouseEnter={onDragOver}>
+			<div
+				className="absolute inset-x-3 top-1/2 -translate-y-1/2 h-0.5 rounded-full transition-all duration-200"
+				style={{
+					backgroundColor: isActive ? theme.colors.accent : 'transparent',
+					boxShadow: isActive ? `0 0 8px ${theme.colors.accent}` : 'none',
+					transform: `translateY(-50%) scaleX(${isActive ? 1 : 0})`,
+				}}
+			/>
+		</div>
+	);
+}
+
+interface QueueItemRowProps {
+	item: QueuedItem;
+	index: number;
+	theme: Theme;
+	onRemove: () => void;
+	onSwitchToSession: () => void;
+	isDragging?: boolean;
+	canDrag?: boolean;
+	isAnyDragging?: boolean;
+	onDragStart?: () => void;
+	onDragEnd?: () => void;
+	onDragCancel?: () => void;
+	onDragOverItem?: (dropIndex: number) => void;
+}
+
+function QueueItemRow({
+	item,
+	index,
+	theme,
+	onRemove,
+	onSwitchToSession,
+	isDragging,
+	canDrag,
+	isAnyDragging,
+	onDragStart,
+	onDragEnd,
+	onDragCancel,
+	onDragOverItem,
+}: QueueItemRowProps) {
+	const [isPressed, setIsPressed] = useState(false);
+	const [isHovered, setIsHovered] = useState(false);
+	const pressTimerRef = useRef<NodeJS.Timeout | null>(null);
+	const isDraggingRef = useRef(false);
+	const rowRef = useRef<HTMLDivElement>(null);
+
+	const isCommand = item.type === 'command';
+	const displayText = isCommand
+		? item.command
+		: (item.text?.length || 0) > 100
+			? item.text?.slice(0, 100) + '...'
+			: item.text;
+
+	const timeSinceQueued = Date.now() - item.timestamp;
+	const minutes = Math.floor(timeSinceQueued / 60000);
+	const timeDisplay = minutes < 1 ? 'Just now' : `${minutes}m ago`;
+
+	// When another item is being dragged, use cursor position relative to this item's
+	// vertical midpoint to determine if the drop should be before or after this item.
+	const handleMouseMoveForDrop = (e: React.MouseEvent) => {
+		if (!isAnyDragging || isDragging || !rowRef.current || !onDragOverItem) return;
+		const rect = rowRef.current.getBoundingClientRect();
+		const midY = rect.top + rect.height / 2;
+		onDragOverItem(e.clientY < midY ? index : index + 1);
+	};
+
+	// Handle mouse down for drag initiation
+	const handleMouseDown = (e: React.MouseEvent) => {
+		if (!canDrag || e.button !== 0) return;
+
+		// Don't start drag if clicking on buttons
+		if ((e.target as HTMLElement).closest('button')) return;
+
+		setIsPressed(true);
+
+		// Small delay before initiating drag to allow for click detection
+		pressTimerRef.current = setTimeout(() => {
+			isDraggingRef.current = true;
+			onDragStart?.();
+		}, 150);
+	};
+
+	const handleMouseUp = () => {
+		if (pressTimerRef.current) {
+			clearTimeout(pressTimerRef.current);
+			pressTimerRef.current = null;
+		}
+
+		if (isDraggingRef.current) {
+			onDragEnd?.();
+			isDraggingRef.current = false;
+		}
+
+		setIsPressed(false);
+	};
+
+	const handleMouseLeave = () => {
+		setIsHovered(false);
+
+		if (pressTimerRef.current) {
+			clearTimeout(pressTimerRef.current);
+			pressTimerRef.current = null;
+		}
+
+		// Don't cancel drag on leave - let mouse up handle it
+		if (!isDraggingRef.current) {
+			setIsPressed(false);
+		}
+	};
+
+	// Cleanup timer on unmount
+	useEffect(() => {
+		return () => {
+			if (pressTimerRef.current) {
+				clearTimeout(pressTimerRef.current);
+			}
+		};
+	}, []);
+
+	// Handle escape key to cancel drag
+	useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if (e.key === 'Escape' && isDragging) {
+				onDragCancel?.();
+				isDraggingRef.current = false;
+				setIsPressed(false);
+			}
+		};
+
+		if (isDragging) {
+			window.addEventListener('keydown', handleKeyDown);
+			window.addEventListener('mouseup', handleMouseUp);
+			return () => {
+				window.removeEventListener('keydown', handleKeyDown);
+				window.removeEventListener('mouseup', handleMouseUp);
+			};
+		}
+	}, [isDragging, onDragCancel]);
+
+	// Visual states
+	const showDragReady = canDrag && isHovered && !isDragging && !isAnyDragging;
+	const showGrabbed = isPressed || isDragging;
+	const isDimmed = isAnyDragging && !isDragging;
+
+	return (
+		<div
+			ref={rowRef}
+			className="relative my-1"
+			style={{
+				zIndex: isDragging ? 50 : 1,
+			}}
+			onMouseMove={handleMouseMoveForDrop}
+		>
+			<div
+				className="flex items-start gap-3 px-3 py-2.5 rounded-lg border group select-none"
+				style={{
+					backgroundColor: isDragging ? theme.colors.bgMain : theme.colors.bgSidebar,
+					borderColor: isDragging
+						? theme.colors.accent
+						: showGrabbed
+							? theme.colors.accent + '80'
+							: theme.colors.border,
+					cursor: canDrag ? (isDragging ? 'grabbing' : 'grab') : 'default',
+					transform: isDragging
+						? 'scale(1.02) rotate(1deg)'
+						: showGrabbed
+							? 'scale(1.01)'
+							: 'scale(1)',
+					boxShadow: isDragging
+						? `0 8px 32px ${theme.colors.accent}40, 0 4px 16px rgba(0,0,0,0.3)`
+						: showGrabbed
+							? `0 4px 16px ${theme.colors.accent}20`
+							: 'none',
+					transition: isDragging ? 'none' : 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+					opacity: isDragging ? 0.95 : isDimmed ? 0.5 : 1,
+				}}
+				onMouseDown={handleMouseDown}
+				onMouseUp={handleMouseUp}
+				onMouseEnter={() => setIsHovered(true)}
+				onMouseLeave={handleMouseLeave}
+			>
+				{/* Drag handle indicator */}
+				{canDrag && (
+					<div
+						className="absolute left-1 top-1/2 -translate-y-1/2 flex flex-col gap-0.5 transition-opacity duration-200"
+						style={{
+							opacity: showDragReady || showGrabbed ? 0.6 : 0,
+						}}
+					>
+						<div className="flex gap-0.5">
+							<div
+								className="w-1 h-1 rounded-full"
+								style={{ backgroundColor: theme.colors.textDim }}
+							/>
+							<div
+								className="w-1 h-1 rounded-full"
+								style={{ backgroundColor: theme.colors.textDim }}
+							/>
+						</div>
+						<div className="flex gap-0.5">
+							<div
+								className="w-1 h-1 rounded-full"
+								style={{ backgroundColor: theme.colors.textDim }}
+							/>
+							<div
+								className="w-1 h-1 rounded-full"
+								style={{ backgroundColor: theme.colors.textDim }}
+							/>
+						</div>
+						<div className="flex gap-0.5">
+							<div
+								className="w-1 h-1 rounded-full"
+								style={{ backgroundColor: theme.colors.textDim }}
+							/>
+							<div
+								className="w-1 h-1 rounded-full"
+								style={{ backgroundColor: theme.colors.textDim }}
+							/>
+						</div>
+					</div>
+				)}
+
+				{/* Position indicator */}
+				<span
+					className="text-xs font-mono mt-0.5 w-5 text-center transition-all duration-200"
+					style={{
+						color: theme.colors.textDim,
+						transform: showGrabbed ? 'scale(1.1)' : 'scale(1)',
+						fontWeight: showGrabbed ? 600 : 400,
+					}}
+				>
+					#{index + 1}
+				</span>
+
+				{/* Type icon */}
+				<div
+					className="mt-0.5 transition-transform duration-200"
+					style={{
+						transform: showGrabbed ? 'scale(1.1)' : 'scale(1)',
+					}}
+				>
+					{isCommand ? (
+						<Command className="w-4 h-4" style={{ color: theme.colors.warning }} />
+					) : (
+						<MessageSquare className="w-4 h-4" style={{ color: theme.colors.accent }} />
+					)}
+				</div>
+
+				{/* Content */}
+				<div className="flex-1 min-w-0">
+					<div className="flex items-center gap-2">
+						{item.tabName && (
+							<button
+								onClick={(e) => {
+									e.stopPropagation();
+									onSwitchToSession();
+								}}
+								className="text-xs px-1.5 py-0.5 rounded font-mono hover:opacity-80 transition-opacity cursor-pointer"
+								style={{
+									backgroundColor: theme.colors.accent + '25',
+									color: theme.colors.textMain,
+								}}
+								title="Jump to this session"
+							>
+								{item.tabName}
+							</button>
+						)}
+						<span
+							className="text-xs flex items-center gap-1"
+							style={{ color: theme.colors.textDim }}
+						>
+							<Clock className="w-3 h-3" />
+							{timeDisplay}
+						</span>
+					</div>
+					<div
+						className={`mt-1 text-sm ${isCommand ? 'font-mono' : ''}`}
+						style={{ color: theme.colors.textMain }}
+					>
+						{displayText}
+					</div>
+					{isCommand && item.commandDescription && (
+						<div className="text-xs mt-0.5" style={{ color: theme.colors.textDim }}>
+							{item.commandDescription}
+						</div>
+					)}
+					{item.images && item.images.length > 0 && (
+						<div
+							className="text-xs mt-1 flex items-center gap-1"
+							style={{ color: theme.colors.textDim }}
+						>
+							+ {item.images.length} image{item.images.length > 1 ? 's' : ''}
+						</div>
+					)}
+				</div>
+
+				{/* Remove button */}
+				<button
+					onClick={(e) => {
+						e.stopPropagation();
+						onRemove();
+					}}
+					className="p-1.5 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500/20 transition-all"
+					style={{ color: theme.colors.error }}
+					title="Remove from queue"
+				>
+					<Trash2 className="w-4 h-4" />
+				</button>
+			</div>
+
+			{/* Shimmer effect when grabbed */}
+			{showGrabbed && (
+				<div
+					className="absolute inset-0 rounded-lg pointer-events-none overflow-hidden"
+					style={{
+						background: `linear-gradient(90deg, transparent, ${theme.colors.accent}10, transparent)`,
+						animation: 'shimmer 1.5s infinite',
+					}}
+				/>
+			)}
+		</div>
+	);
+}
