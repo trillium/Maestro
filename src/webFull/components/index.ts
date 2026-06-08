@@ -152,3 +152,12 @@ export { AICommandsPanel } from './AICommandsPanel';
 export { AutoRunDocumentSelector } from './AutoRunDocumentSelector';
 export type { DocTreeNode, DocumentTaskCount } from './AutoRunDocumentSelector';
 export { AutoRunExpandedModal } from './AutoRunExpandedModal';
+export { SendToAgentModal } from './SendToAgentModal';
+export type {
+	SendToAgentModalProps,
+	SendToAgentOptions,
+	SessionOption as SendToAgentSessionOption,
+	SessionStatus as SendToAgentSessionStatus,
+} from './SendToAgentModal';
+export { PromptComposerModal } from './PromptComposerModal';
+export type { PromptComposerModalProps } from './PromptComposerModal';
