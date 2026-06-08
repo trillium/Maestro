@@ -31,15 +31,24 @@
  *      `src/main/ipc/handlers/autorun.ts:224`. The route handlers re-validate
  *      so a 400 fires before any fs call.
  *
- *   4. **No image base64 encoding in `readFile`.** The renderer-side
- *      `fs:readFile` handler returns a `data:` URL for image extensions —
- *      that codepath exists for the renderer's `<img src>` consumers. The
- *      server-side surface returns raw UTF-8 text only; binary files are
- *      out of scope (the AutoRun shell image-loading sites will need an
- *      `/api/images/*` route cluster per the Decision, separate brief).
- *      Binary detection is done up-front via a NUL-byte sniff on the first
- *      8 KiB to reject obvious binary payloads with a 400 instead of
- *      returning a corrupt UTF-8 string.
+ *   4. **No image base64 encoding in `readFile`; `readImage` is the image
+ *      sibling.** The renderer-side `fs:readFile` handler returns a `data:`
+ *      URL for image extensions — that codepath exists for the renderer's
+ *      `<img src>` consumers. The server-side `readFile()` returns raw UTF-8
+ *      text only and 400s on binary content. The image branch lives in
+ *      `readImage()` (added 2026-06-08 to close `ISC-44.shim.fs_read_image_route`
+ *      — the audit-correction route the AutoRun lift discovered was missing
+ *      after the W3-autorun-images cluster shipped). `readImage()` accepts a
+ *      narrow extension allowlist (png / jpg / jpeg / gif / webp / svg —
+ *      mirrors the W3-autorun-images set, deliberately narrower than the
+ *      renderer's full IMAGE_EXTENSIONS at filesystem.ts:41), reads the file
+ *      as a Buffer, and returns `{dataUrl: "data:image/<ext>;base64,<payload>"}`.
+ *      The text-side `readFile()` binary detection (NUL-byte sniff on the
+ *      first 8 KiB) stays — it rejects obvious binary payloads with a 400
+ *      instead of returning a corrupt UTF-8 string. Callers route image
+ *      paths to `readImage()` and text paths to `readFile()` based on
+ *      extension; the AutoRun-lift `useAutoRunImageHandling` hook is the
+ *      first consumer to need both branches.
  *
  *   5. **`writeDoc` accepts a single absolute `path` + `content`.** The
  *      renderer-side `autorun:writeDoc` IPC channel accepts
@@ -168,6 +177,66 @@ async function isProbablyBinary(p: string): Promise<boolean> {
 	}
 }
 
+/* ============ Image extension allowlist ============ */
+
+/**
+ * Fixed allowlist for the `readImage()` surface. Mirrors the
+ * `ALLOWED_IMAGE_EXTENSIONS` list in `src/server/autorun-manager.ts:93` byte-for-byte
+ * so the W3-autorun-images save/list/delete contract and the `fs:read-image`
+ * read contract agree on what counts as a "supported image" across the fs
+ * surface. Deliberately narrower than the renderer-side `IMAGE_EXTENSIONS` in
+ * `src/main/ipc/handlers/filesystem.ts:41` (which also accepts `bmp` + `ico`)
+ * — the AutoRun + useAutoRunImageHandling consumers in webFull only ever
+ * produce / consume these six extensions, and the audit-correction route
+ * (`ISC-44.shim.fs_read_image_route`, 2026-06-08) is gated on the
+ * W3-autorun-images set, not the renderer's wider set. If a future webFull
+ * caller needs `bmp` / `ico`, both lists update together.
+ */
+const READ_IMAGE_ALLOWED_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] as const;
+type ReadImageAllowedExtension = (typeof READ_IMAGE_ALLOWED_EXTENSIONS)[number];
+
+/**
+ * Pull the lowercase extension from an absolute path (without the dot). Used
+ * by `readImage()` for the allowlist check and the `mimeType` derivation.
+ * Returns `''` for paths with no extension so the allowlist check fails loud.
+ */
+function extensionOf(p: string): string {
+	const dot = p.lastIndexOf('.');
+	if (dot < 0 || dot === p.length - 1) return '';
+	return p.slice(dot + 1).toLowerCase();
+}
+
+/**
+ * Validate an image path's extension against the W3-autorun-images allowlist.
+ * Returns `null` if accepted, otherwise a short human-readable reason string
+ * the route layer includes in the 400 reply body. Inlined here so the manager
+ * can re-validate independently of the route layer (defense-in-depth — mirrors
+ * the `isValidFsPath` / `validateFsPath` pair pattern established by the
+ * W3-fs cluster).
+ */
+export function isValidReadImageExtension(p: string): string | null {
+	const ext = extensionOf(p);
+	if (!ext) return 'path must end in a supported image extension';
+	if (!(READ_IMAGE_ALLOWED_EXTENSIONS as readonly string[]).includes(ext)) {
+		return `extension must be one of ${READ_IMAGE_ALLOWED_EXTENSIONS.join(', ')} (got ${JSON.stringify(ext)})`;
+	}
+	return null;
+}
+
+/**
+ * Map a validated image extension to its MIME type. `svg` is the only special
+ * case — the IETF registers `image/svg+xml` (not `image/svg`). All others use
+ * `image/<ext>` directly. This mirrors the renderer-side `fs:readFile` mapping
+ * at `src/main/ipc/handlers/filesystem.ts:158` byte-for-byte; the renderer's
+ * mapping accepts `image/jpg` (rather than the canonical `image/jpeg`) and the
+ * webFull `<img src>` consumer treats `data:image/jpg;base64,...` correctly,
+ * so we preserve wire parity rather than canonicalising.
+ */
+function mimeTypeForImageExtension(ext: ReadImageAllowedExtension): string {
+	if (ext === 'svg') return 'image/svg+xml';
+	return `image/${ext}`;
+}
+
 /* ============ FsManager (server-side) ============ */
 
 export class FsManager {
@@ -224,6 +293,63 @@ export class FsManager {
 				throw err;
 			}
 			return await fsp.readFile(p, 'utf-8');
+		} catch (err: any) {
+			if (err?.code === 'ENOENT' || err?.code === 'EISDIR') {
+				return null;
+			}
+			throw err;
+		}
+	}
+
+	/**
+	 * Read an image file's contents as a `data:image/<ext>;base64,<payload>`
+	 * URL string.
+	 *
+	 * Image-aware sibling of `readFile()` for the AutoRun shell's
+	 * `useAutoRunImageHandling` hook (`src/renderer/hooks/batch/useAutoRunImageHandling.ts:175`),
+	 * which calls `window.maestro.fs.readFile()` and inspects the result with
+	 * `dataUrl.startsWith('data:')`. The text-only `/api/fs/read-file` route
+	 * cannot satisfy that contract: it 400s on binary payloads (every PNG /
+	 * JPEG / WebP has NUL bytes in the header). This method ports the image
+	 * branch of the renderer-side `fs:readFile` handler at
+	 * `src/main/ipc/handlers/filesystem.ts:166-175` byte-for-byte (Buffer ->
+	 * base64 -> `data:<mime>;base64,<payload>`).
+	 *
+	 * Extension allowlist: validated against the W3-autorun-images set
+	 * (`png, jpg, jpeg, gif, webp, svg`) BEFORE the file is opened. Deliberately
+	 * narrower than the renderer's set (which also accepts `bmp` + `ico`) —
+	 * the AutoRun + useAutoRunImageHandling consumers in webFull only produce
+	 * the six allowed extensions, and gating on the broader set would risk
+	 * surfacing arbitrary binary blobs as "images" when the actual consumer
+	 * cannot render them. The route layer pre-validates with the same allowlist
+	 * for defense-in-depth, matching the W3-fs `validateFsPath()` ↔
+	 * `isValidFsPath()` pair pattern.
+	 *
+	 * Returns `null` for `ENOENT` / `EISDIR` (matches the renderer-side
+	 * `fs:readFile` semantics and this manager's `readFile()` so the route
+	 * layer surfaces a 404). Throws an error tagged with `unsupportedExtension`
+	 * when the extension isn't in the allowlist (route layer maps to 400),
+	 * and throws for permission errors etc. so the route layer surfaces a 500.
+	 *
+	 * NO binary-content sniff. The text-side `readFile()` does a NUL-byte
+	 * sniff because the wire format is `text/plain` UTF-8; a binary payload
+	 * would corrupt. Here the wire format is `data:<mime>;base64,…` — every
+	 * byte goes through `Buffer.toString('base64')`, which is binary-safe
+	 * by construction. The extension allowlist is the sole content gate.
+	 */
+	async readImage(p: string): Promise<{ dataUrl: string } | null> {
+		const extReason = isValidReadImageExtension(p);
+		if (extReason) {
+			const err = new Error(extReason);
+			(err as any).unsupportedExtension = true;
+			throw err;
+		}
+		try {
+			const buffer = await fsp.readFile(p);
+			const base64 = buffer.toString('base64');
+			const ext = extensionOf(p) as ReadImageAllowedExtension;
+			const mimeType = mimeTypeForImageExtension(ext);
+			return { dataUrl: `data:${mimeType};base64,${base64}` };
 		} catch (err: any) {
 			if (err?.code === 'ENOENT' || err?.code === 'EISDIR') {
 				return null;
