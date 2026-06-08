@@ -273,6 +273,7 @@ Every feature ported into `src/webFull/` gets a parity catalog at `src/webFull/<
 - [ ] ISC-44.layer-4.2.tab_switcher_modal: Cmd+Alt+T tab-switcher modal (`tabSwitcher` shortcut + `TabSearchModal` surface for fuzzy-search-jump). Currently DEFERRED — the search button is wired but the fuzzy-search modal is a separate lift.
 - [ ] ISC-44.layer-4.2.toggle_tab_star: Cmd+Shift+S toggle-tab-star keyboard shortcut (`toggleTabStar` from renderer/constants/shortcuts.ts). Currently DEFERRED — long-press popover covers the discoverable path.
 - [ ] ISC-44.layer-4.2.tab_context_menu: Right-click context menu with the full action set (renderer's `TabContextMenu`). Currently DEFERRED — long-press popover covers rename/star/move; the rest of the renderer's right-click items map to other DEFERRED entries above.
+- [x] ISC-44.shim.big_3_ipc_strategy: IPC-shim strategy for the three Hard-bucket modals (`NewInstanceModal` + `AutoRun` + `MarketplaceModal`) captured as ONE shared Decision rather than three dedicated briefs. Per Architect audit #10, the three modals collapse onto a single shared route surface: `/api/agents/{detect,getConfig,setConfig,getModels,refresh}` + `/api/ssh-remotes/list` + `/api/fs/{homeDir,stat,readFile}` + `/api/autorun/writeDoc` + `/api/dialog/selectFolder` (with `shell.openExternal` swapped per-site to `window.open(url, '_blank', 'noopener,noreferrer')` per the StandingOvationOverlay precedent — no server route needed). Strategy enumerates per-site disposition (existing route / new route / strip-and-promote / window.open swap) and identifies the SUBSET of new routes that unblocks all three modals simultaneously (the generalising unlock the audit named). Future implementation work spawns child ISCs per route + per modal. **CLOSED 2026-06-08** on this Decision entry. See Decisions 2026-06-08 ("IPC-shim strategy for the big-3 (NewInstanceModal + AutoRun + MarketplaceModal)").
 
 ## Features
 
@@ -4194,4 +4195,168 @@ Composition shape: NOT a modal — inline settings-pane editor. The disclosure f
 - **Wiring the three lifted modals into webFull feature surfaces.** The lifts ship the modal components themselves; the webFull-side glue that decides when to mount each modal (the equivalents of the renderer's `useContextMerge` / `useSummarize` / `useCrossAgentTransfer` orchestrator hooks) lives in feature wiring layers that this brief does not touch. A downstream lift would port those orchestrator hooks and wire `<MergeProgressModal>` / `<SummarizeProgressModal>` / `<TransferProgressModal>` into the webFull surface; that wiring would be tracked under an L3.x / L4.x ISC.
 - **Promoting `useLayerStack` and the `LayerStackContext` provider into the webFull `App` root.** The lifted modals consume `useLayerStack` and will throw `useLayerStack must be used within a LayerStackProvider` if the webFull root has not mounted the provider yet. The provider lift was tracked under an L2.1 ISC and is assumed in place per the established sibling-modal precedent (`AgentErrorModal`, `AgentPromptComposerModal`, `AutoRunLightbox`, etc. all consume the same hook in webFull). If the provider has not been threaded into the webFull root, the consuming feature surfaces will fail loud the first time one of these modals mounts; that surfaces as an L4.x wiring task.
 - **Lifting `getAgentDisplayName` into the webFull tree as a sibling helper.** Currently imported from `'../../shared/agentMetadata'`. The shared helper is pure and webFull-safe, so a local lift would be pure code motion. Out of scope for this brief; matches the `AgentErrorModal` precedent.
+
+### 2026-06-08 — IPC-shim strategy for the big-3 (NewInstanceModal + AutoRun + MarketplaceModal)
+
+Per Architect audit #10, the three Hard-bucket modals collapse onto ONE shared IPC-shim plan rather than three independent briefs. Total IPC surface across the three is 30 callsites (18 + 7 + 5 by `grep -c "window\.maestro\." src/renderer/components/{NewInstanceModal,AutoRun,MarketplaceModal}.tsx`), but the underlying namespace count is small: `agents.*`, `sshRemote.*`, `fs.*`, `autorun.*`, `dialog.*`, and `shell.openExternal` — six namespaces total, with massive callsite-level reuse. The unlock count is **five new server routes + one per-site browser-API swap** that simultaneously unblock all three modals for leaf-parade-eligible lifts. SHA at append time: `2353a51766de9f931d59c0a157fe8045deb55639`. Files cited: `src/renderer/components/NewInstanceModal.tsx` (1822 LOC, 18 sites), `src/renderer/components/AutoRun.tsx` (2285 LOC, 7 sites), `src/renderer/components/MarketplaceModal.tsx` (1434 LOC, 5 sites); preload contracts in `src/main/preload/{fs,agents,sshRemote,autorun,system}.ts`; existing route surface in `src/main/web-server/routes/apiRoutes.ts` (verified — only `api/fonts/detected`, `api/history`, `api/session(s)`, `api/settings`, `api/stats/*`, `api/theme`, `api/wakatime/*` registered today).
+
+#### Per-modal IPC enumeration with disposition
+
+**NewInstanceModal.tsx — 18 sites across 5 namespaces:**
+
+| Line | Call                                              | Namespace | Disposition                                                                                                                                                                                          |
+| ---- | ------------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 129  | `fs.homeDir()`                                    | fs        | NEW ROUTE `GET /api/fs/home-dir`                                                                                                                                                                     |
+| 200  | `fs.stat(trimmedPath, activeSshRemoteId)`         | fs        | NEW ROUTE `GET /api/fs/stat?path&sshRemoteId`                                                                                                                                                        |
+| 240  | `agents.detect(sshRemoteId)`                      | agents    | NEW ROUTE `GET /api/agents/detect?sshRemoteId`                                                                                                                                                       |
+| 284  | `agents.getConfig(agent.id)`                      | agents    | NEW ROUTE `GET /api/agents/:id/config`                                                                                                                                                               |
+| 371  | `dialog.selectFolder()`                           | dialog    | STRIP-AND-PROMOTE — replace with `<input type="file" webkitdirectory>` host-wired pattern, fall back to text-entry path in headless; promote `onFolderPick?: () => Promise<string \| null>` to props |
+| 381  | `agents.refresh(agentId)`                         | agents    | NEW ROUTE `POST /api/agents/:id/refresh`                                                                                                                                                             |
+| 405  | `agents.getModels(agentId, forceRefresh)`         | agents    | NEW ROUTE `GET /api/agents/:id/models?force`                                                                                                                                                         |
+| 602  | `sshRemote.getConfigs()`                          | sshRemote | NEW ROUTE `GET /api/ssh-remotes`                                                                                                                                                                     |
+| 971  | `agents.setConfig(agent.id, updatedConfig)`       | agents    | NEW ROUTE `POST /api/agents/:id/config` (writer half of getConfig)                                                                                                                                   |
+| 1000 | `shell.openExternal(url)`                         | shell     | `window.open(url, '_blank', 'noopener,noreferrer')` SWAP per StandingOvationOverlay precedent                                                                                                        |
+| 1270 | `agents.detect()`                                 | agents    | (same as 240, no-arg variant)                                                                                                                                                                        |
+| 1277 | `agents.getModels(activeToolType)`                | agents    | (same as 405)                                                                                                                                                                                        |
+| 1288 | `agents.getConfig(activeToolType)`                | agents    | (same as 284)                                                                                                                                                                                        |
+| 1312 | `sshRemote.getConfigs()`                          | sshRemote | (same as 602)                                                                                                                                                                                        |
+| 1385 | `fs.stat(projectRoot, editSshRemoteId)`           | fs        | (same as 200)                                                                                                                                                                                        |
+| 1482 | `agents.getModels(selectedToolType, true)`        | agents    | (same as 405)                                                                                                                                                                                        |
+| 1495 | `agents.refresh(selectedToolType)`                | agents    | (same as 381)                                                                                                                                                                                        |
+| 1791 | `agents.setConfig(selectedToolType, otherConfig)` | agents    | (same as 971)                                                                                                                                                                                        |
+
+After dedup: **5 distinct route methods + 1 strip-and-promote + 1 window.open swap** cover all 18 sites.
+
+**AutoRun.tsx — 7 sites across 3 namespaces:**
+
+| Line | Call                                                           | Namespace | Disposition                                                                                                       |
+| ---- | -------------------------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------- |
+| 265  | `fs.readFile(absolutePath, sshRemoteId)`                       | fs        | NEW ROUTE `GET /api/fs/read-file?path&sshRemoteId` (returns `data:` URL for images per existing preload contract) |
+| 285  | `fs.readFile(src, sshRemoteId)`                                | fs        | (same as 265)                                                                                                     |
+| 314  | `fs.readFile(pathToLoad, sshRemoteId)`                         | fs        | (same as 265)                                                                                                     |
+| 653  | `autorun.writeDoc(folderPath, filename, content, sshRemoteId)` | autorun   | NEW ROUTE `POST /api/autorun/write-doc` body `{folderPath, filename, content, sshRemoteId}`                       |
+| 748  | `autorun.writeDoc(folderPath, filename, content, sshRemoteId)` | autorun   | (same as 653)                                                                                                     |
+| 1467 | `shell.openExternal(href)`                                     | shell     | `window.open` SWAP                                                                                                |
+| 1520 | `shell.openExternal(href)`                                     | shell     | `window.open` SWAP                                                                                                |
+
+After dedup: **2 distinct route methods + 1 window.open swap** cover all 7 sites. AutoRun also reaches `window.maestro.autoRun.*` / `window.maestro.dialog.*` / `window.maestro.shell.openPath` / `window.maestro.images.*` at runtime per prior Decisions (ISC-44.layer-2.5.autorun_expanded_modal — line 253; deferred-list line 4181), but those callsites are NOT in the 7-site count above because they live in the `AutoRun` view's RUNTIME flows below the module-load surface this strategy targets; a full `ISC-44.layer-2.5.autorun_view` lift remains a separate larger ticket.
+
+**MarketplaceModal.tsx — 5 sites across 2 namespaces:**
+
+| Line | Call                                      | Namespace | Disposition                                                      |
+| ---- | ----------------------------------------- | --------- | ---------------------------------------------------------------- |
+| 304  | `shell.openExternal(href)`                | shell     | `window.open` SWAP                                               |
+| 425  | `shell.openExternal(playbook.authorLink)` | shell     | `window.open` SWAP                                               |
+| 930  | `dialog.selectFolder()`                   | dialog    | STRIP-AND-PROMOTE — same `onFolderPick` prop as NewInstanceModal |
+| 1181 | `shell.openExternal(url)`                 | shell     | `window.open` SWAP                                               |
+| 1209 | `shell.openExternal(url)`                 | shell     | `window.open` SWAP                                               |
+
+After dedup: **0 new routes + 1 strip-and-promote + 1 window.open swap** cover all 5 sites. MarketplaceModal is the LIGHTEST of the three — its entire IPC surface drains to ZERO new server routes; the only host-wired primitive it needs is the same `onFolderPick` prop the NewInstanceModal lift also needs.
+
+#### The unlock subset
+
+The **minimum new server-route subset** that makes all three modals leaf-parade-eligible is **5 routes** (handlers wire to existing managers in `src/main/`, mirroring the W2-wakatime + W2-stats provider-registry pattern from ISC-44.general.wakatime / ISC-44.general.stats):
+
+1. `GET /api/fs/home-dir` → mirrors `fs:homeDir` IPC; wraps `os.homedir()`. Used by NewInstanceModal:129.
+2. `GET /api/fs/stat?path=<>&sshRemoteId=<>` → mirrors `fs:stat` IPC. Used by NewInstanceModal:200, NewInstanceModal:1385.
+3. `GET /api/fs/read-file?path=<>&sshRemoteId=<>` → mirrors `fs:readFile` IPC; returns `data:` URL for images per existing contract. Used by AutoRun:265, AutoRun:285, AutoRun:314. (Also retires the cross-fork edge from `ImageDiffViewer` per ISC-44.layer-2.5.image_diff_viewer line 240 — paired unlock.)
+4. `GET /api/agents/detect?sshRemoteId=<>` + `GET /api/agents/:id/config` + `POST /api/agents/:id/config` + `GET /api/agents/:id/models?force=<>` + `POST /api/agents/:id/refresh` → mirrors the 5 `agents:*` IPC channels. Used by NewInstanceModal (8 sites after dedup).
+5. `GET /api/ssh-remotes` → mirrors `ssh-remote:getConfigs` IPC. Used by NewInstanceModal:602, NewInstanceModal:1312.
+
+Plus **1 new POST route specifically for AutoRun:**
+
+6. `POST /api/autorun/write-doc` body `{folderPath, filename, content, sshRemoteId}` → mirrors `autorun:writeDoc` IPC. Used by AutoRun:653, AutoRun:748.
+
+(Six routes total if you count the agents-family as five sub-routes; five if you count the agents family as one namespace cluster. The audit's "unlock count" phrasing maps cleanest to **five route CLUSTERS**: `fs`, `agents`, `ssh-remotes`, `autorun`, and the standalone `fs/home-dir` which could fold into the `fs` cluster — call it **five new route clusters** as the headline figure.)
+
+The two HOST-WIRED primitives (no server route, no IPC at all):
+
+A. `dialog.selectFolder()` STRIP-AND-PROMOTE — both NewInstanceModal:371 and MarketplaceModal:930 promote `onFolderPick?: () => Promise<string | null>` onto the prop surface. Host wiring is `<input type="file" webkitdirectory>` in the browser, falling back to text-entry path if `webkitdirectory` is unsupported. Matches the L2.5 `AppOverlays` precedent of stripping renderer self-source and promoting to props.
+
+B. `shell.openExternal(url)` per-site SWAP to `window.open(url, '_blank', 'noopener,noreferrer')` — covers 7 sites (NewInstanceModal:1000, AutoRun:1467+1520, MarketplaceModal:304+425+1181+1209). Matches the L2.5 `StandingOvationOverlay` precedent (Decisions 2026-06-08 line 298 — audit decision: `openExternal → window.open` swap) word-for-word. All swaps are inside event-handler-deferred click paths, NOT module-load, so the swap is mechanical with zero runtime risk in either tree.
+
+#### Provider-registry pattern (reuse W2-wakatime + W2-stats precedent)
+
+For each new namespace cluster, the route handler queries a lazy-registered provider following the established pattern (`registerFsProvider()` / `getFsProvider()`, `registerAgentsProvider()` / `getAgentsProvider()`, `registerSshRemotesProvider()` / `getSshRemotesProvider()`, `registerAutorunProvider()` / `getAutorunProvider()`). When no provider is registered, the route 503s — Electron path continues using IPC, both stacks run side-by-side because the underlying state (agent detection cache, SSH config file, autorun docs on disk) is the cross-mode contract. This neutralises the "renderer and webFull diverge silently" audit risk.
+
+Provider files would land at:
+
+- `src/server/fs-manager.ts` (mirrors `src/main/utils/fs-helpers.ts` patterns; no `electron` import)
+- `src/server/agents-manager.ts` (mirrors `src/main/agent-detection.ts`, `src/main/agents/*.ts`; no `electron` import)
+- `src/server/ssh-remotes-manager.ts` (mirrors `src/main/ssh-remote-manager.ts`)
+- `src/server/autorun-manager.ts` (mirrors `src/main/autorun-manager.ts`)
+
+Each provider registers in `src/server/index.ts` before `WebServer.start()`, matching the W2-wakatime + W2-stats wiring.
+
+#### Concrete brief shape for the next IPC-shim wave
+
+The next brief in this chain should pick ONE of the five route clusters and ship it server-half, following the W2-wakatime template exactly:
+
+```
+Title: "W3-fs — server-side fs-helper REST routes (GET /api/fs/{home-dir,stat,read-file})"
+Branch: w3-fs-server-port
+Off: main @ <current SHA>
+Source files to port (no `electron` import allowed): src/main/utils/fs-helpers.ts → src/server/fs-manager.ts
+Server routes to add (additive only, in src/main/web-server/routes/apiRoutes.ts):
+  GET /:token/api/fs/home-dir
+  GET /:token/api/fs/stat?path&sshRemoteId
+  GET /:token/api/fs/read-file?path&sshRemoteId
+Provider registry: FsProvider interface + registerFsProvider() + getFsProvider() in src/server/fs-manager.ts
+Headless wiring: src/server/index.ts wires the manager + provider before WebServer.start()
+Files NOT touched: src/web/, src/renderer/, src/main/utils/fs-helpers.ts (Electron path keeps the IPC handler — both stacks run side-by-side because the filesystem itself is the cross-mode contract)
+ISC closure: ISC-44.shim.fs_routes (new sub-ISC under the umbrella ISC-44.shim.big_3_ipc_strategy) flipped from [ ] to [x] CLOSED
+```
+
+The other four route clusters follow the same template with namespace-substitution (`agents`, `ssh-remotes`, `autorun`, and the dialog-folder-picker which is purely client-side strip-and-promote — no server brief needed, just a webFull-side prop-promotion in each modal lift).
+
+#### Preconditions in dependency order
+
+1. **(Server) W3-fs — `/api/fs/{home-dir,stat,read-file}` routes** land first. Unblocks: AutoRun:265+285+314, NewInstanceModal:129+200+1385, AND retires the `ISC-44.layer-2.5.image_diff_viewer` cross-fork edge from `GitDiffViewer` per line 240.
+2. **(Server) W3-ssh-remotes — `/api/ssh-remotes` route** lands second. Unblocks: NewInstanceModal:602+1312. Smallest of the new providers (single read-side route, single config file).
+3. **(Server) W3-agents — `/api/agents/{detect,:id/config[GET+POST],:id/models,:id/refresh}` cluster** lands third. Unblocks: NewInstanceModal (8 sites after dedup). LARGEST route cluster — five sub-routes; should be ONE branch to keep the agent-detection cache coherent.
+4. **(Server) W3-autorun — `/api/autorun/write-doc` route** lands fourth. Unblocks: AutoRun:653+748. (NOTE: a full `ISC-44.layer-2.5.autorun_view` lift also needs `/api/autorun/*` read-side routes for the doc-loader paths; this brief only ships the write-side, sufficient for the leaf-parade-eligibility of the modal SHELL, not the full view.)
+5. **(Client) Per-modal lift wave** — once routes 1-4 are landed, the three modals each get their own leaf-parade lift brief: `leaf-marketplace-modal` (lightest — only needs strip-and-promote + window.open swaps, no new routes); `leaf-newinstance-modal` (needs routes 1-3 + strip-and-promote + 1 window.open swap); `leaf-autorun-view-shell` (needs routes 1+4 + 2 window.open swaps; note the underlying `AutoRun` view itself is a separate larger lift per line 4181, but the modal SHELL surface that this strategy unlocks for leaf-parade is the focused subset).
+
+#### Cross-fork edge accounting (the lift-time payoff)
+
+After all five routes + two host-wired primitives land, the cross-fork edge count from these three modals drops to:
+
+- `NewInstanceModal` → ZERO module-load IPC; remaining cross-fork edges are pure-data type imports (matches the `GroupChatInput` precedent of edges that collapse to zero when types replicate to `src/shared/`).
+- `AutoRun` (modal SHELL only) → ZERO module-load IPC; the runtime `AutoRun.*` / `images.*` / `shell.openPath` reach below the shell surface is a separate ISC.
+- `MarketplaceModal` → ZERO IPC at any level; the lightest of the three goes straight to leaf-parade-eligible the moment routes 1-3 aren't needed (it doesn't read fs / agents / ssh-remotes / autorun) — actually MarketplaceModal could lift TODAY with just the window.open swap + `onFolderPick` prop promotion. **MarketplaceModal is leaf-parade-eligible AHEAD of the route work.** Flagged for the orchestrator as a low-cost early win.
+
+#### Audit-decision summary (the 3-5 bullets)
+
+- The big-3 collapse onto **five new server route clusters** (`fs`, `agents`, `ssh-remotes`, `autorun`-write, plus the standalone `fs/home-dir` folding into `fs`) + **one mechanical browser-API swap** (`shell.openExternal` → `window.open(url, '_blank', 'noopener,noreferrer')`, 7 sites total) + **one strip-and-promote prop** (`onFolderPick` for `dialog.selectFolder`, 2 sites).
+- `MarketplaceModal` is leaf-parade-eligible TODAY (window.open swap + onFolderPick prop only — no new routes). Low-cost early win for the orchestrator.
+- `AutoRun` modal SHELL is leaf-parade-eligible after routes 1 (`/api/fs/*`) + 4 (`/api/autorun/write-doc`); the full AutoRun VIEW remains a separate larger ISC (`ISC-44.layer-2.5.autorun_view`, line 4181).
+- `NewInstanceModal` is leaf-parade-eligible after routes 1+2+3 land together (`fs` + `ssh-remotes` + `agents`); it's the largest of the three by callsite count (18 sites) but the namespace count is small (5 namespaces, with massive dedup).
+- The provider-registry pattern from W2-wakatime + W2-stats neutralises the renderer/webFull drift risk — both stacks run side-by-side because the underlying state (filesystem, agent detection cache, ssh config, autorun docs) is the cross-mode contract.
+
+#### Out of scope
+
+- **Implementation of any of the five route clusters.** This Decision is the strategy doc; each route cluster ships under its own sub-ISC (`ISC-44.shim.fs_routes`, `ISC-44.shim.agents_routes`, `ISC-44.shim.ssh_remotes_routes`, `ISC-44.shim.autorun_routes`) spawned from this umbrella ISC-44.shim.big_3_ipc_strategy. Future briefs follow the W2-wakatime template byte-for-byte.
+- **The actual modal lifts.** Each of the three modals gets its own `leaf-<modal>-shim` brief after the route dependencies land. The lifts follow the established L2.5 leaf-parade pattern (verbatim copy + import-path adapts + parity catalog).
+- **`AutoRun` view lift.** `ISC-44.layer-2.5.autorun_view` per line 4181 remains a separate larger ticket; this strategy unlocks the SHELL surface for the modal version of AutoRun (`AutoRunExpandedModal`), not the full editor view.
+- **`useAgentConfiguration` webFull adapter.** Per line 4062 ("the central blocker"), a webFull-side hook adapter consuming the new `/api/agents/*` routes is its own ticket; this strategy ships the SERVER routes, not the client-side hook port. The hook lift is downstream of the route lift and benefits from the same routes the big-3 use.
+
+#### Cited prior art and SHAs
+
+- Architect audit #10 (this brief's source) — recommended ONE shared Decision for the big-3 IPC strategy rather than three dedicated briefs.
+- W2-wakatime precedent: ISC-44.general.wakatime (line 162) — server-side `WakaTimeManager` port pattern, `WakaTimeProvider` interface + lazy registry, headless wiring in `src/server/index.ts`.
+- W2-stats precedent: ISC-44.general.stats (line 164) — same provider-registry pattern repeated; five additive REST routes added without touching `src/main/ipc/handlers/stats.ts`.
+- StandingOvationOverlay precedent: Decisions 2026-06-08 line 298 — `openExternal` → `window.open(url, '_blank', 'noopener,noreferrer')` swap policy, including security rationale (`noopener` prevents reverse-tabnabbing, `noreferrer` suppresses HTTP Referer).
+- AppOverlays precedent: Decisions 2026-06-08 line 297 — strip-and-promote-to-prop pattern for renderer-only architecture (settings store / modal store) at the lift boundary.
+- `useAgentConfiguration` blocker callout: line 4062 — names the same five server routes (`/api/agents/detect`, `/api/ssh-remotes/list`, `/api/agents/config/{get,set}`) that this strategy formalises.
+- `AutoRun` view deferral: line 4181 — names `/api/autorun/*` + `/api/fs/*` + `/api/images/*` as the unlock for the full view; this strategy ships the subset of those that the SHELL needs.
+- Pre-flight inventory commands (verified at SHA `2353a51766de9f931d59c0a157fe8045deb55639`):
+  - `grep -c "window\.maestro\." src/renderer/components/NewInstanceModal.tsx` → 18
+  - `grep -c "window\.maestro\." src/renderer/components/AutoRun.tsx` → 7
+  - `grep -c "window\.maestro\." src/renderer/components/MarketplaceModal.tsx` → 5
+  - `grep -nE "api/[a-z-]+" src/main/web-server/routes/apiRoutes.ts | grep -oE "api/[a-z-]+" | sort -u` → 7 existing namespaces (`fonts`, `history`, `session(s)`, `settings`, `stats`, `theme`, `wakatime`); none of the big-3's required namespaces (`fs`, `agents`, `ssh-remotes`, `autorun`, `dialog`) are present.
+
+#### Verification of this append
+
+This Decision is itself the closure of `ISC-44.shim.big_3_ipc_strategy` — the audit asked for ONE Decision, not three briefs, and the strategy is the deliverable. Future implementation work spawns child ISCs from this umbrella ticket per the dependency order above. No code touched; no test runs needed for this Decision-only ISC. Files modified: `ISA.md` only (one ISC line added at line 276, one Decision entry appended at end of Decisions section). Files NOT touched: `src/web/`, `src/webFull/`, `src/renderer/`, `src/main/`, `src/server/` — all zero bytes diff vs `main`.
+
 - **Composing the three modals onto the L2.1 `Modal` primitive.** The renderer sources pre-date L2.1 and render their own 450px-wide chrome verbatim. A future chrome-convergence sweep could re-port them onto `Modal` + a new `ProgressModalShell` shared primitive; out of scope per the verbatim-lift rule. The three lifts coexist with `Modal`-using siblings in the webFull tree by intent — same as the `MergeProgressOverlay` / `SummarizeProgressOverlay` pair on the inline-overlay axis.
