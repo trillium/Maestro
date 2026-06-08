@@ -75,3 +75,5 @@ export { AutoRunnerHelpModal } from './AutoRunnerHelpModal';
 export { ShortcutsHelpModal } from './ShortcutsHelpModal';
 export { ToggleButtonGroup } from './ToggleButtonGroup';
 export type { ToggleButtonOption } from './ToggleButtonGroup';
+export { AgentErrorModal } from './AgentErrorModal';
+export type { RecoveryAction } from './AgentErrorModal';
