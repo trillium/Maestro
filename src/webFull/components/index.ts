@@ -115,3 +115,8 @@ export { GitStatusWidget } from './GitStatusWidget';
 export type { GitStatusWidgetProps, GitFileChange, GitFileDetails } from './GitStatusWidget';
 export { MaestroSilhouette, AnimatedMaestro } from './MaestroSilhouette';
 export { TemplateAutocompleteDropdown } from './TemplateAutocompleteDropdown';
+export { QueuedItemsList } from './QueuedItemsList';
+export type {
+	QueuedItem as QueuedItemsListItem,
+	QueuedItemType as QueuedItemsListItemType,
+} from './QueuedItemsList';
