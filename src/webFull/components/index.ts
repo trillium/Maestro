@@ -134,3 +134,4 @@ export { SummarizeProgressOverlay } from './SummarizeProgressOverlay';
 export type { SummarizeProgressOverlayProps } from './SummarizeProgressOverlay';
 export { AutoRunLightbox } from './AutoRunLightbox';
 export { GroupChatInput } from './GroupChatInput';
+export { StandingOvationOverlay } from './StandingOvationOverlay';
