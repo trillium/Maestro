@@ -570,7 +570,11 @@ void notImplementedWrite;
 // shouldUsePty() sense, so pty_subscribe on a non-terminal session simply
 // produces an empty backfill — harmless.
 
-const rawPtyMultiplexer = new RawPtyMultiplexer();
+// L6.3 — wire disk-backed scrollback persistence. Passing `dataDir` triggers
+// the multiplexer's boot-time scan of `<dataDir>/pty-scrollback/` and enables
+// per-publish writes to `<sessionId>.log` + `<sessionId>.seq` + `<sessionId>.meta`.
+// Without `dataDir` the multiplexer stays in-memory only (L6.1 behavior).
+const rawPtyMultiplexer = new RawPtyMultiplexer({ dataDir });
 
 // Map a bare-sessionId from the WS protocol to the multiplexer / PtySpawner
 // key. Terminal sessions are 1:1 with PTYs in this codebase, so always
@@ -690,7 +694,8 @@ async function main() {
 			'L0f also wires Sentry init for error capture (no-op without MAESTRO_SENTRY_DSN).'
 	);
 	console.log(
-		'[maestro-server] Layer 6.1: raw PTY multiplexer ready (subscribe/publish over WS)'
+		`[maestro-server] Layer 6.3: raw PTY multiplexer ready with disk-backed ` +
+			`scrollback (data dir: ${path.join(dataDir, 'pty-scrollback')})`,
 	);
 }
 
