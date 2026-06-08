@@ -87,3 +87,5 @@ export type {
 	ExecutionQueueSession,
 } from './ExecutionQueueIndicator';
 export { FirstRunCelebration } from './FirstRunCelebration';
+export { GroupChatMessages } from './GroupChatMessages';
+export type { GroupChatMessagesHandle } from './GroupChatMessages';
