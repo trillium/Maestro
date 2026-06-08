@@ -239,6 +239,20 @@ export { DocumentSelector } from './Wizard/shared/DocumentSelector';
 export type { DocumentSelectorProps } from './Wizard/shared/DocumentSelector';
 export { TypingIndicator } from './Wizard/shared/TypingIndicator';
 
+// Phase 2 medium-IPC additions (ISC-44.lift.wizard_{resume_modal,document_editor,phase_review_screen}_lifted)
+// ExistingDocsModal SKIPPED — no `/api/autorun/delete-folder` route exists in the
+// server tree as of this lift (only `delete-image` is shipped). See ISA.md entry
+// for the unblocking-route follow-up.
+export { WizardResumeModal } from './Wizard/WizardResumeModal';
+export {
+	DocumentEditor,
+	ImagePreview as DocumentEditorImagePreview,
+	MarkdownImage as DocumentEditorMarkdownImage,
+	openDocumentPreviewExternalLink,
+} from './Wizard/shared/DocumentEditor';
+export type { DocumentEditorProps } from './Wizard/shared/DocumentEditor';
+export { PhaseReviewScreen } from './Wizard/screens/PhaseReviewScreen';
+
 // Wizard tour
 export { TourOverlay } from './Wizard/tour/TourOverlay';
 export { TourStep } from './Wizard/tour/TourStep';
