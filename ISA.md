@@ -183,8 +183,9 @@ Every feature ported into `src/webFull/` gets a parity catalog at `src/webFull/<
 - **2026-06-07** — All time estimates stripped from this ISA and the support docs per principal's standing instruction. Plan is ordered by dependency, not by duration. Logical port order lives in `WEB_PORT_ORDER.md`. See feedback memory `feedback_no_time_estimates`.
 - **2026-06-07** — **Delegation-first execution model adopted.** Trillium's framing: this whole port project is delegate-able because we have a working Electron app as a golden reference. Per-feature agents read `src/renderer/<surface>`, drive both Electron (via CDP at `localhost:9222`) and `src/webFull/` (via Vite dev server) side-by-side, port the UI to talk to the existing WS protocol, and verify by comparing observed behavior. Each agent runs in a worktree-isolated branch. Layer 0 from `WEB_PORT_ORDER.md` must complete BEFORE the delegation pipeline starts — agents need a vanilla-Node server entrypoint to run their builds against. After Layer 0, Layers 1-9 fan out cleanly: most features within a layer have no inter-feature dependencies and can run in parallel agents. The delegation harness itself (per-feature agent contract, comparison loop, merge protocol) is the next concrete artifact to design once Layer 0 work begins.
 - **2026-06-07** — **Function parity is the verification bar, not structural/protocol parity.** Methodology lives in `WEB_PARITY_VERIFICATION.md`: every feature port ships with a user-story catalog of (`Given`, `When`, `Then`) triples; assertions use a fixed vocabulary (`hasElement`, `hasText`, `wsFrameMatches`, `dbHasRow`, `fsHas`, `processHas`, `notificationFired`, `broadcast`) that's deliberately layout-independent; the catalog is recorded against the running Electron app (the test oracle) and replayed against webFull; pass criteria = every catalog story passes on both targets. Pixel-perfect, DOM-identical, and CSS-identical parity are explicitly rejected as the wrong bar. The catalog IS the spec — not the renderer source — to protect against agent hallucination and renderer-bug canonization.
-- **2026-06-08** — **Layer 0b shipped: write/interrupt/execute callbacks wired via ProcessManager.** `src/server/process-manager-adapter.ts` (108 LOC) instantiates a single `ProcessManager` at server startup; `src/server/index.ts` routes `setWriteToSessionCallback` / `setExecuteCommandCallback` / `setInterruptSessionCallback` through it. Suffix logic (`-ai` / `-terminal`) mirrors `src/main/web-server/web-server-factory.ts` lines 248-272 verbatim — the adapter reads the live sessions store on every call (lookup closure), matches by `s.id`, and resolves `inputMode === 'ai' ? '${id}-ai' : '${id}-terminal'`. ProcessManager confirmed electron-free (grep across `src/main/process-manager/`, `src/main/parsers/`, `src/shared/` returned zero `from 'electron'` hits). `tsconfig.server.json` `include` widened to add `src/main/process-manager/**/*.ts` and `src/main/parsers/**/*.ts`; build still emits cleanly and `grep -r "from 'electron'" dist/server/` stays empty. **Out of scope (still stubbed, deferred to Layer 0c):** `switchMode`, `selectSession`, `selectTab`, `newTab`, `closeTab`, `renameTab`, `starTab`, `reorderTab`, `toggleBookmark` — these need write-back to the sessions store and WebSocket broadcast plumbing. `executeCommand`'s "spawn new session if none exists" semantics also deferred — full session-creation flow lives in the renderer today and needs a server-side port plus a UI surface in Layer 3. **Trade-off accepted:** Layer 0b ships a strict minimum (write/execute/interrupt to an already-running PTY) so command-send and Ctrl-C end-to-end work from the mobile-companion bundle against a session whose process the adapter owns. Spawning that process from the server is a Layer 0c+ concern.
-- **2026-06-08** — **Layer 0a shipped: bootable headless server with read-only callbacks.** The Fastify+WebSocket server in `src/main/web-server/WebServer.ts` now boots from a vanilla Node entrypoint (`src/server/index.ts`) with no `electron` import in the runtime path. What landed: (1) `src/shared/data-dir.ts` — dual-mode userData resolver that returns `app.getPath('userData')` under Electron else `MAESTRO_DATA_DIR ?? ~/.config/maestro` (covers ISC-29); (2) `src/shared/file-store.ts` — `electron-store`-shape JSON file store that preserves on-disk schema so a desktop data dir is portable into headless mode (covers ISC-36); (3) `src/server/index.ts` — entrypoint that constructs `WebServer`, wires READ callbacks (`getSessions`, `getSessionDetail`, `getTheme`, `getBionifyReadingMode`, `getCustomCommands`, `getHistory` — the last stubbed to `[]` pending HistoryManager port) to file-backed stores; WRITE callbacks (`writeToSession`, `executeCommand`, `interruptSession`, `switchMode`, `selectSession`, `selectTab`, `newTab`, `closeTab`, `renameTab`, `starTab`, `reorderTab`, `toggleBookmark`) log a warning and return `false`; (4) `tsconfig.server.json` — server-only TS build (rootDir `src`, outDir `dist`) so `dist/server/index.js` is the runnable artifact; (5) `package.json` scripts `build:server` + `start:web`. **What's deferred to Layer 0b:** WRITE-callback implementations — these currently round-trip through the renderer in Electron mode (via `CallbackRegistry`); in headless mode they need server-side equivalents that drive `ProcessManager` / `AgentDetector` / the session store directly. Also deferred: `HistoryManager` port (currently stubbed empty) since it imports `electron`. **Upstream files touched:** zero — every change is in NEW files (`src/server/`, `src/shared/`, `tsconfig.server.json`) plus a two-line `package.json` scripts addition (no dependency or build-graph mutation). The TS errors in the WIP that this finishing pass resolved were three `unknown` widenings from `FileStore.get<V>()`'s overload set being shadowed by the keyof-T overload when `T = Record<string, unknown>`; fixed with `as string` casts at the three call sites rather than redesigning the overloads (the helper is intentionally electron-store-shaped, not type-safe-on-arbitrary-keys). Also corrected `tsconfig.server.json` outDir from `dist/server` → `dist` so the rootDir-relative output lands at `dist/server/index.js` (matching `package.json` `start:web`); without this the build produced `dist/server/server/index.js` and `start:web` would have failed.
+- **2026-06-08** — **Layer 0a shipped: bootable headless server with read-only callbacks.** The Fastify+WebSocket server in `src/main/web-server/WebServer.ts` now boots from a vanilla Node entrypoint (`src/server/index.ts`) with no `electron` import in the runtime path. What landed: (1) `src/shared/data-dir.ts` — dual-mode userData resolver that returns `app.getPath('userData')` under Electron else `MAESTRO_DATA_DIR ?? ~/.config/maestro` (covers ISC-29); (2) `src/shared/file-store.ts` — `electron-store`-shape JSON file store that preserves on-disk schema so a desktop data dir is portable into headless mode (covers ISC-36); (3) `src/server/index.ts` — entrypoint that constructs `WebServer`, wires READ callbacks (`getSessions`, `getSessionDetail`, `getTheme`, `getBionifyReadingMode`, `getCustomCommands`, `getHistory` — the last stubbed to `[]` pending HistoryManager port) to file-backed stores; WRITE callbacks (`writeToSession`, `executeCommand`, `interruptSession`, `switchMode`, `selectSession`, `selectTab`, `newTab`, `closeTab`, `renameTab`, `starTab`, `reorderTab`, `toggleBookmark`) log a warning and return `false`; (4) `tsconfig.server.json` — server-only TS build (rootDir `src`, outDir `dist`) so `dist/server/index.js` is the runnable artifact; (5) `package.json` scripts `build:server` + `start:web`. **Upstream files touched:** zero — every change is in NEW files (`src/server/`, `src/shared/`, `tsconfig.server.json`) plus a two-line `package.json` scripts addition.
+- **2026-06-08** — **Layer 0b shipped: write/interrupt/execute callbacks wired via ProcessManager.** `src/server/process-manager-adapter.ts` (108 LOC) instantiates a single `ProcessManager` at server startup; `src/server/index.ts` routes `setWriteToSessionCallback` / `setExecuteCommandCallback` / `setInterruptSessionCallback` through it. Suffix logic (`-ai` / `-terminal`) mirrors `src/main/web-server/web-server-factory.ts` lines 248-272 verbatim — the adapter reads the live sessions store on every call (lookup closure), matches by `s.id`, and resolves `inputMode === 'ai' ? '${id}-ai' : '${id}-terminal'`. ProcessManager confirmed electron-free (grep across `src/main/process-manager/`, `src/main/parsers/`, `src/shared/` returned zero `from 'electron'` hits). `tsconfig.server.json` `include` widened to add `src/main/process-manager/**/*.ts` and `src/main/parsers/**/*.ts`; build still emits cleanly and `grep -r "from 'electron'" dist/server/` stays empty. **Out of scope (still stubbed, deferred to Layer 0c):** `switchMode`, `selectSession`, `selectTab`, `newTab`, `closeTab`, `renameTab`, `starTab`, `reorderTab`, `toggleBookmark` — these need write-back to the sessions store and WebSocket broadcast plumbing. `executeCommand`'s "spawn new session if none exists" semantics also deferred — full session-creation flow lives in the renderer today and needs a server-side port plus a UI surface in Layer 3.
+- **2026-06-08** — **Layer 1.1 shipped: `vite.config.webfull.mts` sibling config + dev/build scripts.** Pattern: a parallel Vite config file (sibling to `vite.config.web.mts`) drives the `src/webFull/` divergent tree without touching `vite.config.web.mts`, `tsconfig.json`, or any file under `src/web/`. Surgical changes from the original: `root` and `publicDir` repointed to `src/webFull/` (+ `src/webFull/public/`); `outDir` → `dist/webfull/`; dev port 5174 → 5176, preview 5175 → 5177 (both `strictPort: true`); `@web` alias re-pointed at `src/webFull` so any import that resolves through the alias stays inside the webfull tree (no new `@webfull` alias added — keeping import sites stable across the two trees). All other settings (`define`, `esbuild`, build target, manualChunks logic, css, optimizeDeps, proxy) carried over verbatim. The `mobile/` and `desktop/` path-based chunk naming continues to work because `src/webFull/` was forked verbatim from `src/web/`. Files touched: NEW `vite.config.webfull.mts`; 2-line scripts addition in `package.json` (`dev:webfull`, `build:webfull`). NOT added to the aggregate `build` script — that stays upstream-compatible. No edits to `src/web/`, `vite.config.web.mts`, or `tsconfig.json`. Plumbing only — subsequent web-UI port agents now have a `src/webFull/` build target to land against.
 
 ## Changelog
 
@@ -280,3 +281,59 @@ Every feature ported into `src/webFull/` gets a parity catalog at `src/webFull/<
 
 - **Probe:** `grep -r "from 'electron'" dist/server/`
 - **Result:** Empty (exit 0, no matches). Adding `src/main/process-manager/**/*.ts` and `src/main/parsers/**/*.ts` to the server tsconfig did not pull any electron imports into the compiled dist tree. Status: **PASS**.
+### 2026-06-08 — Layer 1.1 evidence (webfull Vite scaffold)
+
+**Environment:** Node 22.22.1 via fnm; npm 10.9.4; macOS arm64 (laptop); branch `layer-1.1-vite-webfull`; base SHA `7530a134b`.
+
+#### Build verification (`npm run build:webfull`)
+
+```
+> maestro@0.15.3 build:webfull
+> vite build --config vite.config.webfull.mts
+
+vite v5.4.21 building for production...
+transforming...
+✓ 2532 modules transformed.
+rendering chunks...
+computing gzip size...
+../../dist/webfull/index.html                    3.54 kB │ gzip:   1.41 kB
+../../dist/webfull/assets/mobile-DWpJmM3c.css   47.56 kB │ gzip:   9.36 kB
+../../dist/webfull/assets/main-Boi2EcHi.js       0.81 kB │ gzip:   0.47 kB │ map:     0.10 kB
+../../dist/webfull/assets/react-Dl6t4piS.js    141.58 kB │ gzip:  45.37 kB │ map:   347.24 kB
+../../dist/webfull/assets/mobile-Bju1GwAh.js   962.75 kB │ gzip: 319.27 kB │ map: 3,195.98 kB
+✓ built in 4.52s
+```
+
+Exit code 0. Produced artifacts (paths relative to repo root):
+
+- `dist/webfull/index.html` (3.54 kB) — contains `<div id="root">` mount point and references hashed asset paths (`./assets/main-Boi2EcHi.js`, `./assets/react-Dl6t4piS.js`, `./assets/mobile-Bju1GwAh.js`, `./assets/mobile-DWpJmM3c.css`).
+- `dist/webfull/assets/` — hashed JS/CSS bundles + source maps.
+- `dist/webfull/manifest.json`, `dist/webfull/sw.js`, `dist/webfull/icons/` — copied from `src/webFull/public/` (publicDir routing verified).
+
+Chunk naming preserved the `mobile-`/`react-`/`main-` prefixes from the upstream chunk strategy — confirms manualChunks logic resolves correctly against the `src/webFull/` tree (the verbatim fork from `src/web/`).
+
+Note: vite emitted a CSS minification warning (`Expected identifier but found "-"`) — same warning surfaces against `src/web/` upstream (it is in the existing CSS source); not a regression introduced by this config.
+
+#### Dev mode verification (`npm run dev:webfull`)
+
+```
+> maestro@0.15.3 dev:webfull
+> vite --config vite.config.webfull.mts
+
+  VITE v5.4.21  ready in 146 ms
+
+  ➜  Local:   http://localhost:5176/
+```
+
+```
+$ curl -s -o /dev/null -w "HTTP %{http_code}\n" http://localhost:5176/
+HTTP 200
+```
+
+`strictPort: true` honored at 5176 (web stays on 5174). Dev server killed cleanly after probe; no stray listener (`lsof -nP -iTCP:5176 -sTCP:LISTEN` → no rows).
+
+#### Scope check
+
+- `git diff main..HEAD -- src/web/ | wc -c` → `0` (zero bytes — `src/web/` untouched on this branch range relative to `main`).
+- `git diff main..HEAD --stat` → 3 files: `ISA.md`, `package.json`, `vite.config.webfull.mts` (plus Layer 0a's pre-existing files via `7530a134b` ancestor). The layer-1.1 commit itself adds only the three files above.
+- `node_modules` symlink (created for the build) removed before commit; not tracked.
