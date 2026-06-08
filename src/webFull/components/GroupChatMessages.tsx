@@ -65,7 +65,7 @@ import type {
 	GroupChatParticipant,
 	GroupChatState,
 } from '../../shared/group-chat-types';
-import { MarkdownRenderer } from '../../renderer/components/MarkdownRenderer';
+import { MarkdownRenderer } from './MarkdownRenderer';
 import { stripMarkdown } from '../../renderer/utils/textProcessing';
 import {
 	generateParticipantColor,
