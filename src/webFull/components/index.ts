@@ -252,6 +252,7 @@ export {
 } from './Wizard/shared/DocumentEditor';
 export type { DocumentEditorProps } from './Wizard/shared/DocumentEditor';
 export { PhaseReviewScreen } from './Wizard/screens/PhaseReviewScreen';
+export { ConversationScreen } from './Wizard/screens/ConversationScreen';
 
 // Wizard tour
 export { TourOverlay } from './Wizard/tour/TourOverlay';
