@@ -65,6 +65,8 @@ function createMockCallbacks(): MessageHandlerCallbacks {
 		selectTab: vi.fn().mockResolvedValue(true),
 		newTab: vi.fn().mockResolvedValue({ tabId: 'new-tab-123' }),
 		createSession: vi.fn().mockResolvedValue({ sessionId: 'new-session-xyz' }),
+		processSpawn: vi.fn().mockResolvedValue({ pid: 12345, success: true, sshRemoteUsed: null }),
+		processKill: vi.fn().mockResolvedValue(true),
 		closeTab: vi.fn().mockResolvedValue(true),
 		renameTab: vi.fn().mockResolvedValue(true),
 		starTab: vi.fn().mockResolvedValue(true),
@@ -662,6 +664,200 @@ describe('WebSocketMessageHandler', () => {
 				const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
 				expect(response.type).toBe('error');
 				expect(response.message).toContain('boom');
+			});
+		});
+	});
+
+	describe('WS process-lifecycle family — process_spawn (Web → Desktop)', () => {
+		it('should spawn process and return pid + success', async () => {
+			handler.handleMessage(client, {
+				type: 'process_spawn',
+				sessionId: 'session-1',
+				toolType: 'claude-code',
+				cwd: '/tmp/proj',
+				command: 'claude',
+				args: ['--print'],
+			} as WebClientMessage);
+
+			await vi.waitFor(() => {
+				expect(callbacks.processSpawn).toHaveBeenCalledWith(
+					expect.objectContaining({
+						sessionId: 'session-1',
+						toolType: 'claude-code',
+						cwd: '/tmp/proj',
+						command: 'claude',
+						args: ['--print'],
+					})
+				);
+			});
+
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response.type).toBe('process_spawn_result');
+			expect(response.success).toBe(true);
+			expect(response.sessionId).toBe('session-1');
+			expect(response.pid).toBe(12345);
+			expect(response.sshRemoteUsed).toBeNull();
+		});
+
+		it('should forward sessionSshRemoteConfig (contract vector 1)', async () => {
+			handler.handleMessage(client, {
+				type: 'process_spawn',
+				sessionId: 'session-2',
+				toolType: 'opencode',
+				cwd: '/x',
+				command: 'opencode',
+				args: ['-p', 'hello'],
+				sessionSshRemoteConfig: { enabled: true, remoteId: 'r1' },
+				sessionCustomEnvVars: { FOO: 'bar' },
+				querySource: 'user',
+				tabId: 't-1',
+			} as WebClientMessage);
+
+			await vi.waitFor(() => {
+				expect(callbacks.processSpawn).toHaveBeenCalledWith(
+					expect.objectContaining({
+						sessionSshRemoteConfig: { enabled: true, remoteId: 'r1' },
+						sessionCustomEnvVars: { FOO: 'bar' },
+						querySource: 'user',
+						tabId: 't-1',
+					})
+				);
+			});
+		});
+
+		it('should reject process_spawn with missing required fields', () => {
+			handler.handleMessage(client, {
+				type: 'process_spawn',
+				sessionId: 'session-1',
+				toolType: 'claude-code',
+				// missing cwd, command, args
+			} as WebClientMessage);
+
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response.type).toBe('error');
+			expect(callbacks.processSpawn).not.toHaveBeenCalled();
+		});
+
+		it('should reject process_spawn with non-array args', () => {
+			handler.handleMessage(client, {
+				type: 'process_spawn',
+				sessionId: 'session-1',
+				toolType: 'claude-code',
+				cwd: '/x',
+				command: 'claude',
+				args: 'not-an-array' as unknown as string[],
+			} as WebClientMessage);
+
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response.type).toBe('error');
+			expect(callbacks.processSpawn).not.toHaveBeenCalled();
+		});
+
+		it('should report when process_spawn is not configured', () => {
+			const handlerNoCallbacks = new WebSocketMessageHandler();
+
+			handlerNoCallbacks.handleMessage(client, {
+				type: 'process_spawn',
+				sessionId: 'session-1',
+				toolType: 'claude-code',
+				cwd: '/x',
+				command: 'claude',
+				args: [],
+			} as WebClientMessage);
+
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response.type).toBe('error');
+			expect(response.message).toContain('Process spawn not configured');
+		});
+
+		it('should report failure when spawn callback returns null', async () => {
+			(callbacks.processSpawn as any).mockResolvedValue(null);
+			handler.handleMessage(client, {
+				type: 'process_spawn',
+				sessionId: 'session-1',
+				toolType: 'claude-code',
+				cwd: '/x',
+				command: 'claude',
+				args: [],
+			} as WebClientMessage);
+
+			await vi.waitFor(() => {
+				const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+				expect(response.type).toBe('process_spawn_result');
+				expect(response.success).toBe(false);
+			});
+		});
+
+		it('should send error frame on spawn callback exception', async () => {
+			(callbacks.processSpawn as any).mockRejectedValue(new Error('spawn boom'));
+			handler.handleMessage(client, {
+				type: 'process_spawn',
+				sessionId: 'session-1',
+				toolType: 'claude-code',
+				cwd: '/x',
+				command: 'claude',
+				args: [],
+			} as WebClientMessage);
+
+			await vi.waitFor(() => {
+				const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+				expect(response.type).toBe('error');
+				expect(response.message).toContain('spawn boom');
+			});
+		});
+	});
+
+	describe('WS process-lifecycle family — process_kill (Web → Desktop)', () => {
+		it('should kill process by sessionId', async () => {
+			handler.handleMessage(client, {
+				type: 'process_kill',
+				sessionId: 'session-1',
+			} as WebClientMessage);
+
+			await vi.waitFor(() => {
+				expect(callbacks.processKill).toHaveBeenCalledWith('session-1');
+			});
+
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response.type).toBe('process_kill_result');
+			expect(response.success).toBe(true);
+			expect(response.sessionId).toBe('session-1');
+		});
+
+		it('should reject process_kill with missing sessionId', () => {
+			handler.handleMessage(client, {
+				type: 'process_kill',
+			} as WebClientMessage);
+
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response.type).toBe('error');
+			expect(callbacks.processKill).not.toHaveBeenCalled();
+		});
+
+		it('should report when process_kill is not configured', () => {
+			const handlerNoCallbacks = new WebSocketMessageHandler();
+
+			handlerNoCallbacks.handleMessage(client, {
+				type: 'process_kill',
+				sessionId: 'session-1',
+			} as WebClientMessage);
+
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response.type).toBe('error');
+			expect(response.message).toContain('Process kill not configured');
+		});
+
+		it('should report false when kill callback returns false', async () => {
+			(callbacks.processKill as any).mockResolvedValue(false);
+			handler.handleMessage(client, {
+				type: 'process_kill',
+				sessionId: 'unknown-session',
+			} as WebClientMessage);
+
+			await vi.waitFor(() => {
+				const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+				expect(response.type).toBe('process_kill_result');
+				expect(response.success).toBe(false);
 			});
 		});
 	});

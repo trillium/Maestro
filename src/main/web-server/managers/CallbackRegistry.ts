@@ -27,6 +27,9 @@ import type {
 	GetBionifyReadingModeCallback,
 	GetCustomCommandsCallback,
 	GetHistoryCallback,
+	ProcessSpawnCallback,
+	ProcessSpawnRequest,
+	ProcessKillCallback,
 } from '../types';
 
 const LOG_CONTEXT = 'CallbackRegistry';
@@ -54,6 +57,10 @@ export interface WebServerCallbacks {
 	reorderTab: ReorderTabCallback | null;
 	toggleBookmark: ToggleBookmarkCallback | null;
 	getHistory: GetHistoryCallback | null;
+	/** WS process-lifecycle family — umbrella Decision 2026-06-08. */
+	processSpawn: ProcessSpawnCallback | null;
+	/** WS process-lifecycle family — umbrella Decision 2026-06-08. */
+	processKill: ProcessKillCallback | null;
 }
 
 export class CallbackRegistry {
@@ -77,6 +84,8 @@ export class CallbackRegistry {
 		reorderTab: null,
 		toggleBookmark: null,
 		getHistory: null,
+		processSpawn: null,
+		processKill: null,
 	};
 
 	// ============ Getter Methods ============
@@ -172,6 +181,27 @@ export class CallbackRegistry {
 		return this.callbacks.getHistory?.(projectPath, sessionId) ?? [];
 	}
 
+	/**
+	 * WS process-lifecycle family — proxy through to the registered
+	 * `processSpawn` callback. Returns `null` when no callback is registered
+	 * (the Electron desktop server omits this surface).
+	 */
+	async processSpawn(
+		request: ProcessSpawnRequest
+	): Promise<{ pid: number; success: boolean; sshRemoteUsed?: string | null } | null> {
+		if (!this.callbacks.processSpawn) return null;
+		return this.callbacks.processSpawn(request);
+	}
+
+	/**
+	 * WS process-lifecycle family — proxy through to the registered
+	 * `processKill` callback. Returns `false` when no callback is registered.
+	 */
+	async processKill(sessionId: string): Promise<boolean> {
+		if (!this.callbacks.processKill) return false;
+		return this.callbacks.processKill(sessionId);
+	}
+
 	// ============ Setter Methods ============
 
 	setGetSessionsCallback(callback: GetSessionsCallback): void {
@@ -255,6 +285,16 @@ export class CallbackRegistry {
 
 	setGetHistoryCallback(callback: GetHistoryCallback): void {
 		this.callbacks.getHistory = callback;
+	}
+
+	setProcessSpawnCallback(callback: ProcessSpawnCallback): void {
+		logger.info('[CallbackRegistry] setProcessSpawnCallback called', LOG_CONTEXT);
+		this.callbacks.processSpawn = callback;
+	}
+
+	setProcessKillCallback(callback: ProcessKillCallback): void {
+		logger.info('[CallbackRegistry] setProcessKillCallback called', LOG_CONTEXT);
+		this.callbacks.processKill = callback;
 	}
 
 	// ============ Check Methods ============

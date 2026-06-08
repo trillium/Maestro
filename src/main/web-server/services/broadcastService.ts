@@ -255,6 +255,97 @@ export class BroadcastService {
 	}
 
 	/**
+	 * WS process-lifecycle family — `process_data` Server→Client frame.
+	 *
+	 * Umbrella Decision 2026-06-08 (`docs/ws-process-lifecycle-decision`,
+	 * contract vector 2). Delivers raw stdout/stderr chunks as they arrive
+	 * from the PTY/child — NO newline framing, NO batching, NO line-buffering.
+	 * Renderer-side consumers (Wizard `conversationManager`, AutoRun batch
+	 * output renderer, group-chat agent stdout reader) reassemble partial
+	 * JSON / partial Markdown themselves, so any server-side framing would
+	 * break the streaming UI.
+	 *
+	 * Wire shape mirrors the existing `session_output` broadcast at
+	 * `src/main/process-listeners/data-listener.ts:151-159` modulo the
+	 * `process:*`-aligned `source: 'stdout' | 'stderr'` tag (the older frame
+	 * uses 'ai' | 'terminal' for renderer-side tab routing — this new frame
+	 * carries the raw PTY-source label so wave-16 callers can distinguish
+	 * the two streams without inspecting the session shape).
+	 *
+	 * Fan-out is broad (broadcastToAll, not broadcastToSession) because the
+	 * webFull Wizard / AutoRun callers track sessionId on the receiving side
+	 * and don't depend on `subscribedSessionId` filtering — they multiplex
+	 * many sessions in one client. Mirrors `session_output`'s fan-out
+	 * posture.
+	 */
+	broadcastProcessData(sessionId: string, chunk: string, source: 'stdout' | 'stderr'): void {
+		this.broadcastToAll({
+			type: 'process_data',
+			sessionId,
+			chunk,
+			source,
+			timestamp: Date.now(),
+		});
+	}
+
+	/**
+	 * WS process-lifecycle family — `process_exit` Server→Client frame.
+	 * Mirrors the Electron `process:exit` IPC event subscribed via `onExit`
+	 * at `src/main/preload/process.ts:193-197`.
+	 */
+	broadcastProcessExit(sessionId: string, code: number, signal?: string | null): void {
+		this.broadcastToAll({
+			type: 'process_exit',
+			sessionId,
+			code,
+			signal: signal ?? null,
+			timestamp: Date.now(),
+		});
+	}
+
+	/**
+	 * WS process-lifecycle family — `process_thinking_chunk` Server→Client
+	 * frame. OPTIONAL capability per contract vector 3 in the umbrella
+	 * Decision — only emitted by agents that produce partial thinking
+	 * content (Claude Code today). webFull subscribers MUST optional-chain.
+	 *
+	 * Mirrors the Electron `process:thinking-chunk` IPC event at
+	 * `src/main/preload/process.ts:226-231` (and the forwarding listener at
+	 * `src/main/process-listeners/forwarding-listeners.ts:27-29`).
+	 */
+	broadcastProcessThinkingChunk(sessionId: string, content: string): void {
+		this.broadcastToAll({
+			type: 'process_thinking_chunk',
+			sessionId,
+			content,
+			timestamp: Date.now(),
+		});
+	}
+
+	/**
+	 * WS process-lifecycle family — `process_tool_execution` Server→Client
+	 * frame. OPTIONAL capability per contract vector 3 — only emitted by
+	 * agents that surface structured tool-execution events (OpenCode, Codex).
+	 *
+	 * Mirrors the Electron `process:tool-execution` IPC event at
+	 * `src/main/preload/process.ts:236-243` (and the forwarding listener at
+	 * `src/main/process-listeners/forwarding-listeners.ts:32-34`). The
+	 * `toolEvent` shape matches `ToolExecution` from
+	 * `src/main/process-manager/types.ts:123-127`.
+	 */
+	broadcastProcessToolExecution(
+		sessionId: string,
+		toolEvent: { toolName: string; state: unknown; timestamp: number }
+	): void {
+		this.broadcastToAll({
+			type: 'process_tool_execution',
+			sessionId,
+			toolEvent,
+			timestamp: Date.now(),
+		});
+	}
+
+	/**
 	 * Broadcast AutoRun state to all connected web clients
 	 * Called when batch processing starts, progresses, or stops
 	 */

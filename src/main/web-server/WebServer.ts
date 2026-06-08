@@ -68,6 +68,8 @@ import type {
 	GetBionifyReadingModeCallback,
 	GetCustomCommandsCallback,
 	GetHistoryCallback,
+	ProcessSpawnCallback,
+	ProcessKillCallback,
 } from './types';
 
 // Logger context for all web server logs
@@ -353,6 +355,24 @@ export class WebServer {
 		this.callbackRegistry.setGetHistoryCallback(callback);
 	}
 
+	/**
+	 * WS process-lifecycle family — register the `process_spawn` Client→Server
+	 * frame handler. The wired callback MUST route through `wrapSpawnWithSsh`
+	 * before invoking `ProcessManager.spawn` (umbrella Decision contract
+	 * vector 1).
+	 */
+	setProcessSpawnCallback(callback: ProcessSpawnCallback): void {
+		this.callbackRegistry.setProcessSpawnCallback(callback);
+	}
+
+	/**
+	 * WS process-lifecycle family — register the `process_kill` Client→Server
+	 * frame handler.
+	 */
+	setProcessKillCallback(callback: ProcessKillCallback): void {
+		this.callbackRegistry.setProcessKillCallback(callback);
+	}
+
 	// ============ Rate Limiting ============
 
 	setRateLimitConfig(config: Partial<RateLimitConfig>): void {
@@ -515,6 +535,12 @@ export class WebServer {
 			getLiveSessionInfo: (sessionId: string) =>
 				this.liveSessionManager.getLiveSessionInfo(sessionId),
 			isSessionLive: (sessionId: string) => this.liveSessionManager.isSessionLive(sessionId),
+			// WS process-lifecycle family (umbrella Decision 2026-06-08). Routes
+			// through CallbackRegistry so deployments that don't register the
+			// callbacks (e.g. the Electron desktop server) cleanly resolve
+			// `null` / `false` and the handler surfaces a "not configured" error.
+			processSpawn: async (request) => this.callbackRegistry.processSpawn(request),
+			processKill: async (sessionId: string) => this.callbackRegistry.processKill(sessionId),
 		});
 	}
 
@@ -572,6 +598,42 @@ export class WebServer {
 
 	broadcastCustomCommands(commands: CustomAICommand[]): void {
 		this.broadcastService.broadcastCustomCommands(commands);
+	}
+
+	/**
+	 * WS process-lifecycle family — see BroadcastService doc for contract.
+	 * Wired by `src/server/index.ts` against the shared `ProcessManager`
+	 * `'data'` event.
+	 */
+	broadcastProcessData(sessionId: string, chunk: string, source: 'stdout' | 'stderr'): void {
+		this.broadcastService.broadcastProcessData(sessionId, chunk, source);
+	}
+
+	/**
+	 * WS process-lifecycle family — wired against the shared
+	 * `ProcessManager` `'exit'` event.
+	 */
+	broadcastProcessExit(sessionId: string, code: number, signal?: string | null): void {
+		this.broadcastService.broadcastProcessExit(sessionId, code, signal);
+	}
+
+	/**
+	 * WS process-lifecycle family — OPTIONAL. Wired against the shared
+	 * `ProcessManager` `'thinking-chunk'` event.
+	 */
+	broadcastProcessThinkingChunk(sessionId: string, content: string): void {
+		this.broadcastService.broadcastProcessThinkingChunk(sessionId, content);
+	}
+
+	/**
+	 * WS process-lifecycle family — OPTIONAL. Wired against the shared
+	 * `ProcessManager` `'tool-execution'` event.
+	 */
+	broadcastProcessToolExecution(
+		sessionId: string,
+		toolEvent: { toolName: string; state: unknown; timestamp: number }
+	): void {
+		this.broadcastService.broadcastProcessToolExecution(sessionId, toolEvent);
 	}
 
 	/**
