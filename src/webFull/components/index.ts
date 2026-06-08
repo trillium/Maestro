@@ -255,3 +255,32 @@ export { AgentComparisonChart } from './UsageDashboard/AgentComparisonChart';
 export { DurationTrendsChart } from './UsageDashboard/DurationTrendsChart';
 export { SourceDistributionChart } from './UsageDashboard/SourceDistributionChart';
 export type { StatsTimeRange, StatsAggregation } from './UsageDashboard/types';
+
+// ============================================================================
+// UsageDashboard Phase 1.5 leaf wave — 6 additional 0-IPC charts
+// ----------------------------------------------------------------------------
+// Lifted after the Phase-1 agent flagged these as additional 0-IPC leaves
+// beyond its original 13-file scope. All verified 0 `window.maestro` references.
+//
+// Files lifted (verbatim, with the same Theme / StatsAggregation /
+// colorblindPalettes import-path swaps as Phase 1):
+//   - AgentEfficiencyChart       (Theme + StatsAggregation + COLORBLIND_AGENT)
+//   - LocationDistributionChart  (Theme + StatsAggregation + COLORBLIND_BINARY)
+//   - PeakHoursChart             (Theme + StatsAggregation)
+//   - WeekdayComparisonChart     (Theme + StatsAggregation)
+//   - SessionStats               (Theme + Session + ToolType + COLORBLIND_AGENT;
+//                                 missing `isGitRepo` / `worktreeConfig` on
+//                                 webFull's `SessionData` are accessed via the
+//                                 existing `(session as any)` escape hatch the
+//                                 renderer already uses for `sshRemoteId` etc.)
+//   - SummaryCards               (Theme + Session + StatsAggregation;
+//                                 `s.filePreviewTabs` accessed via `(s as any)`
+//                                 since webFull's `SessionData` does not yet
+//                                 expose it — same pattern as SessionStats.)
+// ============================================================================
+export { AgentEfficiencyChart } from './UsageDashboard/AgentEfficiencyChart';
+export { LocationDistributionChart } from './UsageDashboard/LocationDistributionChart';
+export { PeakHoursChart } from './UsageDashboard/PeakHoursChart';
+export { WeekdayComparisonChart } from './UsageDashboard/WeekdayComparisonChart';
+export { SessionStats } from './UsageDashboard/SessionStats';
+export { SummaryCards } from './UsageDashboard/SummaryCards';
