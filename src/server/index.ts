@@ -52,6 +52,7 @@ import { getFontsManager } from './fonts-manager';
 import { getFsManager } from './fs-manager';
 import { getMarketplaceManager } from './marketplace-manager';
 import { getAgentsManager } from './agents-manager';
+import { getSshRemotesManager } from './ssh-remotes-manager';
 import {
 	registerWakatimeProvider,
 	registerStatsProvider,
@@ -59,6 +60,7 @@ import {
 	registerFsProvider,
 	registerMarketplaceProvider,
 	registerAgentsProvider,
+	registerSshRemotesProvider,
 } from '../main/web-server/routes/apiRoutes';
 import type { StatsTimeRange } from '../shared/stats-types';
 
@@ -346,6 +348,50 @@ registerAgentsProvider({
 	detectAgent: (agentId: string) => agentsManager.detectAgent(agentId),
 	getCapabilities: (agentId: string) =>
 		agentsManager.getCapabilities(agentId) as unknown as Record<string, unknown>,
+});
+
+// W3-ssh-remotes — SshRemotes manager. Server-side port of the read-side
+// `ssh-remote:*` IPC handlers at `src/main/ipc/handlers/ssh-remote.ts`. Backs
+// the new `/api/ssh-remotes/*` REST routes (closes
+// ISC-44.shim.ssh_remotes_routes, server-half — the LAST of the 5 sibling
+// sub-ISCs under the umbrella ISC-44.shim.big_3_ipc_strategy). With this
+// cluster shipped, the IPC-shim Decision is complete: all 5 route clusters
+// (fs / agents / marketplace / autorun-via-FsProvider.writeDoc / ssh-remotes)
+// have landed server-side. The renderer-side IPC handlers are NOT touched;
+// both stacks can run side-by-side in a hybrid Electron + headless-sidecar
+// deployment because the underlying state (the `sshRemotes` array +
+// `defaultSshRemoteId` key in maestro-settings.json, plus the user's
+// `~/.ssh/config` file) is the cross-mode contract.
+//
+// Stateless after construction — no DB handle, no network egress, no async
+// initialization, no watchers. Each call reads the live settings store on
+// invocation (same posture as the renderer-side handler). No SIGINT/SIGTERM
+// shutdown hook needed (no resources to release).
+//
+// Read-only sub-surface per the umbrella Decision's "ship the read sub-
+// surface, defer the writers" posture established by W3-agents:
+//   - getConfigs / getDefaultId / getSshConfigHosts shipped
+//   - saveConfig / deleteConfig / setDefaultId / test deferred to follow-up
+//     briefs (config CRUD needs a widened SshRemotesProvider.set; test needs
+//     `ssh` binary + buildSshArgs/parseSSHError extraction)
+const sshRemotesManager = getSshRemotesManager({
+	get: <V>(key: string, defaultValue: V): V => {
+		// FileStore's keyof-T overload returns `unknown` for arbitrary string keys;
+		// cast at the boundary, same pattern used by `let securityToken = ...` below.
+		return settingsStore.get<V>(key, defaultValue) as V;
+	},
+});
+
+// Register the manager as the default SshRemotes provider for the REST routes.
+// MUST run before `server.start()` so the routes have a backing provider by
+// the time the first client request arrives. The renderer-side Electron path
+// does NOT register a provider — the `ssh-remote:*` IPC channels continue to
+// own that surface — and the routes correctly 503 when called outside the
+// headless server.
+registerSshRemotesProvider({
+	getConfigs: () => sshRemotesManager.getConfigs() as { configs: unknown[] },
+	getDefaultId: () => sshRemotesManager.getDefaultId(),
+	getSshConfigHosts: () => sshRemotesManager.getSshConfigHosts(),
 });
 
 // Persistent token: stored in settings if present, otherwise ephemeral per boot.

@@ -629,6 +629,107 @@ export function getMarketplaceProvider(): MarketplaceProvider | null {
 	return marketplaceProvider;
 }
 
+/* ============ SshRemotes provider registry (W3-ssh-remotes — closes ISC-44.shim.ssh_remotes_routes, server-half) ============ */
+//
+// Mirrors the WakaTimeProvider / StatsProvider / FontsProvider / FsProvider /
+// MarketplaceProvider / AgentsProvider patterns above. Headless entrypoints
+// register a provider backed by `src/server/ssh-remotes-manager.ts`; the
+// Electron path leaves it unset and the routes 503 cleanly. NO fallback
+// default is constructed here — the headless boot path is the only legitimate
+// registrant. The renderer-side `ssh-remote:*` IPC handlers in
+// `src/main/ipc/handlers/ssh-remote.ts` continue to own the SSH-remote
+// surface inside Electron, and the routes here do NOT touch them. Both
+// stacks can run side-by-side because the underlying state (the
+// `sshRemotes` array + `defaultSshRemoteId` key in maestro-settings.json,
+// plus the user's `~/.ssh/config` file) is the cross-mode contract.
+//
+// LAST of the 5 route clusters named in the umbrella
+// `ISC-44.shim.big_3_ipc_strategy` Decision (siblings: `fs_routes`,
+// `agents_routes`, `marketplace_routes`, `autorun_routes` — the autorun
+// half folded into `FsProvider.writeDoc`). With this cluster shipped, the
+// IPC-shim Decision is complete and the NewInstanceModal lift's
+// server-side dependencies are all in place (the modal still needs
+// agent-config CRUD + model discovery for full parity, both deliberately
+// out of scope per the umbrella Decision).
+//
+// Route surface (3 endpoints — read-only sub-surface per the umbrella
+// Decision's "ship the read sub-surface, defer the writers" posture
+// established by W3-agents):
+//   GET /api/ssh-remotes                   — list configs (mirrors `ssh-remote:getConfigs`)
+//   GET /api/ssh-remotes/default-id        — global default id (mirrors `ssh-remote:getDefaultId`)
+//   GET /api/ssh-remotes/ssh-config-hosts  — parse ~/.ssh/config (mirrors `ssh-remote:getSshConfigHosts`)
+//
+// Out of scope (deliberately, per the umbrella big_3_ipc_strategy Decision
+// — matches the W3-agents precedent of "ship the read sub-surface,
+// defer the writers"):
+//   - `ssh-remote:saveConfig` (writer) — config validation + UUID
+//     generation + electron-store write semantics; needs widened
+//     `SshRemotesProvider.set(...)` and a follow-up brief.
+//   - `ssh-remote:deleteConfig` (writer) — same writer-store gap.
+//   - `ssh-remote:setDefaultId` (writer) — same writer-store gap.
+//   - `ssh-remote:test` — needs `ssh` binary in server env + the
+//     buildSshArgs / parseSSHError helpers from
+//     `src/main/ssh-remote-manager.ts` extracted into `src/shared/` or
+//     inlined here. The connection-test flow is a separate brief because
+//     it touches network egress + binary requirements + error-pattern
+//     parity that benefits from its own test pass.
+//
+// NewInstanceModal callsites unblocked by this brief:
+//   - NewInstanceModal.tsx:602  — `window.maestro.sshRemote.getConfigs()`
+//   - NewInstanceModal.tsx:1312 — same `getConfigs()` callsite
+// Both calls populate the SSH-remote dropdown in the modal's connection
+// section; the modal does NOT call save/delete/setDefault/test (those
+// live in SettingsModal's SSH tab, which is a separate webFull lift).
+export interface SshRemotesProvider {
+	/**
+	 * Get all SSH remote configurations. Returns `{ configs }` with the
+	 * stored `SshRemoteConfig[]`. Empty array when none configured.
+	 * Mirrors `ssh-remote:getConfigs` 1:1.
+	 */
+	getConfigs: () => { configs: unknown[] };
+	/**
+	 * Get the global default SSH remote ID. Returns `{ id }` with the
+	 * stored default id or `null` if not set. Mirrors
+	 * `ssh-remote:getDefaultId` 1:1.
+	 */
+	getDefaultId: () => { id: string | null };
+	/**
+	 * Parse `~/.ssh/config` and return host entries. Returns the parser's
+	 * full result envelope (`{ success, hosts, error?, configPath }`).
+	 * Mirrors `ssh-remote:getSshConfigHosts` 1:1.
+	 */
+	getSshConfigHosts: () => {
+		success: boolean;
+		hosts: unknown[];
+		error?: string;
+		configPath: string;
+	};
+}
+
+let sshRemotesProvider: SshRemotesProvider | null = null;
+
+/**
+ * Register the active SshRemotes provider. Pass null to clear.
+ *
+ * The headless server boot path calls this once before `WebServer.start()` so
+ * the `/api/ssh-remotes/*` routes are wired by the time the first client
+ * request arrives. Electron-host paths can ignore this — the routes 503
+ * cleanly when no provider is registered, and the Electron renderer continues
+ * to use the `ssh-remote:*` IPC namespace directly.
+ */
+export function registerSshRemotesProvider(provider: SshRemotesProvider | null): void {
+	sshRemotesProvider = provider;
+}
+
+/**
+ * Internal accessor for the route handlers. Returns the registered provider
+ * or `null` if none is registered (the routes translate `null` → HTTP 503).
+ * Exposed for testing.
+ */
+export function getSshRemotesProvider(): SshRemotesProvider | null {
+	return sshRemotesProvider;
+}
+
 /**
  * API Routes Class
  *
@@ -2227,6 +2328,158 @@ export class ApiRoutes {
 					return reply.code(500).send({
 						error: 'Internal Server Error',
 						message: `Failed to get capabilities: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// ============ W3-ssh-remotes — read-side surface (closes ISC-44.shim.ssh_remotes_routes, server-half) ============
+		//
+		// Ships the LAST of the 5 server-side route clusters named in the umbrella
+		// `ISC-44.shim.big_3_ipc_strategy` Decision. Mirrors the read sub-surface of
+		// the `ssh-remote:*` IPC channels at `src/main/ipc/handlers/ssh-remote.ts`.
+		// Backed by `src/server/ssh-remotes-manager.ts` (NEW). With this cluster
+		// shipped, all 5 sibling sub-ISCs are closed (fs / agents / marketplace /
+		// autorun-via-FsProvider.writeDoc / ssh-remotes) and the IPC-shim Decision
+		// is complete. NO touch to `src/main/ipc/handlers/ssh-remote.ts` or the
+		// renderer-side preload bridge.
+		//
+		// Route surface (3 endpoints):
+		//   GET /api/ssh-remotes                   — `{configs, timestamp}`
+		//   GET /api/ssh-remotes/default-id        — `{id, timestamp}`
+		//   GET /api/ssh-remotes/ssh-config-hosts  — `{success, hosts, error?, configPath, timestamp}`
+		//
+		// All routes 503 cleanly when no `SshRemotesProvider` is registered (the
+		// Electron path leaves it unset and the renderer continues to use the
+		// `ssh-remote:*` IPC namespace via `window.maestro.sshRemote.*`). NO
+		// `?sshRemoteId=` query param is accepted here — the SSH-remote surface
+		// IS the SSH-remote surface; there is no nested SSH-over-SSH semantic to
+		// reject. This differs from the W3-fs / W3-agents precedent (which both
+		// 501 on `?sshRemoteId=`) because those routes operate on the local host
+		// and might plausibly be retargeted; the SSH-remote routes operate on the
+		// settings store + ~/.ssh/config directly.
+		//
+		// Out of scope per the umbrella Decision — will land in follow-up briefs:
+		//   - `ssh-remote:saveConfig` / `deleteConfig` / `setDefaultId` (writers).
+		//   - `ssh-remote:test` (connection-test; needs `ssh` binary + buildSshArgs
+		//     / parseSSHError extraction from `src/main/ssh-remote-manager.ts`).
+
+		// GET /api/ssh-remotes — mirrors `ssh-remote:getConfigs` IPC reply.
+		// Returns `{ configs, timestamp }`. The configs array is a serialized
+		// `SshRemoteConfig[]` straight from the settings store — same on-disk
+		// schema as the renderer-side handler reads.
+		server.get(
+			`/${token}/api/ssh-remotes`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (_request, reply) => {
+				const provider = getSshRemotesProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'SSH remotes provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const { configs } = provider.getConfigs();
+					return {
+						configs,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get SSH remote configs: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/ssh-remotes/default-id — mirrors `ssh-remote:getDefaultId`
+		// IPC reply. Returns `{ id, timestamp }` where `id` is the stored
+		// default SSH remote id or `null` if not set.
+		server.get(
+			`/${token}/api/ssh-remotes/default-id`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (_request, reply) => {
+				const provider = getSshRemotesProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'SSH remotes provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const { id } = provider.getDefaultId();
+					return {
+						id,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get default SSH remote id: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/ssh-remotes/ssh-config-hosts — mirrors
+		// `ssh-remote:getSshConfigHosts` IPC reply. Parses `~/.ssh/config`
+		// on the SERVER host (the headless server reads its own filesystem)
+		// and returns the parsed host list. Returns `{ success: true,
+		// hosts: [] }` when the config file is absent (matches the
+		// renderer-side parser's contract — absent config is not an error).
+		// Wildcard-only Host patterns (`Host *`) are filtered out per the
+		// parser's contract — only concrete host entries make it into the
+		// response.
+		server.get(
+			`/${token}/api/ssh-remotes/ssh-config-hosts`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (_request, reply) => {
+				const provider = getSshRemotesProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'SSH remotes provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = provider.getSshConfigHosts();
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get SSH config hosts: ${error.message}`,
 						timestamp: Date.now(),
 					});
 				}
