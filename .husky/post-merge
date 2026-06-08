@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+# Auto-run build:server when the merge brought in src/server/ changes.
+# Audit #5/#6/#7 flagged stale dist/server/ as a recurring debt after W2 waves.
+
+CHANGED=$(git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD 2>/dev/null | grep -E '^src/server/' || true)
+
+if [ -n "$CHANGED" ]; then
+  echo "[post-merge] src/server/ changes detected — rebuilding dist/server/"
+  MAESTRO_HEADLESS=1 npm run build:server
+fi

@@ -84,7 +84,7 @@ import type { Theme } from '../../shared/theme-types';
 import type { AgentError, AgentErrorType } from '../../shared/types';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { Modal } from './ui/Modal';
-import { CollapsibleJsonViewer } from '../../renderer/components/CollapsibleJsonViewer';
+import { CollapsibleJsonViewer } from './CollapsibleJsonViewer';
 
 /**
  * Props for recovery action buttons
