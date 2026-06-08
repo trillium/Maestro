@@ -125,3 +125,4 @@ export type {
 export { ShortcutEditor } from './ShortcutEditor';
 export type { ShortcutEditorProps } from './ShortcutEditor';
 export { ToolCallCard, getToolName } from './ToolCallCard';
+export { LightboxModal } from './LightboxModal';
