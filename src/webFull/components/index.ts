@@ -135,3 +135,5 @@ export type { SummarizeProgressOverlayProps } from './SummarizeProgressOverlay';
 export { AutoRunLightbox } from './AutoRunLightbox';
 export { GroupChatInput } from './GroupChatInput';
 export { StandingOvationOverlay } from './StandingOvationOverlay';
+export { SessionActivityGraph, LOOKBACK_OPTIONS } from './SessionActivityGraph';
+export type { LookbackPeriod, ActivityEntry } from './SessionActivityGraph';
