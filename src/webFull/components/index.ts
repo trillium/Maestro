@@ -111,3 +111,5 @@ export { LogFilterControls } from './LogFilterControls';
 export type { LogFilterControlsProps } from './LogFilterControls';
 export { FontConfigurationPanel } from './FontConfigurationPanel';
 export type { FontConfigurationPanelProps } from './FontConfigurationPanel';
+export { GitStatusWidget } from './GitStatusWidget';
+export type { GitStatusWidgetProps, GitFileChange, GitFileDetails } from './GitStatusWidget';
