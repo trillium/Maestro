@@ -30,6 +30,7 @@ import { WebServer } from '../main/web-server/WebServer';
 import { getThemeById } from '../main/themes';
 import { FileStore } from '../shared/file-store';
 import { getDataDir } from '../shared/data-dir';
+import { ServerProcessManagerAdapter } from './process-manager-adapter';
 
 type StoredSession = {
 	id: string;
@@ -87,6 +88,14 @@ if (!securityToken || !UUID_V4_REGEX.test(securityToken)) {
 	securityToken = randomUUID();
 	console.log('[maestro-server] using ephemeral token (no valid webAuthToken in settings)');
 }
+
+// Layer 0b — ProcessManager adapter. Owns a single ProcessManager instance,
+// reads the live sessions store on every call to resolve `-ai` vs `-terminal`
+// suffix, and is shut down on SIGINT/SIGTERM below.
+const processManagerAdapter = new ServerProcessManagerAdapter((sessionId) => {
+	const sessions = sessionsStore.get<StoredSession[]>('sessions', []);
+	return sessions.find((s) => s.id === sessionId) ?? null;
+});
 
 const server = new WebServer(port, securityToken);
 
@@ -215,19 +224,53 @@ server.setGetHistoryCallback(() => {
 	return [];
 });
 
-// ============ WRITE callbacks (Layer 0b — stubbed) ============
+// ============ WRITE callbacks ============
+//
+// Layer 0b: writeToSession, executeCommand, and interruptSession are wired
+// through ServerProcessManagerAdapter. The other 7 callbacks (switchMode,
+// tab ops, bookmark) remain stubbed — they need write-back to the sessions
+// store and broadcast plumbing, which is the Layer 0c scope.
 
 const notImplementedWrite = (op: string) => (..._args: unknown[]): false | null => {
 	console.warn(
-		`[maestro-server] WRITE op "${op}" called but not implemented in Layer 0a headless mode. ` +
-			`Layer 0b will add server-side implementations.`
+		`[maestro-server] WRITE op "${op}" called but not implemented yet. ` +
+			`Layer 0c will add server-side implementations for store + broadcast.`
 	);
 	return false;
 };
 
-server.setWriteToSessionCallback(notImplementedWrite('writeToSession') as any);
-server.setExecuteCommandCallback(notImplementedWrite('executeCommand') as any);
-server.setInterruptSessionCallback(notImplementedWrite('interruptSession') as any);
+// writeToSession — direct write to ProcessManager. The route at
+// POST /:token/api/session/:id/send already appends '\n' before calling this.
+server.setWriteToSessionCallback((sessionId: string, data: string): boolean => {
+	const result = processManagerAdapter.write(sessionId, data);
+	console.log(
+		`[maestro-server] writeToSession ${sessionId} (${data.length} bytes) -> ${result}`
+	);
+	return result;
+});
+
+// executeCommand — Layer 0b minimum: route through writeToSession after
+// suffix resolution, with a trailing newline. The renderer-side version
+// additionally spawns a new session if none exists; that "session creation"
+// flow lives in the renderer today and is out of scope for L0b.
+server.setExecuteCommandCallback(
+	async (sessionId: string, command: string, inputMode?: 'ai' | 'terminal'): Promise<boolean> => {
+		const result = await processManagerAdapter.executeCommand(sessionId, command, inputMode);
+		console.log(
+			`[maestro-server] executeCommand ${sessionId} (mode=${inputMode ?? 'auto'}, ` +
+				`${command.length} chars) -> ${result}`
+		);
+		return result;
+	}
+);
+
+// interruptSession — forwards to ProcessManager.interrupt (Ctrl-C / SIGINT).
+server.setInterruptSessionCallback(async (sessionId: string): Promise<boolean> => {
+	const result = await processManagerAdapter.interrupt(sessionId);
+	console.log(`[maestro-server] interruptSession ${sessionId} -> ${result}`);
+	return result;
+});
+
 server.setSwitchModeCallback(notImplementedWrite('switchMode') as any);
 server.setSelectSessionCallback(notImplementedWrite('selectSession') as any);
 server.setSelectTabCallback(notImplementedWrite('selectTab') as any);
@@ -248,7 +291,11 @@ async function main() {
 	console.log(`[maestro-server] listening at ${result.url}`);
 	console.log(`[maestro-server] data directory: ${dataDir}`);
 	console.log(`[maestro-server] sessions visible: ${sessionsStore.get<StoredSession[]>('sessions', []).length}`);
-	console.log('[maestro-server] READ-ONLY mode (Layer 0a). WRITE callbacks return false; see Layer 0b.');
+	console.log(
+		'[maestro-server] Layer 0b: 3/10 WRITE callbacks active ' +
+			'(writeToSession, executeCommand, interruptSession via ProcessManager). ' +
+			'switchMode, tab ops, bookmark still stubbed.'
+	);
 }
 
 main().catch((err) => {
@@ -260,6 +307,11 @@ main().catch((err) => {
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 	process.on(signal, () => {
 		console.log(`[maestro-server] received ${signal}, shutting down`);
+		try {
+			processManagerAdapter.shutdown();
+		} catch (err) {
+			console.error('[maestro-server] processManagerAdapter.shutdown() threw', err);
+		}
 		server.stop().finally(() => process.exit(0));
 	});
 }
