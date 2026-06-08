@@ -93,3 +93,4 @@ export { ThemePicker } from './ThemePicker';
 export { SettingCheckbox } from './SettingCheckbox';
 export type { SettingCheckboxProps } from './SettingCheckbox';
 export { WelcomeContent } from './WelcomeContent';
+export { CollapsibleJsonViewer } from './CollapsibleJsonViewer';
