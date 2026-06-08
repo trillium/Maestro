@@ -141,3 +141,5 @@ export { GitDiffViewer } from './GitDiffViewer';
 export type { GitDiffViewerProps } from './GitDiffViewer';
 export { SessionItem } from './SessionItem';
 export type { SessionItemProps, SessionItemVariant } from './SessionItem';
+export { CsvTableRenderer } from './CsvTableRenderer';
+export type { CsvTableRendererProps } from './CsvTableRenderer';
