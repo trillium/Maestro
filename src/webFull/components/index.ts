@@ -70,3 +70,4 @@ export type { SessionListItemProps } from './SessionListItem';
 export { DeleteWorktreeModal } from './DeleteWorktreeModal';
 export { DeleteAgentConfirmModal } from './DeleteAgentConfirmModal';
 export { HistoryHelpModal } from './HistoryHelpModal';
+export { QuitConfirmModal } from './QuitConfirmModal';
