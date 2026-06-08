@@ -13,11 +13,13 @@
  * - GET /api/history - Get history entries
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
 	ApiRoutes,
 	type ApiRouteCallbacks,
 	type RateLimitConfig,
+	registerProcessesProvider,
+	type ProcessesProvider,
 } from '../../../../main/web-server/routes/apiRoutes';
 
 // Mock the logger
@@ -532,6 +534,245 @@ describe('ApiRoutes', () => {
 
 			const sessionsRoute = newFastify.getRoute('GET', `/${securityToken}/api/sessions`);
 			expect(sessionsRoute?.config?.rateLimit?.max).toBe(200);
+		});
+	});
+
+	// ============ Processes cluster (ISC-44.server.api_processes_cluster) ============
+	//
+	// Provider-registry routes (mirrors the W3-fs / W3-agents test pattern: no
+	// callbacks, just register the provider on the module-level registry before
+	// invoking the route handler, then unregister in afterEach so other tests
+	// see a clean slate).
+	describe('Processes routes', () => {
+		afterEach(() => {
+			// Always clear so a later test doesn't inherit a stale provider.
+			registerProcessesProvider(null);
+		});
+
+		const sampleProcess = {
+			sessionId: 'session-1',
+			toolType: 'claude-code',
+			pid: 12345,
+			cwd: '/tmp/project',
+			isTerminal: false,
+			isBatchMode: false,
+			startTime: 1700000000000,
+			command: 'claude',
+			args: ['--resume', 'agent-id'],
+		};
+
+		describe('Route registration', () => {
+			it('should register GET /api/processes', () => {
+				expect(mockFastify.routes.has(`GET:/${securityToken}/api/processes`)).toBe(true);
+			});
+
+			it('should register GET /api/processes/:sessionId', () => {
+				expect(mockFastify.routes.has(`GET:/${securityToken}/api/processes/:sessionId`)).toBe(true);
+			});
+
+			it('should configure read-budget rate limiting on /api/processes', () => {
+				const route = mockFastify.getRoute('GET', `/${securityToken}/api/processes`);
+				expect(route?.config?.rateLimit?.max).toBe(rateLimitConfig.max);
+				expect(route?.config?.rateLimit?.timeWindow).toBe(rateLimitConfig.timeWindow);
+			});
+		});
+
+		describe('GET /api/processes', () => {
+			it('should return the active process list', async () => {
+				const provider: ProcessesProvider = {
+					list: vi.fn().mockReturnValue([sampleProcess]),
+					get: vi.fn(),
+				};
+				registerProcessesProvider(provider);
+
+				const route = mockFastify.getRoute('GET', `/${securityToken}/api/processes`);
+				const reply = createMockReply();
+				const result = await route!.handler({ query: {} }, reply);
+
+				expect(result.processes).toHaveLength(1);
+				expect(result.processes[0].sessionId).toBe('session-1');
+				expect(result.count).toBe(1);
+				expect(result.timestamp).toBeDefined();
+				expect(provider.list).toHaveBeenCalled();
+			});
+
+			it('should return an empty list when no processes are active', async () => {
+				const provider: ProcessesProvider = {
+					list: vi.fn().mockReturnValue([]),
+					get: vi.fn(),
+				};
+				registerProcessesProvider(provider);
+
+				const route = mockFastify.getRoute('GET', `/${securityToken}/api/processes`);
+				const reply = createMockReply();
+				const result = await route!.handler({ query: {} }, reply);
+
+				expect(result.processes).toEqual([]);
+				expect(result.count).toBe(0);
+			});
+
+			it('should return 503 when no provider is registered', async () => {
+				registerProcessesProvider(null);
+
+				const route = mockFastify.getRoute('GET', `/${securityToken}/api/processes`);
+				const reply = createMockReply();
+				await route!.handler({ query: {} }, reply);
+
+				expect(reply.code).toHaveBeenCalledWith(503);
+				expect(reply.send).toHaveBeenCalledWith(
+					expect.objectContaining({ error: 'Service Unavailable' })
+				);
+			});
+
+			it('should return 501 when sshRemoteId query param is supplied', async () => {
+				const provider: ProcessesProvider = {
+					list: vi.fn().mockReturnValue([sampleProcess]),
+					get: vi.fn(),
+				};
+				registerProcessesProvider(provider);
+
+				const route = mockFastify.getRoute('GET', `/${securityToken}/api/processes`);
+				const reply = createMockReply();
+				await route!.handler({ query: { sshRemoteId: 'remote-1' } }, reply);
+
+				expect(reply.code).toHaveBeenCalledWith(501);
+				expect(provider.list).not.toHaveBeenCalled();
+			});
+
+			it('should return 500 when provider.list throws', async () => {
+				const provider: ProcessesProvider = {
+					list: vi.fn().mockImplementation(() => {
+						throw new Error('boom');
+					}),
+					get: vi.fn(),
+				};
+				registerProcessesProvider(provider);
+
+				const route = mockFastify.getRoute('GET', `/${securityToken}/api/processes`);
+				const reply = createMockReply();
+				await route!.handler({ query: {} }, reply);
+
+				expect(reply.code).toHaveBeenCalledWith(500);
+				expect(reply.send).toHaveBeenCalledWith(
+					expect.objectContaining({
+						message: expect.stringContaining('boom'),
+					})
+				);
+			});
+		});
+
+		describe('GET /api/processes/:sessionId', () => {
+			it('should return a single process', async () => {
+				const provider: ProcessesProvider = {
+					list: vi.fn(),
+					get: vi.fn().mockReturnValue(sampleProcess),
+				};
+				registerProcessesProvider(provider);
+
+				const route = mockFastify.getRoute('GET', `/${securityToken}/api/processes/:sessionId`);
+				const reply = createMockReply();
+				const result = await route!.handler(
+					{ params: { sessionId: 'session-1' }, query: {} },
+					reply
+				);
+
+				expect(result.process.sessionId).toBe('session-1');
+				expect(result.timestamp).toBeDefined();
+				expect(provider.get).toHaveBeenCalledWith('session-1');
+			});
+
+			it('should return 404 when sessionId is unknown', async () => {
+				const provider: ProcessesProvider = {
+					list: vi.fn(),
+					get: vi.fn().mockReturnValue(null),
+				};
+				registerProcessesProvider(provider);
+
+				const route = mockFastify.getRoute('GET', `/${securityToken}/api/processes/:sessionId`);
+				const reply = createMockReply();
+				await route!.handler({ params: { sessionId: 'nonexistent' }, query: {} }, reply);
+
+				expect(reply.code).toHaveBeenCalledWith(404);
+				expect(reply.send).toHaveBeenCalledWith(expect.objectContaining({ error: 'Not Found' }));
+			});
+
+			it('should return 400 for an invalid sessionId (path traversal)', async () => {
+				const provider: ProcessesProvider = {
+					list: vi.fn(),
+					get: vi.fn(),
+				};
+				registerProcessesProvider(provider);
+
+				const route = mockFastify.getRoute('GET', `/${securityToken}/api/processes/:sessionId`);
+				const reply = createMockReply();
+				await route!.handler({ params: { sessionId: '../etc/passwd' }, query: {} }, reply);
+
+				expect(reply.code).toHaveBeenCalledWith(400);
+				expect(provider.get).not.toHaveBeenCalled();
+			});
+
+			it('should return 400 for an empty sessionId', async () => {
+				const provider: ProcessesProvider = {
+					list: vi.fn(),
+					get: vi.fn(),
+				};
+				registerProcessesProvider(provider);
+
+				const route = mockFastify.getRoute('GET', `/${securityToken}/api/processes/:sessionId`);
+				const reply = createMockReply();
+				await route!.handler({ params: { sessionId: '' }, query: {} }, reply);
+
+				expect(reply.code).toHaveBeenCalledWith(400);
+			});
+
+			it('should return 503 when no provider is registered', async () => {
+				registerProcessesProvider(null);
+
+				const route = mockFastify.getRoute('GET', `/${securityToken}/api/processes/:sessionId`);
+				const reply = createMockReply();
+				await route!.handler({ params: { sessionId: 'session-1' }, query: {} }, reply);
+
+				expect(reply.code).toHaveBeenCalledWith(503);
+			});
+
+			it('should return 501 when sshRemoteId query param is supplied', async () => {
+				const provider: ProcessesProvider = {
+					list: vi.fn(),
+					get: vi.fn().mockReturnValue(sampleProcess),
+				};
+				registerProcessesProvider(provider);
+
+				const route = mockFastify.getRoute('GET', `/${securityToken}/api/processes/:sessionId`);
+				const reply = createMockReply();
+				await route!.handler(
+					{ params: { sessionId: 'session-1' }, query: { sshRemoteId: 'remote-1' } },
+					reply
+				);
+
+				expect(reply.code).toHaveBeenCalledWith(501);
+				expect(provider.get).not.toHaveBeenCalled();
+			});
+
+			it('should return 500 when provider.get throws', async () => {
+				const provider: ProcessesProvider = {
+					list: vi.fn(),
+					get: vi.fn().mockImplementation(() => {
+						throw new Error('lookup failure');
+					}),
+				};
+				registerProcessesProvider(provider);
+
+				const route = mockFastify.getRoute('GET', `/${securityToken}/api/processes/:sessionId`);
+				const reply = createMockReply();
+				await route!.handler({ params: { sessionId: 'session-1' }, query: {} }, reply);
+
+				expect(reply.code).toHaveBeenCalledWith(500);
+				expect(reply.send).toHaveBeenCalledWith(
+					expect.objectContaining({
+						message: expect.stringContaining('lookup failure'),
+					})
+				);
+			});
 		});
 	});
 });

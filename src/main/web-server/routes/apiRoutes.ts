@@ -1045,6 +1045,145 @@ export function getSshRemotesProvider(): SshRemotesProvider | null {
 	return sshRemotesProvider;
 }
 
+/* ============ Processes provider registry (ISC-44.server.api_processes_cluster) ============ */
+//
+// Mirrors the WakaTimeProvider / StatsProvider / FontsProvider / FsProvider /
+// AgentsProvider / MarketplaceProvider / SshRemotesProvider patterns above.
+// Headless entrypoints register a provider backed by
+// `src/server/processes-manager.ts`; the Electron path leaves it unset and
+// the routes 503 cleanly. NO fallback default is constructed here — the
+// headless boot path is the only legitimate registrant. The renderer-side
+// `process:*` IPC handlers in `src/main/ipc/handlers/process.ts` continue to
+// own the process surface inside Electron, and the routes here do NOT touch
+// them. Both stacks can run side-by-side because the underlying
+// `ProcessManager` singleton is the cross-mode contract.
+//
+// Read-side ONLY. The mutation + streaming verbs on the
+// `window.maestro.process.*` namespace (spawn / write / kill / interrupt /
+// resize / runCommand + all 14 `on*` event listeners) belong on the WS
+// process-lifecycle frame family, whose umbrella Decision was committed at
+// `9ec71a510`. Folding mutation into REST would split the lifecycle contract
+// across two transports — the umbrella explicitly assigns the family to WS.
+//
+// Route surface (2 endpoints):
+//   GET /api/processes              — list all active processes (mirrors
+//                                      `process:getActiveProcesses` IPC reply)
+//   GET /api/processes/:sessionId   — single-process detail (the implicit
+//                                      `processes.find(p => p.sessionId === …)`
+//                                      pattern the renderer applies after a
+//                                      list round-trip, surfaced as a direct
+//                                      lookup so the client doesn't pull the
+//                                      full list to read one entry)
+//
+// SSH remote support: the read surface is local-only by construction (the
+// ProcessManager singleton tracks both local and remote-spawned processes by
+// sessionId; the projected `sshRemoteId` / `sshRemoteHost` fields are
+// surfaced when present so callers can tell which view they're reading).
+// A `?sshRemoteId=` query param does NOT redirect — there's no "remote
+// process list" concept here, only a local bookkeeping view. The routes
+// reject the param with a 501 for consistency with the W3-fs / W3-agents
+// precedent, so callers fail loud rather than silently get a local result.
+export interface ProcessesProvider {
+	/**
+	 * List all active processes. Returns the 9-field projection mirroring the
+	 * `process:getActiveProcesses` IPC reply shape at
+	 * `src/main/ipc/handlers/process.ts:628-638`, plus the two optional SSH
+	 * bookkeeping fields surfaced when present.
+	 *
+	 * Returns `[]` when no processes are active. NEVER throws — read against
+	 * the in-memory Map inside ProcessManager.
+	 */
+	list: () => Array<{
+		sessionId: string;
+		toolType: string;
+		pid: number;
+		cwd: string;
+		isTerminal: boolean;
+		isBatchMode: boolean;
+		startTime: number;
+		command?: string;
+		args?: string[];
+		sshRemoteId?: string;
+		sshRemoteHost?: string;
+	}>;
+	/**
+	 * Look up a single process by sessionId. Returns `null` when no process
+	 * is tracked for the id so the route layer can map to a 404. NEVER
+	 * throws.
+	 */
+	get: (sessionId: string) => {
+		sessionId: string;
+		toolType: string;
+		pid: number;
+		cwd: string;
+		isTerminal: boolean;
+		isBatchMode: boolean;
+		startTime: number;
+		command?: string;
+		args?: string[];
+		sshRemoteId?: string;
+		sshRemoteHost?: string;
+	} | null;
+}
+
+let processesProvider: ProcessesProvider | null = null;
+
+/**
+ * Register the active Processes provider. Pass null to clear.
+ *
+ * The headless server boot path calls this once before `WebServer.start()` so
+ * the `/api/processes/*` routes are wired by the time the first client request
+ * arrives. Electron-host paths can ignore this — the routes 503 cleanly when
+ * no provider is registered, and the Electron renderer continues to use the
+ * `process:*` IPC namespace directly.
+ */
+export function registerProcessesProvider(provider: ProcessesProvider | null): void {
+	processesProvider = provider;
+}
+
+/**
+ * Internal accessor for the route handlers. Returns the registered provider
+ * or `null` if none is registered (the routes translate `null` → HTTP 503).
+ * Exposed for testing.
+ */
+export function getProcessesProvider(): ProcessesProvider | null {
+	return processesProvider;
+}
+
+/**
+ * Validate a session id for cross-process use.
+ *
+ * Session ids are short opaque tokens (UUIDs, plus the synthetic
+ * `<sessionId>-ai` form `agentStore.ts:216` uses for the secondary tab
+ * process). The route layer accepts the session id as a URL path segment
+ * (`/api/processes/:sessionId`), so we must reject anything that could
+ * contain path-traversal or shell-injection characters before forwarding
+ * to the provider. The provider itself does NOT shell out the id — lookup
+ * is a Map.get() — but defense-in-depth: belt-and-suspenders the id at the
+ * route boundary so a future consumer that DOES use the id in a shell
+ * context can't be blindsided. Mirrors the `validateAgentId` /
+ * `validateFsPath` pair pattern.
+ *
+ * Rules:
+ *   - must be a non-empty string
+ *   - must not contain `/`, `\`, NUL, or `..`
+ *   - must be <= 256 characters (UUIDs are 36; `-ai` suffix adds 3 — 256 is
+ *     plenty of headroom for any reasonable id without enabling DoS via
+ *     pathologically long URL segments)
+ */
+function validateSessionId(sessionId: string | undefined): string | null {
+	if (typeof sessionId !== 'string' || sessionId.length === 0) {
+		return 'sessionId must be a non-empty string';
+	}
+	if (sessionId.length > 256) return 'sessionId must be <= 256 characters';
+	if (sessionId.includes('\0')) return 'sessionId must not contain NUL byte';
+	if (sessionId.includes('/') || sessionId.includes('\\')) {
+		return 'sessionId must not contain path separators';
+	}
+	if (sessionId.includes('..')) return 'sessionId must not contain `..`';
+	return null;
+}
+
 /**
  * API Routes Class
  *
@@ -3764,6 +3903,146 @@ export class ApiRoutes {
 					return reply.code(500).send({
 						error: 'Internal Server Error',
 						message: `Failed to test SSH remote: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// ============ Processes — read-side surface (ISC-44.server.api_processes_cluster) ============
+		//
+		// Mirrors the W3-fs / W3-agents / W3-ssh-remotes precedent: a thin
+		// projection of the in-process `ProcessManager` singleton over REST,
+		// backed by `src/server/processes-manager.ts`. The renderer-side
+		// `process:*` IPC handlers are NOT touched; both stacks can run
+		// side-by-side because the `ProcessManager` singleton is the
+		// cross-mode contract.
+		//
+		// Read-side ONLY. Mutation + streaming verbs (spawn / write / kill /
+		// interrupt / resize / runCommand + all 14 `on*` listeners) belong on
+		// the WS process-lifecycle frame family (umbrella `9ec71a510`). Folding
+		// mutation into REST would split the lifecycle contract across two
+		// transports — the umbrella explicitly assigns the family to WS.
+		//
+		// Route surface (2 endpoints):
+		//   GET /api/processes              — `{processes: [...], count, timestamp}`
+		//   GET /api/processes/:sessionId   — `{process: {...}, timestamp}` or 404
+		//
+		// Both routes 503 cleanly when no `ProcessesProvider` is registered
+		// (matches the W3-fs / W3-agents / W3-ssh-remotes precedent). A
+		// `?sshRemoteId=` query param returns 501 — the read surface is local
+		// only, and the ProcessManager singleton tracks both local and
+		// remote-spawned processes by sessionId, so SSH redirection has no
+		// semantic meaning here. Failing loud keeps callers from silently
+		// reading a local-only view when they asked for a remote one.
+
+		// GET /api/processes — list all active processes. Mirrors
+		// `process:getActiveProcesses` IPC reply (an array) wrapped in a
+		// `{processes, count, timestamp}` envelope for parity with the rest of
+		// the `/api/*` surface (every other list route returns a count +
+		// timestamp).
+		server.get(
+			`/${token}/api/processes`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getProcessesProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Processes provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { sshRemoteId } = (request.query as { sshRemoteId?: string }) || {};
+				if (sshRemoteId) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side processes routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const processes = provider.list();
+					return {
+						processes,
+						count: processes.length,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to list processes: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/processes/:sessionId — single-process detail. Returns 404
+		// when the id is not tracked (matches the FsManager.readFile / 404
+		// semantics — "didn't exist" is a normal case, not a server error).
+		server.get(
+			`/${token}/api/processes/:sessionId`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getProcessesProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Processes provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { sshRemoteId } = (request.query as { sshRemoteId?: string }) || {};
+				if (sshRemoteId) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side processes routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const { sessionId } = request.params as { sessionId?: string };
+				const reason = validateSessionId(sessionId);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const proc = provider.get(sessionId as string);
+					if (!proc) {
+						return reply.code(404).send({
+							error: 'Not Found',
+							message: 'Process not found',
+							timestamp: Date.now(),
+						});
+					}
+					return {
+						process: proc,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get process: ${error.message}`,
 						timestamp: Date.now(),
 					});
 				}

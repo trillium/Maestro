@@ -5169,3 +5169,5 @@ The rest (`react`, `lucide-react`, `react-markdown`, `rehype-slug`) resolves ide
 - `grep -c 'window\.maestro' src/webFull/hooks/useAutoRunImageHandling.ts` filtered via the same comment-strip → 0 (all 9 remaining hits are inside the docblock).
 
 **Branch.** `leaf-autorun-main`. Commit pending — not pushed per the brief's "no push" rule.
+
+- 2026-06-08 /api/processes cluster: GET /api/processes, GET /api/processes/:sessionId. Pattern matches fs/agents. ISC: ISC-44.server.api_processes_cluster.
