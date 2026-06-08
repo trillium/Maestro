@@ -15,6 +15,7 @@
  * - PATCH /api/settings - Persist partial settings updates (Layer 3.1)
  */
 
+import * as path from 'path';
 import { FastifyInstance } from 'fastify';
 import { HistoryEntry } from '../../../shared/types';
 import { logger } from '../../utils/logger';
@@ -302,6 +303,111 @@ export function registerFontsProvider(provider: FontsProvider | null): void {
  */
 export function getFontsProvider(): FontsProvider | null {
 	return fontsProvider;
+}
+
+/* ============ Fs provider registry (W3-fs — closes ISC-44.shim.fs_routes, server-half) ============ */
+//
+// Mirrors the WakaTimeProvider / StatsProvider / FontsProvider patterns above.
+// Headless entrypoints register a provider backed by `src/server/fs-manager.ts`;
+// the Electron path leaves it unset and the routes 503 cleanly. NO fallback
+// default is constructed here — the headless boot path is the only legitimate
+// registrant. The renderer-side `fs:*` IPC handlers in
+// `src/main/ipc/handlers/filesystem.ts` continue to own the fs surface inside
+// Electron, and the routes here do NOT touch them. Both stacks can run
+// side-by-side because the underlying filesystem is the cross-mode contract.
+//
+// Route surface (4 endpoints) per the umbrella big_3_ipc_strategy Decision:
+//   GET  /api/fs/home-dir         — return server-side os.homedir()
+//   GET  /api/fs/stat?path=…      — stat result + exists flag
+//   GET  /api/fs/read-file?path=… — UTF-8 file contents (rejects binary)
+//   POST /api/autorun/write-doc   — write content to absolute path, mkdir -p
+//
+// The last route lives under `/api/autorun/*` namespace by Decision (the
+// AutoRun shell is the only consumer of writeDoc, and a future
+// `W3-autorun` brief may extend this namespace with read-side routes for
+// the doc loader) — but the underlying implementation here is the same
+// FsManager.writeDoc primitive. Folding the namespace under FsProvider
+// keeps the route count in one registry rather than splitting into a
+// trivial AutorunProvider with one method.
+export interface FsProvider {
+	/** Return the server's home directory. Matches `fs:homeDir` IPC reply (`string`). */
+	getHomeDir: () => string;
+	/**
+	 * Stat a path. Returns `{exists, isDir, isFile, size?, mtime?}` — `exists:false`
+	 * for missing paths rather than throwing. Throws for permission errors etc.
+	 * The route layer pre-validates the path so traversal / NUL bytes never
+	 * reach this method.
+	 */
+	stat: (path: string) => Promise<{
+		exists: boolean;
+		isDir: boolean;
+		isFile: boolean;
+		size?: number;
+		mtime?: string;
+	}>;
+	/**
+	 * Read a file's contents as UTF-8 text. Returns `null` for ENOENT/EISDIR
+	 * so the route layer surfaces a 404. Throws an error tagged with
+	 * `binary: true` when the file looks like binary, so the route layer
+	 * returns 400 rather than a corrupt string.
+	 */
+	readFile: (path: string) => Promise<string | null>;
+	/**
+	 * Write content to an absolute path. Creates parent dirs on demand.
+	 * Returns `{path, bytes}` — byte count is UTF-8 byte length.
+	 */
+	writeDoc: (path: string, content: string) => Promise<{ path: string; bytes: number }>;
+}
+
+let fsProvider: FsProvider | null = null;
+
+/**
+ * Register the active Fs provider. Pass null to clear.
+ *
+ * The headless server boot path calls this once before `WebServer.start()` so
+ * the `/api/fs/*` + `/api/autorun/write-doc` routes are wired by the time the
+ * first client request arrives. Electron-host paths can ignore this — the
+ * routes 503 cleanly when no provider is registered, and the Electron
+ * renderer continues to use the `fs:*` / `autorun:writeDoc` IPC channels
+ * directly.
+ */
+export function registerFsProvider(provider: FsProvider | null): void {
+	fsProvider = provider;
+}
+
+/**
+ * Internal accessor for the route handlers. Returns the registered provider
+ * or `null` if none is registered (the routes translate `null` → HTTP 503).
+ * Exposed for testing.
+ */
+export function getFsProvider(): FsProvider | null {
+	return fsProvider;
+}
+
+/**
+ * Validate an absolute filesystem path for cross-process use.
+ *
+ * Belt-and-suspenders re-implementation of the manager-side
+ * `isValidFsPath()` in `src/server/fs-manager.ts`. Inlined here rather than
+ * imported because the routes module deliberately avoids depending on the
+ * `src/server/` tree (the Electron build does not include server-side
+ * managers in its bundle graph; a route-layer import would force-import
+ * the manager into both bundles). The two validators MUST stay in sync;
+ * any change to one is a change to both.
+ *
+ * Returns `null` if the path passes all checks; otherwise returns a short
+ * human-readable reason the route includes in the 400 reply body.
+ */
+function validateFsPath(p: unknown): string | null {
+	if (typeof p !== 'string' || p.length === 0) return 'path must be a non-empty string';
+	if (!path.isAbsolute(p)) return 'path must be absolute';
+	if (p.includes('\0')) return 'path must not contain NUL byte';
+	const segments = p.split(/[/\\]/);
+	if (segments.includes('..')) return 'path must not contain `..` segments';
+	if (p.includes('%2e%2e') || p.includes('%2E%2E')) {
+		return 'path must not contain encoded `..` segments';
+	}
+	return null;
 }
 
 /**
@@ -1077,6 +1183,263 @@ export class ApiRoutes {
 					return reply.code(500).send({
 						error: 'Internal Server Error',
 						message: `Failed to detect fonts: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// ============ Fs endpoints (W3-fs — closes ISC-44.shim.fs_routes, server-half) ============
+		//
+		// Additive REST routes that mirror the renderer-side `fs:*` IPC namespace
+		// (`fs:homeDir`, `fs:stat`, `fs:readFile`) plus the `autorun:writeDoc`
+		// IPC channel. 503 when no FsProvider is registered (the Electron path
+		// leaves it unset). Per the umbrella big_3_ipc_strategy Decision
+		// (2026-06-08), additive `src/main/web-server/routes/` edits are
+		// authorized. NO touch to `src/main/ipc/handlers/filesystem.ts`,
+		// `src/main/ipc/handlers/autorun.ts`, or the renderer-side preload bridges.
+		//
+		// Route surface (4 endpoints):
+		//   GET  /api/fs/home-dir         — `{path: string, timestamp}`
+		//   GET  /api/fs/stat?path=…      — `{exists, isDir, isFile, size?, mtime?, timestamp}`
+		//   GET  /api/fs/read-file?path=… — file contents (text/plain or 404 / 400)
+		//   POST /api/autorun/write-doc   — body `{path, content}`, reply `{path, bytes, timestamp}`
+		//
+		// All path-accepting routes validate the input via `validateFsPath()`
+		// BEFORE invoking the provider, so traversal / NUL bytes / non-absolute
+		// paths fail loud with a 400 — the provider never sees a hostile path.
+		// The provider itself also validates as a belt-and-suspenders defense.
+		//
+		// SSH remote support is deliberately out of scope here (see the manager
+		// doc-comment); a `?sshRemoteId=` query param on the read routes returns
+		// 501 Not Implemented so callers don't silently get a local path when a
+		// remote was requested.
+
+		// GET /api/fs/home-dir — mirrors the `fs:homeDir` IPC reply (`string`).
+		server.get(
+			`/${token}/api/fs/home-dir`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (_request, reply) => {
+				const provider = getFsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Fs provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const homeDir = provider.getHomeDir();
+					return {
+						path: homeDir,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to resolve home directory: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/fs/stat?path=<absolute> — mirrors the `fs:stat` IPC reply,
+		// adapted to return `{exists}` instead of throwing on missing paths.
+		// Returns 200 with `{exists: false}` for missing paths so the client
+		// can distinguish "didn't exist" from "couldn't ask" without parsing
+		// error text.
+		server.get(
+			`/${token}/api/fs/stat`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getFsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Fs provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { path: queryPath, sshRemoteId } = request.query as {
+					path?: string;
+					sshRemoteId?: string;
+				};
+				if (sshRemoteId) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side fs routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateFsPath(queryPath);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.stat(queryPath as string);
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to stat path: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/fs/read-file?path=<absolute> — mirrors `fs:readFile` for the
+		// TEXT case. Binary files return 400 (the renderer-side handler returns
+		// a `data:` URL for images; server-side is text-only, see manager doc).
+		// Missing files / directories return 404 so the client can distinguish
+		// from a 200 with empty content (a real empty file).
+		server.get(
+			`/${token}/api/fs/read-file`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getFsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Fs provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { path: queryPath, sshRemoteId } = request.query as {
+					path?: string;
+					sshRemoteId?: string;
+				};
+				if (sshRemoteId) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side fs routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateFsPath(queryPath);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const content = await provider.readFile(queryPath as string);
+					if (content === null) {
+						return reply.code(404).send({
+							error: 'Not Found',
+							message: 'File does not exist or is a directory',
+							timestamp: Date.now(),
+						});
+					}
+					// Send as text/plain so the client receives the raw string
+					// without JSON-wrapping (the renderer-side IPC reply is the
+					// bare string too — this preserves wire parity for the
+					// read-file case, the only route in this cluster that
+					// returns non-JSON).
+					return reply.code(200).header('Content-Type', 'text/plain; charset=utf-8').send(content);
+				} catch (error: any) {
+					if (error?.binary === true) {
+						return reply.code(400).send({
+							error: 'Bad Request',
+							message: 'File appears to contain binary data; server-side fs routes are text-only',
+							timestamp: Date.now(),
+						});
+					}
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to read file: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// POST /api/autorun/write-doc — body `{path, content}`. Writes content
+		// to an absolute path, creating parent directories on demand. Returns
+		// `{path, bytes, timestamp}`. Used by the AutoRun shell to materialize
+		// docs to disk; the brief flattens the renderer-side
+		// `(folderPath, filename, content)` tuple into a single absolute path
+		// since the webFull shell constructs the full path client-side.
+		server.post(
+			`/${token}/api/autorun/write-doc`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.maxPost,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getFsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Fs provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const body = request.body as { path?: unknown; content?: unknown } | undefined;
+				const bodyPath = body?.path;
+				const bodyContent = body?.content;
+				const reason = validateFsPath(bodyPath);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				if (typeof bodyContent !== 'string') {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'content must be a string',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.writeDoc(bodyPath as string, bodyContent);
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to write doc: ${error.message}`,
 						timestamp: Date.now(),
 					});
 				}
