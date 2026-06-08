@@ -79,3 +79,4 @@ export { AgentErrorModal } from './AgentErrorModal';
 export type { RecoveryAction } from './AgentErrorModal';
 export { ContextWarningSash } from './ContextWarningSash';
 export type { ContextWarningSashProps } from './ContextWarningSash';
+export { QRCode } from './QRCode';
