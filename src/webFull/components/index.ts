@@ -161,3 +161,9 @@ export type {
 } from './SendToAgentModal';
 export { PromptComposerModal } from './PromptComposerModal';
 export type { PromptComposerModalProps } from './PromptComposerModal';
+export { MergeProgressModal } from './MergeProgressModal';
+export type { MergeProgressModalProps } from './MergeProgressModal';
+export { SummarizeProgressModal } from './SummarizeProgressModal';
+export type { SummarizeProgressModalProps } from './SummarizeProgressModal';
+export { TransferProgressModal } from './TransferProgressModal';
+export type { TransferProgressModalProps } from './TransferProgressModal';
