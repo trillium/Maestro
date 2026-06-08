@@ -81,7 +81,7 @@ import type { Group } from '../../shared/types';
 import type { Shortcut, Session, QueuedItem } from '../../renderer/types';
 import { GroupChatHeader } from './GroupChatHeader';
 import { GroupChatMessages, type GroupChatMessagesHandle } from './GroupChatMessages';
-import { GroupChatInput } from '../../renderer/components/GroupChatInput';
+import { GroupChatInput } from './GroupChatInput';
 
 interface GroupChatPanelProps {
 	theme: Theme;
