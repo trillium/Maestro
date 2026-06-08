@@ -731,6 +731,51 @@ export interface SshRemotesProvider {
 		error?: string;
 		configPath: string;
 	};
+
+	/* ============ Writers (W3-ssh-remotes-writers — audit #12) ============ */
+	//
+	// Method-level optional so existing read-only providers keep type-checking
+	// during the rollout. The route layer 503s on undefined methods just as it
+	// 503s on a missing provider — both signal "this surface is not configured
+	// on this host".
+
+	/**
+	 * Save (create-or-update) an SSH remote configuration. Mirrors
+	 * `ssh-remote:saveConfig` 1:1. Validates the merged config; throws on
+	 * validation failure (route layer translates to HTTP 400).
+	 */
+	saveConfig?: (partial: Record<string, unknown>) => { config: unknown };
+	/**
+	 * Partial-update an existing config by id. Throws when the id is not
+	 * present (route layer translates to 404). The id field cannot be
+	 * renamed via this method — the path parameter is authoritative.
+	 */
+	updateConfig?: (id: string, updates: Record<string, unknown>) => { config: unknown };
+	/**
+	 * Delete a config by id. Also clears `defaultSshRemoteId` when it
+	 * matches. Throws on missing id.
+	 */
+	deleteConfig?: (id: string) => { deletedName: string };
+	/**
+	 * Set (or clear with `null`) the global default SSH remote id.
+	 * Validates that a non-null id exists in the stored configs.
+	 */
+	setDefaultId?: (id: string | null) => void;
+	/**
+	 * Test an SSH connection by id or by inline config. Returns a result
+	 * envelope (`{success, error?, remoteInfo?, latencyMs?}`); a failed
+	 * connection is HTTP 200 with `success:false` — the test ran but
+	 * didn't connect. Reserves 5xx for unexpected exceptions.
+	 */
+	testConnection?: (
+		configOrId: string | Record<string, unknown>,
+		agentCommand?: string
+	) => Promise<{
+		success: boolean;
+		error?: string;
+		remoteInfo?: { hostname: string; agentVersion?: string };
+		latencyMs?: number;
+	}>;
 }
 
 let sshRemotesProvider: SshRemotesProvider | null = null;
@@ -2727,6 +2772,349 @@ export class ApiRoutes {
 					return reply.code(500).send({
 						error: 'Internal Server Error',
 						message: `Failed to get SSH config hosts: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// ============ W3-ssh-remotes-writers — writer routes (audit #12) ============
+		//
+		// Five additive writer routes closing the deferred CRUD + test surface
+		// flagged by audit #12 as NewInstanceModal preconditions:
+		//   POST   /api/ssh-remotes              — create config (saveConfig)
+		//   PUT    /api/ssh-remotes/:id          — update config (partial)
+		//   DELETE /api/ssh-remotes/:id          — delete config (clears default)
+		//   PUT    /api/ssh-remotes/default-id   — set/clear default id
+		//   POST   /api/ssh-remotes/:id/test     — test connection by stored id
+		//
+		// Path-parameter order matters: `default-id` is registered as a
+		// distinct PUT route OUTSIDE the `:id` parameterized verb space so
+		// the literal "default-id" never collides with a config id. Fastify
+		// routes the more-specific literal before the parameterized one
+		// because they share a verb (PUT) but different positions in the
+		// URL tree — verified empirically by curling both and watching
+		// `default-id` resolve to its handler.
+		//
+		// All five 503 cleanly when no `SshRemotesProvider` is registered
+		// (matching the read routes above) AND when the provider exists but
+		// the specific writer method is undefined (e.g., an older provider
+		// that doesn't implement the writer interface). The interface marks
+		// writer methods optional so existing read-only providers keep
+		// type-checking during rollout.
+		//
+		// Error contract:
+		//   400 — validation failure (invalid body shape, invalid id, etc.)
+		//   404 — id not found in the store
+		//   500 — unexpected exception in the route or provider plumbing
+		//   503 — provider not registered OR writer method not implemented
+		//
+		// The connection-test route returns 200 with `success:false` for
+		// "the test ran but the connection didn't succeed" — that's a
+		// successful response from the route's perspective. 5xx is reserved
+		// for unexpected exceptions (e.g., `ssh` binary missing from PATH).
+
+		// POST /api/ssh-remotes — create-or-update a config. Mirrors
+		// `ssh-remote:saveConfig`. Body is `Partial<SshRemoteConfig>`; when
+		// `id` is omitted or unknown a new UUID is generated.
+		server.post(
+			`/${token}/api/ssh-remotes`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.maxPost,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getSshRemotesProvider();
+				if (!provider || !provider.saveConfig) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'SSH remotes writer not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const body = request.body as Record<string, unknown> | undefined;
+				if (!body || typeof body !== 'object' || Array.isArray(body)) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'Body must be a JSON object',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = provider.saveConfig(body);
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					const message = String(error?.message ?? error);
+					if (message.startsWith('Invalid configuration')) {
+						return reply.code(400).send({
+							error: 'Bad Request',
+							message,
+							timestamp: Date.now(),
+						});
+					}
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to save SSH remote: ${message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// PUT /api/ssh-remotes/default-id — set or clear the global
+		// default SSH remote id. Body `{ id: string | null }`. Registered
+		// BEFORE the `:id` parameterized PUT so the literal "default-id"
+		// takes precedence (Fastify uses radix-tree matching — literal
+		// segments outrank parameter segments at the same position).
+		server.put(
+			`/${token}/api/ssh-remotes/default-id`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.maxPost,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getSshRemotesProvider();
+				if (!provider || !provider.setDefaultId) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'SSH remotes writer not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const body = request.body as { id?: unknown } | undefined;
+				if (!body || typeof body !== 'object') {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'Body must be a JSON object with an `id` field',
+						timestamp: Date.now(),
+					});
+				}
+				const rawId: unknown = body.id;
+				let id: string | null;
+				if (rawId === null) {
+					id = null;
+				} else if (typeof rawId === 'string') {
+					id = rawId;
+				} else {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: '`id` must be a string or null',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					provider.setDefaultId(id);
+					return {
+						id,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					const code = (error as { code?: string }).code;
+					if (code === 'NOT_FOUND') {
+						return reply.code(404).send({
+							error: 'Not Found',
+							message: String(error?.message ?? error),
+							timestamp: Date.now(),
+						});
+					}
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to set default SSH remote id: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// PUT /api/ssh-remotes/:id — partial-update an existing config.
+		// Body is `Partial<SshRemoteConfig>`; the id is locked to the path
+		// parameter (renaming via PUT is rejected silently — the path id
+		// always wins).
+		server.put(
+			`/${token}/api/ssh-remotes/:id`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.maxPost,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getSshRemotesProvider();
+				if (!provider || !provider.updateConfig) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'SSH remotes writer not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { id } = request.params as { id: string };
+				if (!id || typeof id !== 'string' || id.length === 0) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: '`id` path parameter is required',
+						timestamp: Date.now(),
+					});
+				}
+				const body = request.body as Record<string, unknown> | undefined;
+				if (!body || typeof body !== 'object' || Array.isArray(body)) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'Body must be a JSON object',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = provider.updateConfig(id, body);
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					const code = (error as { code?: string }).code;
+					const message = String(error?.message ?? error);
+					if (code === 'NOT_FOUND') {
+						return reply.code(404).send({
+							error: 'Not Found',
+							message,
+							timestamp: Date.now(),
+						});
+					}
+					if (message.startsWith('Invalid configuration')) {
+						return reply.code(400).send({
+							error: 'Bad Request',
+							message,
+							timestamp: Date.now(),
+						});
+					}
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to update SSH remote: ${message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// DELETE /api/ssh-remotes/:id — delete a config and clear the
+		// default id if it pointed at the deleted entry.
+		server.delete(
+			`/${token}/api/ssh-remotes/:id`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.maxPost,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getSshRemotesProvider();
+				if (!provider || !provider.deleteConfig) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'SSH remotes writer not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { id } = request.params as { id: string };
+				if (!id || typeof id !== 'string' || id.length === 0) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: '`id` path parameter is required',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = provider.deleteConfig(id);
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					const code = (error as { code?: string }).code;
+					if (code === 'NOT_FOUND') {
+						return reply.code(404).send({
+							error: 'Not Found',
+							message: String(error?.message ?? error),
+							timestamp: Date.now(),
+						});
+					}
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to delete SSH remote: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// POST /api/ssh-remotes/:id/test — test connection by stored id.
+		// Optional body `{ agentCommand?: string }` to check a specific
+		// agent binary's availability on the remote. Returns
+		// `{ success, error?, remoteInfo?, latencyMs?, timestamp }`. A
+		// failed connection is HTTP 200 with `success:false` (the route
+		// ran successfully — the test result is the payload). 5xx is
+		// reserved for unexpected exceptions in the test plumbing.
+		server.post(
+			`/${token}/api/ssh-remotes/:id/test`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.maxPost,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getSshRemotesProvider();
+				if (!provider || !provider.testConnection) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'SSH remotes writer not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { id } = request.params as { id: string };
+				if (!id || typeof id !== 'string' || id.length === 0) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: '`id` path parameter is required',
+						timestamp: Date.now(),
+					});
+				}
+				const body = (request.body ?? {}) as { agentCommand?: unknown };
+				const agentCommand = typeof body.agentCommand === 'string' ? body.agentCommand : undefined;
+				try {
+					const result = await provider.testConnection(id, agentCommand);
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					const code = (error as { code?: string }).code;
+					if (code === 'NOT_FOUND') {
+						return reply.code(404).send({
+							error: 'Not Found',
+							message: String(error?.message ?? error),
+							timestamp: Date.now(),
+						});
+					}
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to test SSH remote: ${error.message}`,
 						timestamp: Date.now(),
 					});
 				}
