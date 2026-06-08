@@ -106,3 +106,4 @@ export type {
 export { AutoRunSearchBar } from './AutoRunSearchBar';
 export type { AutoRunSearchBarProps } from './AutoRunSearchBar';
 export { GroupChatPanel } from './GroupChatPanel';
+export { ErrorBoundary } from './ErrorBoundary';
