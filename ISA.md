@@ -159,7 +159,7 @@ Every feature ported into `src/webFull/` gets a parity catalog at `src/webFull/<
 
 > Every "Coming in subsequent layers" deferral enumerated in a shipped layer becomes a tracked `ISC-44.<tab>.<deferral>` so the partial-parity surface is countable. Three terminal statuses: `DEFERRED` (will be ported), `DROPPED` (no browser equivalent — won't be ported), `MISSING` (must be added, blocks ideal state). See Decisions 2026-06-08 ("Adopted `ISC-44.<tab>.<deferral>` tracking convention").
 
-- [ ] ISC-44.general.wakatime: Settings General tab's wakatime status + API-key validation surfaced via `/api/wakatime/*` REST routes. Currently DEFERRED (renderer reads `wakatime:*` IPC).
+- [x] ISC-44.general.wakatime: Settings General tab's wakatime status + API-key validation surfaced via `/api/wakatime/*` REST routes. **CLOSED (server-half) 2026-06-07** on branch `w2-wakatime-server-port`. Server-side `WakaTimeManager` ported to `src/server/wakatime-manager.ts` (no `electron` import, no `src/main/utils/*` imports). Additive REST routes added in `src/main/web-server/routes/apiRoutes.ts` (`GET /api/wakatime/status` mirrors `wakatime:checkCli` IPC; `POST /api/wakatime/validate-key` mirrors `wakatime:validateApiKey` IPC). `WakaTimeProvider` interface + `registerWakatimeProvider()` / `getWakatimeProvider()` lazy registry follows the SettingsProvider pattern from L3.1. Headless server wires the manager + provider in `src/server/index.ts` before `WebServer.start()`. webFull-side hook (`useWakaTimeStatus()` reading the routes from `GeneralTab.tsx`, replacing the "Coming in subsequent layers" panel entry) is the next follow-on; see Decisions 2026-06-07 ("W2 — WakaTime server-side port shipped"). The renderer-side `src/main/wakatime-manager.ts` and `src/main/ipc/handlers/wakatime.ts` are NOT touched — Electron continues using IPC; both stacks can run side-by-side because the `~/.wakatime/` binary cache and `~/.wakatime.cfg` config file are the cross-mode contract.
 - [ ] ISC-44.general.sync: storage location + custom path + folder picker via `/api/sync/*`. Currently DEFERRED.
 - [ ] ISC-44.general.stats: DB size + clear-old-data + earliest-timestamp via `/api/stats/*`. Currently DEFERRED.
 - [ ] ISC-44.general.shells: shells:detect + custom shell path + args + env-var editor. Currently DEFERRED (local-machine concept — server's machine may not match client's; design call needed).
@@ -1470,3 +1470,65 @@ Branch `layer-2.3-platform-shim-and-3-lifts` off `main` at `d7bbd4b9f`. The L2.2
 - **ISC-13 (PTY survives disconnect):** closure conditional. The on-disk format is correct (local probe PASS), so the unit-level claim is verified. End-to-end re-attach on the mini2 deploy requires the WS path to also use the persisted `lastSeq` (L6.2 client-side already does; L6.1 server-side `pty_subscribe` already routes through the multiplexer). Closure pending the manual mini2 probe per `infra/PROBE_ISC45.md`.
 - **ISC-45 (falsification probe):** local-layer falsification: NOT TRIGGERED. The persistence layer round-trips scrollback across a simulated SIGKILL exactly as required. Full closure also pending the manual mini2 probe; if that probe passes ISC-45 closes; if it fails, the failure is in the integration path (WS dispatch, session-id resolution, or client-side `lastSeq` persistence) — the disk layer is sound. Both probes share the same disk format so a passing local probe + failing mini2 probe localizes the bug cleanly.
 - **L6.3 remaining work (out of scope for this brief, tracked for follow-on):** fsync on rotation (currently a fire-and-forget write; under power loss a rotation could leave the `.log`+`.seq` mid-update — the `.meta` write is atomic via `writeFileSync` but the surrounding files aren't). gzip compression on rotated files. Per-session retention configurability (currently one global `diskHardCapBytes`). These are polish items, not gate-blockers.
+
+### 2026-06-07 — W2 WakaTime evidence (server-side port + REST routes — ISC-44.general.wakatime closure, server-half)
+
+#### What
+
+Closes the server-half of `ISC-44.general.wakatime`. The renderer's `src/main/wakatime-manager.ts` + IPC handlers at `src/main/ipc/handlers/wakatime.ts` were left UNTOUCHED — Electron continues using the `wakatime:*` IPC namespace exactly as before. Server-side parity was achieved through a parallel port at `src/server/wakatime-manager.ts` plus two additive REST routes (`GET /api/wakatime/status`, `POST /api/wakatime/validate-key`) wired through a `WakaTimeProvider` registry that mirrors the L3.1 `SettingsProvider` pattern.
+
+#### Decisions
+
+- **Parallel port, not lift.** Same call as L0h (`HistoryManager`): mirror the public API in `src/server/`, drop the `electron`/`src/main/utils/*` imports, keep the logic byte-for-byte identical. Wakatime fits the pattern — `app.getVersion()` is the only electron dependency on the hot path, and it's data the caller can supply.
+- **`appVersion` is a constructor argument, not a side-import.** The renderer reads `app.getVersion()` at runtime; the server-side `WakaTimeManager` accepts `appVersion: string` constructor-side instead. `src/server/index.ts` reads it from the project-root `package.json` (probing `process.cwd()` first, then `__dirname/../../package.json` for the compiled tree under `dist/server/`) with a best-effort fallback to `'unknown'` on any failure. The fallback only affects the cosmetic `--plugin` heartbeat tag; the CLI never refuses heartbeats on a malformed plugin string.
+- **`SettingsReader` interface replaces `Store<MaestroSettings>`.** The renderer-side manager takes a typed electron-store handle; the server-side variant only needs `.get(key, default)`. The new `WakaTimeSettingsReader` interface in `src/server/wakatime-manager.ts` exposes exactly that surface, so the headless `FileStore<Record<string, unknown>>` from `src/shared/file-store.ts` (which already satisfies the interface) can be passed without dragging the main-process types tree into the server build.
+- **Inline `execFileNoThrow` shim.** `tsconfig.server.json` does not include `src/main/utils/`, so importing `execFile.ts` would not type-check. Inlined a minimal version (no Windows PATHEXT, no timeout edge cases, no env handling — none of which this manager hits) directly in the server-side manager. Wraps `child_process.execFile` to never throw and surfaces `{ stdout, stderr, exitCode }`. The stdin-input path uses `child_process.spawn` to match the renderer-side helper for `--extra-heartbeats` JSON injection.
+- **`WakaTimeProvider` registry, no default fallback.** Unlike `SettingsProvider` (which has a lazy default `FileStore`-backed provider), `WakaTimeProvider` has NO fallback. Instantiating a manager needs a settings reader + app version that only the headless boot path knows, and we explicitly do NOT want to drag `src/server/wakatime-manager.ts` (which contains the auto-install HTTPS download path) into the renderer's import graph. When no provider is registered, the routes 503 cleanly — the Electron path never reaches these routes anyway (it uses `wakatime:*` IPC directly).
+- **Route paths follow REST conventions, not IPC names.** `GET /api/wakatime/status` (not `/checkCli`), `POST /api/wakatime/validate-key` (not `/validateApiKey`). The reply shape matches the IPC reply 1:1 (`{ available, version? }` and `{ valid }`), with the standard `timestamp` field spread in to match the rest of `apiRoutes.ts`. POST chosen for the validate route because it carries an API key in the body — query-string keys are wrong for two reasons (URL logging, query-string length limits).
+- **NETWORK EGRESS note.** Server-side manager preserves the renderer's two outbound network paths exactly: (a) GitHub releases (CLI auto-install + version check), (b) `api.wakatime.com` (every heartbeat hits this from the CLI subprocess). No new egress surface is added. Both calls are gated behind `wakatimeEnabled` + `wakatimeApiKey` settings, so an opted-out user never triggers either. Documented inline at the `downloadFile()` / `fetchJson()` declarations so a future security review finds the rationale next to the code.
+- **No push-broadcast for status changes.** The renderer-side manager never calls `BrowserWindow.webContents.send` — status is pull-only via `wakatime:checkCli`. The server-side variant matches that posture: webFull's eventual `useWakaTimeStatus()` hook will poll `GET /api/wakatime/status` on mount + on settings change, NOT subscribe to a WS broadcast. If a future change wires push-based updates, the right hook is `WebServer.broadcastService.broadcastWakatimeStatus` (additive on `broadcastService.ts`) — NOT this module.
+- **`getWakaTimeManager()` singleton mirror of `getHistoryManager()`.** Same pattern as L0h: lazy singleton accessor, first call must supply the dependencies, subsequent calls return the cached instance regardless of arguments. Throws if accessed before init — caught early at the boot path, not at first heartbeat. Test helper `_resetWakaTimeManager()` for unit tests.
+
+#### Files added (new)
+
+- `src/server/wakatime-manager.ts` (~620 LOC) — server-side `WakaTimeManager` port. Mirrors public API of `src/main/wakatime-manager.ts` (`detectCli`, `ensureCliInstalled`, `sendHeartbeat`, `sendFileHeartbeats`, `getCliPath`, `removeSession`); adds `checkCli()` and `validateApiKey()` as the explicit shapes the REST routes call (factored out of the IPC-handler bodies). Inline `execFileNoThrow` shim. `WakaTimeSettingsReader` interface. `WakaTimeProvider` integration glue. `getWakaTimeManager()` + `_resetWakaTimeManager()` singleton helpers. Exports `detectLanguageFromPath`, `WRITE_TOOL_NAMES`, `extractFilePathFromToolExecution` to match the renderer module's pure-helper surface (potentially useful for future webFull-side language detection without importing the manager class).
+
+#### Files edited (additive)
+
+- `src/main/web-server/routes/apiRoutes.ts` — additive only. New `WakaTimeProvider` interface + `registerWakatimeProvider()` / `getWakatimeProvider()` registry at module level. Two new routes registered at the end of `registerRoutes()` (`GET /:token/api/wakatime/status` + `POST /:token/api/wakatime/validate-key`). 503 when no provider is registered. 400 on missing/non-string `key` in the POST body. 500 on provider exceptions. Per ISC-40 N1 legalization, additive `src/main/web-server/routes/` edits are authorized. Existing routes and the `ApiRouteCallbacks` interface unchanged.
+- `src/server/index.ts` — additive only. Import `getWakaTimeManager` from `./wakatime-manager` and `registerWakatimeProvider` from `../main/web-server/routes/apiRoutes`. New `readAppVersion()` helper reads version from `package.json` with a `'unknown'` fallback. Construct the manager (passes `settingsStore` + version) and register the provider before `server.start()`. No existing wiring touched.
+
+#### Files NOT touched (scope discipline)
+
+- `src/main/wakatime-manager.ts` — UNTOUCHED. Forbidden by the brief. Working-tree `git diff HEAD -- src/main/wakatime-manager.ts | wc -c` → 0.
+- `src/main/ipc/handlers/wakatime.ts` — UNTOUCHED. Forbidden by the brief. Working-tree `git diff HEAD -- src/main/ipc/handlers/wakatime.ts | wc -c` → 0.
+- `src/web/`, `src/renderer/`, `src/webFull/` — UNTOUCHED. Standing scope rule. Working-tree diff bytes for each → 0.
+
+#### Verification — build
+
+- `eval "$(/opt/homebrew/bin/fnm env --shell bash)" && fnm use 22.22.1 && npx tsc -p tsconfig.server.json` → exit 0, no diagnostics. `dist/server/wakatime-manager.js` produced.
+
+#### Verification — boot smoke
+
+- `MAESTRO_DATA_DIR=/tmp/maestro-wakatime MAESTRO_WEB_PORT=45698 node dist/server/index.js` boots successfully on port 45698. Ephemeral token logged (`fa5903a1-d706-4f9f-92ad-1b8f4cdd5cfe` for this probe run). No errors in the boot log; existing L0h/L6.3 log lines unchanged.
+
+#### Verification — curl smoke (the routes work end-to-end)
+
+- `curl -is http://localhost:45698/<TOKEN>/api/wakatime/status` → `HTTP/1.1 200 OK`, body `{"available":true,"version":"v2.15.0","timestamp":...}`. The probe host has wakatime-cli already installed at `~/.wakatime/wakatime-cli-darwin-arm64` from a prior renderer-side run; the manager detected it and returned the version. The "available/version" shape matches the renderer-side `wakatime:checkCli` IPC reply exactly.
+- `curl -is -X POST -H 'Content-Type: application/json' -d '{"key":"invalid-test-key"}' http://localhost:45698/<TOKEN>/api/wakatime/validate-key` → `HTTP/1.1 200 OK`, body `{"valid":false,"timestamp":...}`. The CLI ran with the bogus key, the wakatime API rejected it, the manager returned `valid: false`. Reply shape matches the renderer-side `wakatime:validateApiKey` IPC reply.
+- `curl -is -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:45698/<TOKEN>/api/wakatime/validate-key` → `HTTP/1.1 400 Bad Request`, body `{"error":"Bad Request","message":"key must be a string",...}`. Validation guard fires on missing `key`.
+
+#### Verification — scope guards (working tree only; main..HEAD shows prior layers' commits)
+
+- `git diff HEAD -- src/main/wakatime-manager.ts | wc -c` → 0 (forbidden file untouched).
+- `git diff HEAD -- src/main/ipc/handlers/wakatime.ts | wc -c` → 0 (forbidden file untouched).
+- `git diff HEAD -- src/web/ | wc -c` → 0.
+- `git diff HEAD -- src/renderer/ | wc -c` → 0.
+- `git diff HEAD -- src/webFull/ | wc -c` → 0.
+- `git status -s` lists exactly: modified `src/main/web-server/routes/apiRoutes.ts`, modified `src/server/index.ts`, new `src/server/wakatime-manager.ts`, plus this ISA append.
+
+#### What this closes / leaves open
+
+- **ISC-44.general.wakatime, server-half:** CLOSED. The REST surface exists, returns the correct shapes, handles error paths, and is wired in the headless boot path.
+- **ISC-44.general.wakatime, client-half:** OPEN (next follow-on). webFull's `src/webFull/components/Settings/tabs/GeneralTab.tsx` still shows the "WakaTime status & API-key validation" line in the "Coming in subsequent layers" panel. The follow-on agent will: (a) add a `useWakaTimeStatus()` hook in `src/webFull/hooks/` reading `GET /api/wakatime/status` and exposing `validateKey(key)` that posts to `POST /api/wakatime/validate-key`; (b) wire those into a WakaTime section in `GeneralTab.tsx` (toggle for `wakatimeEnabled` + API-key input + status indicator + "test key" button); (c) remove the deferral line from the panel; (d) flip ISC-44.general.wakatime from "server-half CLOSED" to fully CLOSED in this ISA. Parity catalog stories for the webFull port land in `src/webFull/components/Settings/tabs/GeneralTab.parity.test.ts` per the L3.1 pattern.
+- **No new dependencies, no new env vars, no new build steps.** The port reuses existing `child_process`, `https`, `fs`, `os`, `path`, plus `src/shared/platformDetection.ts` and `src/server/sentry.ts`.
