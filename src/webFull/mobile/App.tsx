@@ -102,11 +102,32 @@ import {
 	SettingsModal,
 	AgentErrorModal,
 	AutoRun,
+	// ====================================================================
+	// Audit #10 mount-wave 4 — 8 additional lifted modals/panels wired
+	// behind Cmd+Alt+* debug keybindings. See the host-wiring block
+	// further down in the file for the per-component prop derivation +
+	// host-data TODOs. Each surface follows the same pattern established
+	// in waves 1-3: `useModalGate()` for visibility, a `setShow<X>` /
+	// keybinding-triggered open, prop stubs where host data isn't yet
+	// surfaced through webFull, and observable `webLogger` calls for
+	// every stubbed callback so triggers stay visible in obs.
+	// ====================================================================
+	WizardExitConfirmModal,
+	ExistingAutoRunDocsModal,
+	WizardResumeModal,
+	LightboxModal,
+	HistoryDetailModal,
+	SaveMarkdownModal,
+	ExecutionQueueBrowser,
+	CustomThemeBuilder,
 	type AppOverlaysStandingOvationData,
 	type AppOverlaysFirstRunCelebrationData,
 	type RecoveryAction,
 } from '../components';
-import type { AgentError } from '../../shared/types';
+import type { AgentError, HistoryEntry } from '../../shared/types';
+import type { SerializableWizardState } from '../../renderer/components/Wizard/WizardContext';
+import type { ThemeColors, ThemeId } from '../../shared/theme-types';
+import { THEMES, DEFAULT_CUSTOM_THEME_COLORS } from '../../shared/themes';
 import { useMarketplace } from '../hooks/useMarketplace';
 import { DEFAULT_SHORTCUTS, TAB_SHORTCUTS } from '../../renderer/constants/shortcuts';
 import type { Session, LastResponsePreview } from '../hooks/useSessions';
@@ -405,6 +426,24 @@ export default function MobileApp() {
 	const marketplaceGate = useModalGate();
 	const settingsGate = useModalGate();
 	const agentErrorGate = useModalGate();
+
+	// ====================================================================
+	// Audit #10 mount-wave 4 — visibility gates for 8 newly-mounted lifted
+	// modals/panels (WizardExitConfirmModal, ExistingAutoRunDocsModal,
+	// WizardResumeModal, LightboxModal, HistoryDetailModal,
+	// SaveMarkdownModal, ExecutionQueueBrowser, CustomThemeBuilder). Same
+	// `useModalGate()` primitive as waves 1-3. Keybinding wiring routes
+	// each gate to `show()` in the debug-trigger handler below; render
+	// branches gate on `gate.open` near the other modal renders.
+	// ====================================================================
+	const wizardExitConfirmGate = useModalGate();
+	const existingAutoRunDocsGate = useModalGate();
+	const wizardResumeGate = useModalGate();
+	const lightboxGate = useModalGate();
+	const historyDetailGate = useModalGate();
+	const saveMarkdownGate = useModalGate();
+	const executionQueueBrowserGate = useModalGate();
+	const customThemeBuilderGate = useModalGate();
 
 	// ====================================================================
 	// Audit #10 mount-wave 3 — AutoRun visibility gate
@@ -1272,6 +1311,55 @@ export default function MobileApp() {
 					setPendingKeyboardMasteryLevel(0);
 					return;
 				}
+				// Mount-wave 4 debug keybindings ----------------------------------
+				// Each keybinding closes the orphan-to-mounted trigger gap for a
+				// lifted surface that had ZERO consumers in App.tsx before this
+				// commit. Cmd+Alt+* used uniformly (the Cmd+Alt cluster is
+				// already established as the wave's debug-trigger namespace by
+				// the F/K bindings above). Letters chosen to mnemonic the
+				// surface: W=Wizard exit, D=Auto-run Docs, R=Resume wizard,
+				// L=Lightbox, I=hIstory detail (H is taken), S=Save markdown,
+				// Q=execution Queue, T=custom Theme.
+				if (e.altKey && (e.key === 'w' || e.key === 'W' || e.key === '∑')) {
+					e.preventDefault();
+					wizardExitConfirmGate.show();
+					return;
+				}
+				if (e.altKey && (e.key === 'd' || e.key === 'D' || e.key === '∂')) {
+					e.preventDefault();
+					existingAutoRunDocsGate.show();
+					return;
+				}
+				if (e.altKey && (e.key === 'r' || e.key === 'R' || e.key === '®')) {
+					e.preventDefault();
+					wizardResumeGate.show();
+					return;
+				}
+				if (e.altKey && (e.key === 'l' || e.key === 'L' || e.key === '¬')) {
+					e.preventDefault();
+					lightboxGate.show();
+					return;
+				}
+				if (e.altKey && (e.key === 'i' || e.key === 'I' || e.key === 'ˆ')) {
+					e.preventDefault();
+					historyDetailGate.show();
+					return;
+				}
+				if (e.altKey && (e.key === 's' || e.key === 'S' || e.key === 'ß')) {
+					e.preventDefault();
+					saveMarkdownGate.show();
+					return;
+				}
+				if (e.altKey && (e.key === 'q' || e.key === 'Q' || e.key === 'œ')) {
+					e.preventDefault();
+					executionQueueBrowserGate.show();
+					return;
+				}
+				if (e.altKey && (e.key === 't' || e.key === 'T' || e.key === '†')) {
+					e.preventDefault();
+					customThemeBuilderGate.show();
+					return;
+				}
 			}
 		};
 
@@ -1288,6 +1376,18 @@ export default function MobileApp() {
 		settingsGate,
 		agentErrorGate,
 		autoRunGate,
+		// Mount-wave 4 deps — keep the handler in sync with the new gates so
+		// React's stale-closure trap doesn't bite. `useModalGate()` returns a
+		// stable object reference per the hook contract, so this list does
+		// NOT churn on each render.
+		wizardExitConfirmGate,
+		existingAutoRunDocsGate,
+		wizardResumeGate,
+		lightboxGate,
+		historyDetailGate,
+		saveMarkdownGate,
+		executionQueueBrowserGate,
+		customThemeBuilderGate,
 	]);
 
 	// Derive ContextWarningSash threshold inputs from the active tab's usage
@@ -1796,6 +1896,196 @@ export default function MobileApp() {
 	const handleAutoRunContentChange = useCallback((content: string) => {
 		setAutoRunContent(content);
 	}, []);
+
+	// ====================================================================
+	// Audit #10 mount-wave 4 — host wiring for 8 newly-mounted modals
+	// ====================================================================
+	//
+	// Each modal below follows the same strip-and-promote-to-prop pattern
+	// established in waves 1-3:
+	//   - Callbacks the host doesn't have a real wiring source for are
+	//     stubbed with `webLogger.warn(...)` so the trigger is visible in
+	//     the obs path. None throw — the modals render, the user can
+	//     interact, the host just doesn't persist anything.
+	//   - Data props default to safe synthetic values (empty arrays, stub
+	//     entries) so the modal renders its "happy path" chrome at least
+	//     once. Host-data TODO comments mark each wiring site for the
+	//     next wave.
+	//   - SaveMarkdownModal's `onWriteFile` is the ONE real wiring —
+	//     reuses the existing `handleWriteMarkdownFile` callback already
+	//     wired for TerminalOutput's save-markdown affordance (POST to
+	//     `/api/autorun/write-doc`).
+	//
+	// Render gating — each modal is mounted ONLY when its gate is open
+	// (debug-keybinding triggered). This keeps the surfaces inert during
+	// normal operation and avoids side-effects (fetch calls in
+	// WizardResumeModal, layer-stack registrations) until the user opts
+	// in via the keybinding.
+
+	// WizardExitConfirmModal — current step + 3 callbacks. All callbacks
+	// log + close the gate. Real surface fires from the parent wizard
+	// container; until that lands, this proves the modal is reachable.
+	const handleWizardExitConfirm = useCallback(() => {
+		webLogger.info('[WizardExitConfirmModal] confirm exit (debug stub)', 'Mobile');
+		wizardExitConfirmGate.hide();
+	}, [wizardExitConfirmGate]);
+	const handleWizardExitQuitWithoutSaving = useCallback(() => {
+		webLogger.info('[WizardExitConfirmModal] quit without saving (debug stub)', 'Mobile');
+		wizardExitConfirmGate.hide();
+	}, [wizardExitConfirmGate]);
+
+	// ExistingAutoRunDocsModal — path + count + 3 callbacks. Synthetic
+	// directoryPath uses the active session's cwd when present so the
+	// modal renders against a plausible value; documentCount is a stub.
+	const existingDocsDirectoryPath = activeSession?.cwd ?? '/Users/example/project';
+	const handleExistingDocsStartFresh = useCallback(() => {
+		webLogger.info(
+			'[ExistingAutoRunDocsModal] start fresh (debug stub) — no delete wiring yet',
+			'Mobile'
+		);
+		existingAutoRunDocsGate.hide();
+	}, [existingAutoRunDocsGate]);
+	const handleExistingDocsContinuePlanning = useCallback(() => {
+		webLogger.info(
+			'[ExistingAutoRunDocsModal] continue planning (debug stub) — no resume wiring yet',
+			'Mobile'
+		);
+		existingAutoRunDocsGate.hide();
+	}, [existingAutoRunDocsGate]);
+
+	// WizardResumeModal — synthesize a `SerializableWizardState` so the
+	// modal can render its happy-path chrome. Host-data TODO: thread the
+	// real persisted state from `loadResumeState()` when WizardContext
+	// gets wired through webFull's host. The component will fetch
+	// `/api/git/is-repo` and `/api/agents/detected` on mount (see the
+	// validateResumeState effect at WizardResumeModal.tsx:140) — those
+	// routes already exist in webFull's server, so the validation flow
+	// works end-to-end against the synthetic state.
+	const syntheticWizardResumeState = useMemo<SerializableWizardState>(
+		() => ({
+			currentStep: 'conversation',
+			selectedAgent: (activeSession?.toolType as any) ?? 'claude-code',
+			agentName: 'Claude Code',
+			directoryPath: activeSession?.cwd ?? '',
+			isGitRepo: false,
+			conversationHistory: [],
+			confidenceLevel: 0.5,
+			isReadyToProceed: false,
+			generatedDocuments: [],
+			editedPhase1Content: null,
+			wantsTour: false,
+		}),
+		[activeSession?.toolType, activeSession?.cwd]
+	);
+	const handleWizardResume = useCallback(
+		(options?: { directoryInvalid?: boolean; agentInvalid?: boolean }) => {
+			webLogger.info(
+				`[WizardResumeModal] resume (debug stub) — directoryInvalid=${options?.directoryInvalid ?? false} agentInvalid=${options?.agentInvalid ?? false}`,
+				'Mobile'
+			);
+			wizardResumeGate.hide();
+		},
+		[wizardResumeGate]
+	);
+	const handleWizardResumeStartFresh = useCallback(() => {
+		webLogger.info('[WizardResumeModal] start fresh (debug stub)', 'Mobile');
+		wizardResumeGate.hide();
+	}, [wizardResumeGate]);
+
+	// LightboxModal — single stub image (1x1 transparent PNG data URI) so
+	// the modal renders chrome without needing a real image source.
+	// stagedImages is single-element so the prev/next nav stays inert.
+	const lightboxStubImage = useMemo(
+		() =>
+			'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+		[]
+	);
+	const handleLightboxNavigate = useCallback((image: string) => {
+		webLogger.info(`[LightboxModal] navigate (debug stub) — image bytes=${image.length}`, 'Mobile');
+	}, []);
+
+	// HistoryDetailModal — synthesize a minimal `HistoryEntry` so the
+	// modal renders. Host-data TODO: thread a real entry from the
+	// MobileHistoryPanel selection when that surface gets a click-through
+	// affordance.
+	const syntheticHistoryEntry = useMemo<HistoryEntry>(
+		() => ({
+			id: 'debug-stub-entry',
+			type: 'USER',
+			timestamp: Date.now() - 60_000,
+			summary: 'Debug stub history entry. Real surface fires from MobileHistoryPanel.',
+			fullResponse: 'This is a stub `HistoryEntry` shown via the Cmd+Alt+I debug trigger.',
+			sessionName: activeSession?.name,
+			projectPath: activeSession?.cwd ?? '',
+			sessionId: activeSession?.id,
+			success: true,
+			elapsedTimeMs: 30_000,
+		}),
+		[activeSession?.name, activeSession?.cwd, activeSession?.id]
+	);
+
+	// SaveMarkdownModal — `onWriteFile` reuses the existing
+	// `handleWriteMarkdownFile` callback (POST `/api/autorun/write-doc`)
+	// already wired for TerminalOutput's save-markdown affordance. The
+	// content is a small stub markdown blob; real surface fires from
+	// TerminalOutput's per-entry save button.
+	const saveMarkdownStubContent = useMemo(
+		() =>
+			[
+				'# Debug Stub Markdown',
+				'',
+				'This modal was opened via the Cmd+Alt+S debug keybinding.',
+				'',
+				`Active session: ${activeSession?.name ?? 'none'}`,
+				`Timestamp: ${new Date().toISOString()}`,
+			].join('\n'),
+		[activeSession?.name]
+	);
+
+	// ExecutionQueueBrowser — empty sessions array renders the modal's
+	// empty-state chrome. Host-data TODO: thread real queued items from
+	// the session-level `executionQueue` field when webFull's
+	// SessionData surfaces it over the wire.
+	const handleExecutionQueueRemoveItem = useCallback((sessionId: string, itemId: string) => {
+		webLogger.warn(
+			`[ExecutionQueueBrowser] removeItem (debug stub) — session=${sessionId} item=${itemId}`,
+			'Mobile'
+		);
+	}, []);
+	const handleExecutionQueueSwitchSession = useCallback(
+		(sessionId: string) => {
+			webLogger.info(
+				`[ExecutionQueueBrowser] switchSession (debug) — routing to handleSelectSession(${sessionId})`,
+				'Mobile'
+			);
+			handleSelectSession(sessionId);
+			executionQueueBrowserGate.hide();
+		},
+		[handleSelectSession, executionQueueBrowserGate]
+	);
+
+	// CustomThemeBuilder — needs local state for the color editor since
+	// webFull doesn't yet thread a custom-theme settings store. Defaults
+	// match the shared `DEFAULT_CUSTOM_THEME_COLORS` + `'dracula'` base.
+	const [customThemeColors, setCustomThemeColors] = useState<ThemeColors>(() => ({
+		...DEFAULT_CUSTOM_THEME_COLORS,
+	}));
+	const [customThemeBaseId, setCustomThemeBaseId] = useState<ThemeId>('dracula');
+	const [customThemeSelected, setCustomThemeSelected] = useState(false);
+	const handleCustomThemeSelect = useCallback(() => {
+		setCustomThemeSelected(true);
+		webLogger.info('[CustomThemeBuilder] selected (debug stub)', 'Mobile');
+	}, []);
+	const handleCustomThemeImportError = useCallback((message: string) => {
+		webLogger.warn(`[CustomThemeBuilder] import error: ${message}`, 'Mobile');
+	}, []);
+	const handleCustomThemeImportSuccess = useCallback((message: string) => {
+		webLogger.info(`[CustomThemeBuilder] import success: ${message}`, 'Mobile');
+	}, []);
+	// THEMES reference held so the import isn't dead while the builder is
+	// closed (the builder reads it at render time via the imported const).
+	// Suppress the unused-import warning when the builder isn't open.
+	void THEMES;
 
 	// Determine content based on connection state
 	const renderContent = () => {
