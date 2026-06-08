@@ -10,7 +10,7 @@ import React, {
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Loader2, Search, X } from 'lucide-react';
 import type { Theme, HistoryEntry, HistoryEntryType } from '../../types';
-import type { FileNode } from '../../types/fileTree';
+import type { FileNode } from '../../../shared/types/fileTree';
 import {
 	ActivityGraph,
 	HistoryEntryItem,

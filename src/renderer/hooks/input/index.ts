@@ -28,9 +28,11 @@ export type {
 // @-mention autocomplete
 export { useAtMentionCompletion } from './useAtMentionCompletion';
 
-// Template variable autocomplete
-export { useTemplateAutocomplete } from './useTemplateAutocomplete';
-export type { AutocompleteState } from './useTemplateAutocomplete';
+// Template variable autocomplete — promoted to src/shared/hooks/ to
+// neutralize a cross-fork edge from AutoRun. Re-exported here for the
+// renderer-side `../hooks` barrel.
+export { useTemplateAutocomplete } from '../../../shared/hooks/useTemplateAutocomplete';
+export type { AutocompleteState } from '../../../shared/hooks/useTemplateAutocomplete';
 
 // Input keyboard handling (slash commands, tab completion, @ mentions, enter-to-send)
 export { useInputKeyDown } from './useInputKeyDown';

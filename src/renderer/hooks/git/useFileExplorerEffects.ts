@@ -15,7 +15,7 @@
 
 import { useEffect, useMemo, useCallback } from 'react';
 import type { Session } from '../../types';
-import type { FileNode } from '../../types/fileTree';
+import type { FileNode } from '../../../shared/types/fileTree';
 import { useSessionStore, selectActiveSession } from '../../stores/sessionStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useUIStore } from '../../stores/uiStore';

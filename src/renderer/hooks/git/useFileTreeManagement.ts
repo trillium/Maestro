@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { RightPanelHandle } from '../../components/RightPanel';
 import type { Session } from '../../types';
-import type { FileNode } from '../../types/fileTree';
+import type { FileNode } from '../../../shared/types/fileTree';
 import {
 	loadFileTree,
 	compareFileTrees,

@@ -208,7 +208,7 @@ vi.mock('../../../renderer/constants/modalPriorities', () => ({
 
 // Mock useClickOutside - stores the callback for testing
 let clickOutsideCallback: (() => void) | null = null;
-vi.mock('../../../renderer/hooks/ui/useClickOutside', () => ({
+vi.mock('../../../shared/hooks/useClickOutside', () => ({
 	useClickOutside: (_ref: unknown, callback: () => void, enabled: boolean) => {
 		if (enabled) {
 			clickOutsideCallback = callback;

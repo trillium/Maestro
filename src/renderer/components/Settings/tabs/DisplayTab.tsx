@@ -16,7 +16,7 @@ import { IgnorePatternsSection } from '../IgnorePatternsSection';
 import { DEFAULT_LOCAL_IGNORE_PATTERNS } from '../../../stores/settingsStore';
 import { Modal } from '../../ui/Modal';
 import { MODAL_PRIORITIES } from '../../../constants/modalPriorities';
-import { DEFAULT_BIONIFY_ALGORITHM } from '../../../utils/bionifyReadingMode';
+import { DEFAULT_BIONIFY_ALGORITHM } from '../../../../shared/utils/bionifyReadingMode';
 
 const BIONIFY_ALGORITHM_PATTERN = /^[+-](\s+\d+){4}\s+(?:0(?:\.\d+)?|1(?:\.0+)?)$/;
 

@@ -32,7 +32,7 @@ const mockHandleKeyDown = vi.fn().mockReturnValue(false);
 const mockSelectVariable = vi.fn();
 const mockAutocompleteRef = { current: null };
 
-vi.mock('../../renderer/hooks/input/useTemplateAutocomplete', () => ({
+vi.mock('../../shared/hooks/useTemplateAutocomplete', () => ({
 	useTemplateAutocomplete: vi.fn((props: { onChange: (value: string) => void }) => {
 		// Capture the onChange in a closure for this specific hook instance
 		const onChange = props.onChange;

@@ -12,7 +12,7 @@ import {
 	Save,
 } from 'lucide-react';
 import type { Session, Theme, LogEntry, FocusArea, AgentError } from '../types';
-import type { FileNode } from '../types/fileTree';
+import type { FileNode } from '../../shared/types/fileTree';
 import Convert from 'ansi-to-html';
 import DOMPurify from 'dompurify';
 import { useLayerStack } from '../contexts/LayerStackContext';
@@ -29,7 +29,7 @@ import { MarkdownRenderer } from './MarkdownRenderer';
 import { QueuedItemsList } from './QueuedItemsList';
 import { LogFilterControls } from './LogFilterControls';
 import { SaveMarkdownModal } from './SaveMarkdownModal';
-import { generateTerminalProseStyles } from '../utils/markdownConfig';
+import { generateTerminalProseStyles } from '../../shared/utils/markdownConfig';
 import { safeClipboardWrite } from '../utils/clipboard';
 import { useSettingsStore } from '../stores/settingsStore';
 const BIONIFY_BUTTON_LABEL = 'B';

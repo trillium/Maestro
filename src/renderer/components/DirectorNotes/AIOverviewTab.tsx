@@ -4,7 +4,7 @@ import type { Theme } from '../../types';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { SaveMarkdownModal } from '../SaveMarkdownModal';
 import { useSettings } from '../../hooks';
-import { generateTerminalProseStyles } from '../../utils/markdownConfig';
+import { generateTerminalProseStyles } from '../../../shared/utils/markdownConfig';
 import { safeClipboardWrite } from '../../utils/clipboard';
 
 type SynopsisStats = NonNullable<

@@ -50,7 +50,9 @@ export type {
 // Import AgentError for use within this file
 import type { AgentError } from '../../shared/types';
 
-export type SessionState = 'idle' | 'busy' | 'waiting_input' | 'connecting' | 'error';
+// SessionState — promoted to src/shared/types/ for cross-fork consumption.
+import type { SessionState } from '../../shared/types/sessionState';
+export type { SessionState };
 export type FileChangeType = 'modified' | 'added' | 'deleted';
 export type RightPanelTab = 'files' | 'history' | 'autorun';
 export type SettingsTab = 'general' | 'shortcuts' | 'theme' | 'notifications' | 'aicommands';
@@ -162,11 +164,8 @@ export interface SessionWizardState {
 	toolExecutions?: Array<{ toolName: string; state?: unknown; timestamp: number }>;
 }
 
-export interface Shortcut {
-	id: string;
-	label: string;
-	keys: string[];
-}
+// Shortcut — promoted to src/shared/types/ for cross-fork consumption.
+export type { Shortcut } from '../../shared/types/shortcut';
 
 export interface FileArtifact {
 	path: string;
@@ -279,65 +278,10 @@ export interface BatchRunConfig {
 	worktreeTarget?: WorktreeRunTarget; // Optional target for dispatching to a worktree agent
 }
 
-// Import BatchProcessingState for state machine integration
-import type { BatchProcessingState } from '../hooks/batch/batchStateMachine';
-
-// Batch processing state
-export interface BatchRunState {
-	isRunning: boolean;
-	isStopping: boolean; // Waiting for current task to finish before stopping
-
-	// State machine integration (Phase 11)
-	// Tracks explicit processing state for invariant checking and debugging
-	processingState?: BatchProcessingState;
-
-	// Document-level progress (multi-document support)
-	documents: string[]; // Ordered list of document filenames to process
-	lockedDocuments: string[]; // Documents that should be read-only during this run (subset of documents)
-	currentDocumentIndex: number; // Which document we're on (0-based)
-
-	// Task-level progress within current document
-	currentDocTasksTotal: number; // Total tasks in current document
-	currentDocTasksCompleted: number; // Completed tasks in current document
-
-	// Overall progress (grows as reset docs add tasks back)
-	totalTasksAcrossAllDocs: number;
-	completedTasksAcrossAllDocs: number;
-
-	// Loop mode
-	loopEnabled: boolean;
-	loopIteration: number; // How many times we've looped (0 = first pass)
-	maxLoops?: number | null; // Max loop iterations (null/undefined = infinite)
-
-	// Folder path for file operations
-	folderPath: string;
-
-	// Worktree tracking
-	worktreeActive: boolean; // Currently running in a worktree
-	worktreePath?: string; // Path to the active worktree
-	worktreeBranch?: string; // Branch name in the worktree
-
-	// Legacy fields (kept for backwards compatibility during migration)
-	totalTasks: number;
-	completedTasks: number;
-	currentTaskIndex: number;
-	scratchpadPath?: string; // Path to temp file
-	originalContent: string; // Original scratchpad content for sync back
-
-	// Prompt configuration
-	customPrompt?: string; // User's custom prompt if modified
-	sessionIds: string[]; // Claude session IDs from each iteration
-	startTime?: number; // Timestamp when batch run started
-	cumulativeTaskTimeMs?: number; // Sum of actual task durations (most accurate work time measure)
-	accumulatedElapsedMs?: number; // Accumulated active elapsed time (excludes sleep/suspend time)
-	lastActiveTimestamp?: number; // Last timestamp when actively tracking (for pause/resume calculation)
-
-	// Error handling state (Phase 5.10)
-	error?: AgentError; // Current error if batch is paused due to agent error
-	errorPaused?: boolean; // True if batch is paused waiting for error resolution
-	errorDocumentIndex?: number; // Which document had the error (for skip functionality)
-	errorTaskDescription?: string; // Description of the task that failed (for UI display)
-}
+// Batch processing state — promoted to src/shared/types/ to neutralize a
+// cross-fork edge from AutoRun. The full state machine (transitions, events,
+// reducer) still lives at src/renderer/hooks/batch/.
+export type { BatchRunState } from '../../shared/types/batchRunState';
 
 // Badge unlock record for history tracking
 export interface BadgeUnlockRecord {

@@ -6,10 +6,10 @@ import {
 	FilePreview,
 	_clearExpiredImageCacheForTesting,
 } from '../../../renderer/components/FilePreview';
-import { remarkFileLinks } from '../../../renderer/utils/remarkFileLinks';
+import { remarkFileLinks } from '../../../shared/utils/remarkFileLinks';
 import { captureException } from '../../../renderer/utils/sentry';
 import { formatShortcutKeys } from '../../../renderer/utils/shortcutFormatter';
-import { getEncoder } from '../../../renderer/utils/tokenCounter';
+import { getEncoder } from '../../../shared/utils/tokenCounter';
 import { useSettingsStore } from '../../../renderer/stores/settingsStore';
 
 const reactMarkdownMocks = vi.hoisted(() => ({
@@ -154,7 +154,7 @@ vi.mock('../../../renderer/constants/modalPriorities', () => ({
 const mockContainerClickOutside = { callback: null as (() => void) | null, enabled: false };
 const mockTocClickOutside = { callback: null as (() => void) | null, enabled: false };
 let useClickOutsideCallCount = 0;
-vi.mock('../../../renderer/hooks/ui/useClickOutside', () => ({
+vi.mock('../../../shared/hooks/useClickOutside', () => ({
 	useClickOutside: (_ref: unknown, callback: () => void, enabled: boolean, _options?: unknown) => {
 		// First call is for container (handleEscapeRequest), second is for TOC
 		if (useClickOutsideCallCount % 2 === 0) {
@@ -212,7 +212,7 @@ vi.mock('../../../renderer/components/CsvTableRenderer', () => ({
 }));
 
 // Mock token counter - getEncoder must return a Promise
-vi.mock('../../../renderer/utils/tokenCounter', () => ({
+vi.mock('../../../shared/utils/tokenCounter', () => ({
 	getEncoder: vi.fn(() => Promise.resolve({ encode: () => [1, 2, 3] })),
 	formatTokenCount: vi.fn((count: number) => `${count} tokens`),
 }));
@@ -238,7 +238,7 @@ vi.mock('../../../renderer/utils/shortcutFormatter', () => ({
 }));
 
 // Mock remarkFileLinks
-vi.mock('../../../renderer/utils/remarkFileLinks', () => ({
+vi.mock('../../../shared/utils/remarkFileLinks', () => ({
 	remarkFileLinks: vi.fn(() => () => {}),
 	buildFileTreeIndices: vi.fn(() => ({
 		allPaths: new Set(['docs/guide.md']),
@@ -2609,7 +2609,7 @@ describe('FilePreview', () => {
 		});
 
 		it('skips token counting for files larger than 1MB', async () => {
-			const { getEncoder } = await import('../../../renderer/utils/tokenCounter');
+			const { getEncoder } = await import('../../../shared/utils/tokenCounter');
 
 			// Create content larger than LARGE_FILE_TOKEN_SKIP_THRESHOLD (1MB)
 			const hugeContent = 'z'.repeat(1.5 * 1024 * 1024); // 1.5MB

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { getSyntaxStyle } from '../../../renderer/utils/syntaxTheme';
+import { getSyntaxStyle } from '../../../shared/utils/syntaxTheme';
 
 describe('getSyntaxStyle', () => {
 	it('returns the light syntax style for light mode', () => {

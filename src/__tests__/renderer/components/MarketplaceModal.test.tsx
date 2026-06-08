@@ -55,7 +55,7 @@ vi.mock('../../../renderer/hooks/batch/useMarketplace', () => ({
 	}),
 }));
 
-vi.mock('../../../renderer/utils/markdownConfig', () => ({
+vi.mock('../../../shared/utils/markdownConfig', () => ({
 	REMARK_GFM_PLUGINS: [],
 	generateProseStyles: vi.fn(() => ''),
 	createMarkdownComponents: vi.fn(

@@ -3,8 +3,8 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkStringify from 'remark-stringify';
 import type { Image, Link, Paragraph, Root } from 'mdast';
-import type { FileNode } from '../../renderer/types/fileTree';
-import { buildFileTreeIndices, remarkFileLinks } from '../../renderer/utils/remarkFileLinks';
+import type { FileNode } from '../../shared/types/fileTree';
+import { buildFileTreeIndices, remarkFileLinks } from '../../shared/utils/remarkFileLinks';
 
 const projectRoot = '/Users/agent/Workspace';
 

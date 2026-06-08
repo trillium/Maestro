@@ -18,15 +18,16 @@ export {
 export { useSessionDebounce } from './useSessionDebounce';
 export type { UseSessionDebounceOptions, UseSessionDebounceReturn } from './useSessionDebounce';
 
-// Batch state reducer and types
-export { batchReducer, DEFAULT_BATCH_STATE } from './batchReducer';
+// Batch state reducer and types — promoted to src/shared/batch/ to
+// neutralize a cross-fork edge from AutoRun (transitively via batchStore).
+export { batchReducer, DEFAULT_BATCH_STATE } from '../../../shared/batch/batchReducer';
 export type {
 	BatchState,
 	BatchAction,
 	StartBatchPayload,
 	UpdateProgressPayload,
 	SetErrorPayload,
-} from './batchReducer';
+} from '../../../shared/batch/batchReducer';
 
 // Visibility-aware time tracking hook
 export { useTimeTracking } from './useTimeTracking';
@@ -52,13 +53,14 @@ export type {
 	UseWorktreeManagerReturn,
 } from './useWorktreeManager';
 
-// Batch processing state machine
+// Batch processing state machine — promoted to src/shared/batch/ to
+// neutralize a cross-fork edge from AutoRun (transitively via batchStore).
 export {
 	transition,
 	canTransition,
 	getValidEvents,
 	DEFAULT_MACHINE_CONTEXT,
-} from './batchStateMachine';
+} from '../../../shared/batch/batchStateMachine';
 export type {
 	BatchProcessingState,
 	BatchMachineContext,
@@ -67,7 +69,7 @@ export type {
 	TaskCompletedPayload,
 	ErrorOccurredPayload,
 	LoopCompletedPayload,
-} from './batchStateMachine';
+} from '../../../shared/batch/batchStateMachine';
 
 // Main batch processor hook
 export { useBatchProcessor } from './useBatchProcessor';
@@ -92,9 +94,14 @@ export type {
 	UseAutoRunImageHandlingDeps,
 } from './useAutoRunImageHandling';
 
-// Auto Run undo/redo
-export { useAutoRunUndo } from './useAutoRunUndo';
-export type { UseAutoRunUndoReturn, UseAutoRunUndoDeps, UndoState } from './useAutoRunUndo';
+// Auto Run undo/redo — promoted to src/shared/hooks/ to neutralize a
+// cross-fork edge from AutoRun. Re-exported here for backwards compatibility.
+export { useAutoRunUndo } from '../../../shared/hooks/useAutoRunUndo';
+export type {
+	UseAutoRunUndoReturn,
+	UseAutoRunUndoDeps,
+	UndoState,
+} from '../../../shared/hooks/useAutoRunUndo';
 
 // Playbook management
 export { usePlaybookManagement } from './usePlaybookManagement';

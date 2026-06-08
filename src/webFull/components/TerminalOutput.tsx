@@ -120,7 +120,7 @@ import {
 } from 'lucide-react';
 import type { Session, LogEntry, FocusArea, AgentError } from '../../renderer/types';
 import type { Theme } from '../../shared/theme-types';
-import type { FileNode } from '../../renderer/types/fileTree';
+import type { FileNode } from '../../shared/types/fileTree';
 import Convert from 'ansi-to-html';
 import DOMPurify from 'dompurify';
 import { useLayerStack } from '../contexts/LayerStackContext';

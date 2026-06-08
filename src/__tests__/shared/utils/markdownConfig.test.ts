@@ -21,7 +21,7 @@ import {
 	createReleaseNotesMarkdownComponents,
 	createMarkdownComponents,
 	REMARK_GFM_PLUGINS,
-} from '../../../renderer/utils/markdownConfig';
+} from '../../../shared/utils/markdownConfig';
 import type { Theme } from '../../../shared/theme-types';
 
 /**

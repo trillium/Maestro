@@ -60,7 +60,7 @@ import {
 	REMARK_GFM_PLUGINS,
 	generateProseStyles,
 	createMarkdownComponents,
-} from '../utils/markdownConfig';
+} from '../../shared/utils/markdownConfig';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
 
 // ============================================================================

@@ -15,7 +15,7 @@ import { renderHook } from '@testing-library/react';
 import { AutoRun } from '../../renderer/components/AutoRun';
 import { LayerStackProvider } from '../../renderer/contexts/LayerStackContext';
 import { imageCache, useAutoRunImageHandling } from '../../renderer/hooks/useAutoRunImageHandling';
-import { useAutoRunUndo } from '../../renderer/hooks/useAutoRunUndo';
+import { useAutoRunUndo } from '../../shared/hooks/useAutoRunUndo';
 import type { Theme, BatchRunState, SessionState } from '../../renderer/types';
 
 // Helper to render with LayerStackProvider (required by AutoRunSearchBar)
@@ -98,7 +98,7 @@ vi.mock('../../renderer/components/AutoRunDocumentSelector', () => ({
 	),
 }));
 
-vi.mock('../../renderer/hooks/useTemplateAutocomplete', () => ({
+vi.mock('../../shared/hooks/useTemplateAutocomplete', () => ({
 	useTemplateAutocomplete: ({
 		value,
 		onChange,

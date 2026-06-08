@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkStringify from 'remark-stringify';
-import { remarkFileLinks, buildFileTreeIndices } from '../../../renderer/utils/remarkFileLinks';
-import type { FileNode } from '../../../renderer/types/fileTree';
+import { remarkFileLinks, buildFileTreeIndices } from '../../../shared/utils/remarkFileLinks';
+import type { FileNode } from '../../../shared/types/fileTree';
 import type { Link, Paragraph, Root } from 'mdast';
 
 // Helper to process markdown and return the result

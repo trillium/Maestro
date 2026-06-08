@@ -19,7 +19,7 @@ import { useUIStore } from '../../renderer/stores/uiStore';
 import { useSettingsStore } from '../../renderer/stores/settingsStore';
 import { useFileExplorerStore } from '../../renderer/stores/fileExplorerStore';
 import type { Session } from '../../renderer/types';
-import type { FileNode } from '../../renderer/types/fileTree';
+import type { FileNode } from '../../shared/types/fileTree';
 import type { UseFileExplorerEffectsDeps } from '../../renderer/hooks/git/useFileExplorerEffects';
 
 // --- Mocks ---

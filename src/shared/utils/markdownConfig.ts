@@ -20,9 +20,39 @@ import type { Components } from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { getSyntaxStyle } from './syntaxTheme';
 import React from 'react';
-import type { Theme } from '../types';
-import { REMARK_GFM_PLUGINS } from '../../shared/markdownPlugins';
+import type { Theme } from '../theme-types';
+import { REMARK_GFM_PLUGINS } from '../markdownPlugins';
 import { BionifyText, getBionifyReadingModeStyles } from './bionifyReadingMode';
+
+/**
+ * Open an external URL in a fork-portable way.
+ *
+ * Used by the DEFAULT `a` renderers below when no `onExternalLinkClick`
+ * callback is supplied. In the Electron renderer the preload bridge exposes
+ * `window.maestro.shell.openExternal` (preferred — uses the OS handler via
+ * the main process). In the web/webFull fork that bridge does not exist, so
+ * we fall back to `window.open(href, '_blank', 'noopener,noreferrer')`,
+ * which is the same fallback already used at other `window.maestro?.shell?.`
+ * call sites in the renderer.
+ *
+ * Callers that need richer external-link handling should pass
+ * `onExternalLinkClick` through `MarkdownComponentsOptions`; that callback
+ * overrides this default entirely (see the `a` override around line 489).
+ */
+function openExternalLinkPortable(href: string): void {
+	const shell = (
+		globalThis as unknown as {
+			window?: { maestro?: { shell?: { openExternal?: (href: string) => unknown } } };
+		}
+	).window?.maestro?.shell;
+	if (shell?.openExternal) {
+		shell.openExternal(href);
+		return;
+	}
+	if (typeof window !== 'undefined' && typeof window.open === 'function') {
+		window.open(href, '_blank', 'noopener,noreferrer');
+	}
+}
 
 // ============================================================================
 // Types
@@ -693,7 +723,7 @@ export function createWizardBubbleMarkdownComponents(theme: Theme): Partial<Comp
 					style: { color: theme.colors.accent },
 					onClick: () => {
 						if (href && /^https?:\/\/|^mailto:/.test(href)) {
-							window.maestro.shell.openExternal(href);
+							openExternalLinkPortable(href);
 						}
 					},
 				},
@@ -793,7 +823,7 @@ export function createReleaseNotesMarkdownComponents(theme: Theme): Partial<Comp
 					onClick: (e: React.MouseEvent) => {
 						e.preventDefault();
 						if (href && /^https?:\/\/|^mailto:/.test(href)) {
-							window.maestro.shell.openExternal(href);
+							openExternalLinkPortable(href);
 						}
 					},
 					className: 'hover:underline cursor-pointer',

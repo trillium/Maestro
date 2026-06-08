@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { FilePreview } from '../../renderer/components/FilePreview';
 import { LayerStackProvider } from '../../renderer/contexts/LayerStackContext';
 import { useSettingsStore } from '../../renderer/stores/settingsStore';
-import { getEncoder } from '../../renderer/utils/tokenCounter';
+import { getEncoder } from '../../shared/utils/tokenCounter';
 
 const visitMocks = vi.hoisted(() => ({
 	visit: vi.fn((_tree: unknown, _type: string, visitor: any) => {
@@ -14,7 +14,7 @@ const visitMocks = vi.hoisted(() => ({
 
 vi.mock('unist-util-visit', () => visitMocks);
 
-vi.mock('../../renderer/utils/tokenCounter', () => ({
+vi.mock('../../shared/utils/tokenCounter', () => ({
 	getEncoder: vi.fn(),
 	formatTokenCount: vi.fn((count: number) => `${count} tokens`),
 }));

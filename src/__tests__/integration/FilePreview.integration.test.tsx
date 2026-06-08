@@ -7,7 +7,7 @@ import {
 } from '../../renderer/components/FilePreview';
 import { LayerStackProvider } from '../../renderer/contexts/LayerStackContext';
 import { useSettingsStore } from '../../renderer/stores/settingsStore';
-import { getEncoder } from '../../renderer/utils/tokenCounter';
+import { getEncoder } from '../../shared/utils/tokenCounter';
 import { safeClipboardWrite, safeClipboardWriteBlob } from '../../renderer/utils/clipboard';
 
 const clipboardMocks = vi.hoisted(() => ({
@@ -17,7 +17,7 @@ const clipboardMocks = vi.hoisted(() => ({
 
 vi.mock('../../renderer/utils/clipboard', () => clipboardMocks);
 
-vi.mock('../../renderer/utils/tokenCounter', () => ({
+vi.mock('../../shared/utils/tokenCounter', () => ({
 	getEncoder: vi.fn(),
 	formatTokenCount: vi.fn((count: number) => `${count} tokens`),
 }));

@@ -17,13 +17,13 @@ import {
 	AlertTriangle,
 } from 'lucide-react';
 import type { Theme, HistoryEntry } from '../types';
-import type { FileNode } from '../types/fileTree';
+import type { FileNode } from '../../shared/types/fileTree';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { formatElapsedTime } from '../utils/formatters';
 import { stripAnsiCodes } from '../../shared/stringUtils';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { generateTerminalProseStyles } from '../utils/markdownConfig';
+import { generateTerminalProseStyles } from '../../shared/utils/markdownConfig';
 import { calculateContextDisplay } from '../utils/contextUsage';
 import { getContextColor } from '../utils/theme';
 import { DoubleCheck } from './History';

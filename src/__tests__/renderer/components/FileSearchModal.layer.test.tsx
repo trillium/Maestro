@@ -3,7 +3,7 @@ import { render } from '@testing-library/react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { FileSearchModal } from '../../../renderer/components/FileSearchModal';
 import type { Theme } from '../../../renderer/types';
-import type { FileNode } from '../../../renderer/types/fileTree';
+import type { FileNode } from '../../../shared/types/fileTree';
 
 const registerLayer = vi.fn();
 const unregisterLayer = vi.fn();

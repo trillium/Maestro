@@ -62,7 +62,7 @@ vi.mock('../../renderer/components/MermaidRenderer', () => ({
 	),
 }));
 
-vi.mock('../../renderer/hooks/useTemplateAutocomplete', () => ({
+vi.mock('../../shared/hooks/useTemplateAutocomplete', () => ({
 	useTemplateAutocomplete: ({
 		value,
 		onChange,

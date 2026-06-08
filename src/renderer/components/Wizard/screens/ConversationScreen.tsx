@@ -39,7 +39,7 @@ import { formatAgentName, getToolDetail } from '../shared/wizardHelpers';
 import {
 	REMARK_GFM_PLUGINS,
 	createWizardBubbleMarkdownComponents,
-} from '../../../utils/markdownConfig';
+} from '../../../../shared/utils/markdownConfig';
 
 interface ConversationScreenProps {
 	theme: Theme;

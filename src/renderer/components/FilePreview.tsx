@@ -13,7 +13,7 @@ import rehypeRaw from 'rehype-raw';
 import rehypeSlug from 'rehype-slug';
 import GithubSlugger from 'github-slugger';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { getSyntaxStyle } from '../utils/syntaxTheme';
+import { getSyntaxStyle } from '../../shared/utils/syntaxTheme';
 import {
 	FileCode,
 	Eye,
@@ -41,19 +41,19 @@ import { captureException } from '../utils/sentry';
 import { safeClipboardWrite, safeClipboardWriteBlob } from '../utils/clipboard';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
-import { useClickOutside } from '../hooks/ui/useClickOutside';
+import { useClickOutside } from '../../shared/hooks/useClickOutside';
 import { Modal, ModalFooter } from './ui/Modal';
 import { MermaidRenderer } from './MermaidRenderer';
 import { CsvTableRenderer } from './CsvTableRenderer';
-import { getEncoder, formatTokenCount } from '../utils/tokenCounter';
+import { getEncoder, formatTokenCount } from '../../shared/utils/tokenCounter';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
-import { remarkFileLinks, buildFileTreeIndices } from '../utils/remarkFileLinks';
+import { remarkFileLinks, buildFileTreeIndices } from '../../shared/utils/remarkFileLinks';
 import remarkFrontmatter from 'remark-frontmatter';
 import { remarkFrontmatterTable } from '../utils/remarkFrontmatterTable';
-import { REMARK_GFM_PLUGINS, createMarkdownComponents } from '../utils/markdownConfig';
-import type { FileNode } from '../types/fileTree';
+import { REMARK_GFM_PLUGINS, createMarkdownComponents } from '../../shared/utils/markdownConfig';
+import type { FileNode } from '../../shared/types/fileTree';
 import { isImageFile } from '../../shared/gitUtils';
-import { BionifyTextBlock } from '../utils/bionifyReadingMode';
+import { BionifyTextBlock } from '../../shared/utils/bionifyReadingMode';
 
 // Global cache for loaded images to prevent re-fetching and flickering
 // Maps resolved path -> { dataUrl, dimensions }

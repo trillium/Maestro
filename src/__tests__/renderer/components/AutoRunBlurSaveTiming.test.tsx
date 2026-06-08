@@ -139,7 +139,7 @@ vi.mock('../../../renderer/components/AutoRunDocumentSelector', () => ({
 	),
 }));
 
-vi.mock('../../../renderer/hooks/input/useTemplateAutocomplete', () => ({
+vi.mock('../../../shared/hooks/useTemplateAutocomplete', () => ({
 	useTemplateAutocomplete: ({
 		value,
 		onChange,

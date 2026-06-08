@@ -88,7 +88,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Search, File, FileImage, FileText } from 'lucide-react';
 import type { Theme } from '../../shared/theme-types';
 import type { Shortcut } from '../../renderer/types';
-import type { FileNode } from '../../renderer/types/fileTree';
+import type { FileNode } from '../../shared/types/fileTree';
 import { fuzzyMatchWithScore } from '../../renderer/utils/search';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';

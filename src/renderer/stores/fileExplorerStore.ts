@@ -13,7 +13,7 @@
 
 import { create } from 'zustand';
 import type { FlatTreeNode } from '../utils/fileExplorer';
-import type { FileNode } from '../types/fileTree';
+import type { FileNode } from '../../shared/types/fileTree';
 
 // ============================================================================
 // Types

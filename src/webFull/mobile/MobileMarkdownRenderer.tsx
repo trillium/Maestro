@@ -21,7 +21,7 @@ import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { useThemeColors, useTheme } from '../components/ThemeProvider';
 import { triggerHaptic, HAPTIC_PATTERNS } from './constants';
 import { REMARK_GFM_PLUGINS } from '../../shared/markdownPlugins';
-import { BionifyText, getBionifyReadingModeStyles } from '../../renderer/utils/bionifyReadingMode';
+import { BionifyText, getBionifyReadingModeStyles } from '../../shared/utils/bionifyReadingMode';
 
 /**
  * Props for MobileMarkdownRenderer

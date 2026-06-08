@@ -3,14 +3,14 @@ import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import DOMPurify from 'dompurify';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { getSyntaxStyle } from '../utils/syntaxTheme';
+import { getSyntaxStyle } from '../../shared/utils/syntaxTheme';
 import { Clipboard, Loader2, ImageOff } from 'lucide-react';
 import type { Theme } from '../types';
-import type { FileNode } from '../types/fileTree';
-import { remarkFileLinks, buildFileTreeIndices } from '../utils/remarkFileLinks';
+import type { FileNode } from '../../shared/types/fileTree';
+import { remarkFileLinks, buildFileTreeIndices } from '../../shared/utils/remarkFileLinks';
 import remarkFrontmatter from 'remark-frontmatter';
 import { remarkFrontmatterTable } from '../utils/remarkFrontmatterTable';
-import { REMARK_GFM_PLUGINS, applyReadableTextTransforms } from '../utils/markdownConfig';
+import { REMARK_GFM_PLUGINS, applyReadableTextTransforms } from '../../shared/utils/markdownConfig';
 
 // ============================================================================
 // LocalImage - Loads local images via IPC
