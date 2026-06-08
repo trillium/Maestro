@@ -50,6 +50,7 @@ import { getWakaTimeManager } from './wakatime-manager';
 import { getStatsManager } from './stats-manager';
 import { getFontsManager } from './fonts-manager';
 import { getFsManager } from './fs-manager';
+import { getAutorunManager } from './autorun-manager';
 import { getMarketplaceManager } from './marketplace-manager';
 import { getAgentsManager } from './agents-manager';
 import { getSshRemotesManager } from './ssh-remotes-manager';
@@ -58,6 +59,7 @@ import {
 	registerStatsProvider,
 	registerFontsProvider,
 	registerFsProvider,
+	registerAutorunProvider,
 	registerMarketplaceProvider,
 	registerAgentsProvider,
 	registerSshRemotesProvider,
@@ -262,6 +264,45 @@ registerFsProvider({
 	stat: (p: string) => fsManager.stat(p),
 	readFile: (p: string) => fsManager.readFile(p),
 	writeDoc: (p: string, content: string) => fsManager.writeDoc(p, content),
+});
+
+// W3-autorun-images — Autorun image manager. Server-side port of the
+// `autorun:{saveImage,deleteImage,listImages}` IPC handlers at
+// `src/main/ipc/handlers/autorun.ts:501-752` that backs the new
+// `/api/autorun/{list-images,save-image,delete-image}` REST routes (closes
+// ISC-44.shim.autorun_images_routes, server-half, under the umbrella
+// ISC-44.shim.big_3_ipc_strategy). The renderer-side IPC handlers are NOT
+// touched; both can run side-by-side in a hybrid Electron + headless-sidecar
+// deployment because the underlying filesystem layout
+// (`<folderPath>/images/{docName}-{timestamp}.{ext}`) is the cross-mode
+// contract.
+//
+// Stateless — no DB handle, no network egress, no async initialization. Each
+// saveImage / deleteImage / listImages call shells out fresh to the Node fs
+// APIs. No SIGINT/SIGTERM shutdown hook needed (no resources to release). SSH
+// remote support is deliberately out of scope here; the route layer 501s when
+// an `sshRemoteId` field is present so callers don't silently get a local
+// result when a remote was requested.
+//
+// This is the LAST gap the AutoRun lift named: the lift's
+// `useAutoRunImageHandling` hook calls `window.maestro.autorun.{listImages,
+// saveImage,deleteImage}` at three sites that no-op'd in webFull until now.
+// With these routes wired, the AutoRun lift can resume.
+const autorunManager = getAutorunManager();
+
+// Register the manager as the default Autorun provider for the REST routes.
+// MUST run before `server.start()` so the routes have a backing provider by
+// the time the first client request arrives. The renderer-side Electron path
+// does NOT register a provider — the `autorun:{saveImage,deleteImage,listImages}`
+// IPC channels continue to own that surface — and the routes correctly 503
+// when called outside the headless server.
+registerAutorunProvider({
+	listImages: (folderPath: string, docFilename: string) =>
+		autorunManager.listImages(folderPath, docFilename),
+	saveImage: (folderPath: string, docFilename: string, dataUrl: string, extension: string) =>
+		autorunManager.saveImage(folderPath, docFilename, dataUrl, extension),
+	deleteImage: (folderPath: string, relativePath: string) =>
+		autorunManager.deleteImage(folderPath, relativePath),
 });
 
 // W3 — Marketplace manager. Server-side port of
