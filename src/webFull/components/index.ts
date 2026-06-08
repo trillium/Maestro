@@ -127,3 +127,5 @@ export type { ShortcutEditorProps } from './ShortcutEditor';
 export { ToolCallCard, getToolName } from './ToolCallCard';
 export { LightboxModal } from './LightboxModal';
 export { ParticipantCard } from './ParticipantCard';
+export { MergeProgressOverlay } from './MergeProgressOverlay';
+export type { MergeProgressOverlayProps } from './MergeProgressOverlay';
