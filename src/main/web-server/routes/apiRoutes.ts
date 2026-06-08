@@ -16,6 +16,7 @@
  */
 
 import * as path from 'path';
+import chokidar from 'chokidar';
 import { FastifyInstance } from 'fastify';
 import { HistoryEntry } from '../../../shared/types';
 import { logger } from '../../utils/logger';
@@ -2831,6 +2832,74 @@ export class ApiRoutes {
 						timestamp: Date.now(),
 					});
 				}
+			}
+		);
+
+		// GET /api/autorun/folder-events — SSE stream of file-system changes
+		// inside an Auto Run Docs folder. Backs `autorun.onFileChanged` in the
+		// webFull layer (replaces the Electron IPC event of the same name).
+		// Query: ?path=<absolute path to Auto Run Docs folder>
+		// Emits: `event: file-changed\ndata: {"path":"<abs>","type":"add"|"change"|"unlink"}\n\n`
+		// Validates: path must pass validateFsPath() and basename must equal 'Auto Run Docs'.
+		server.get(
+			`/${token}/api/autorun/folder-events`,
+			{
+				// Intentionally NO rate limit on SSE — long-lived connections
+				// are the wrong shape for the request-rate-limit window.
+			},
+			async (request, reply) => {
+				const query = request.query as Record<string, string>;
+				const folderPath = query.path;
+
+				const pathReason = validateFsPath(folderPath);
+				if (pathReason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: `path: ${pathReason}`,
+						timestamp: Date.now(),
+					});
+				}
+
+				if (path.basename(folderPath) !== 'Auto Run Docs') {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'path must point to an Auto Run Docs folder',
+						timestamp: Date.now(),
+					});
+				}
+
+				reply.raw.writeHead(200, {
+					'Content-Type': 'text/event-stream',
+					'Cache-Control': 'no-cache, no-transform',
+					Connection: 'keep-alive',
+					'Access-Control-Allow-Origin': '*',
+				});
+				reply.raw.write(`: connected ${Date.now()}\n\n`);
+
+				const watcher = chokidar.watch(folderPath, { ignoreInitial: true });
+
+				const send = (type: 'add' | 'change' | 'unlink', filePath: string) => {
+					try {
+						reply.raw.write(
+							`event: file-changed\ndata: ${JSON.stringify({ path: filePath, type })}\n\n`
+						);
+					} catch {
+						/* connection closed */
+					}
+				};
+
+				watcher.on('add', (p) => send('add', p));
+				watcher.on('change', (p) => send('change', p));
+				watcher.on('unlink', (p) => send('unlink', p));
+
+				request.raw.on('close', () => {
+					watcher.close().catch(() => {});
+					try {
+						reply.raw.end();
+					} catch {
+						/* already closed */
+					}
+				});
 			}
 		);
 
