@@ -77,7 +77,9 @@ export const lightboxModalParityCatalog: ParityStory[] = [
 		name: 'lightbox-shows-image-and-dialog-chrome-with-single-staged-image',
 		given:
 			'The user opens the lightbox on a single staged image at "data:image/png;base64,AAA" (no siblings).',
-		when: ['the LightboxModal mounts with image="data:image/png;base64,AAA" and stagedImages=[image]'],
+		when: [
+			'the LightboxModal mounts with image="data:image/png;base64,AAA" and stagedImages=[image]',
+		],
 		then: [
 			// Dialog chrome is present with the documented aria-label
 			{ verb: 'hasElement', target: '[role="dialog"][aria-label="Image Lightbox"]' },
@@ -92,7 +94,9 @@ export const lightboxModalParityCatalog: ParityStory[] = [
 		name: 'lightbox-shows-navigation-arrows-and-counter-with-multiple-staged-images',
 		given:
 			'The user opens the lightbox on the second of three staged images ["a.png","b.png","c.png"].',
-		when: ['the LightboxModal mounts with image="b.png" and stagedImages=["a.png","b.png","c.png"]'],
+		when: [
+			'the LightboxModal mounts with image="b.png" and stagedImages=["a.png","b.png","c.png"]',
+		],
 		then: [
 			// Bottom info strip shows the "Image X of Y" counter
 			{ verb: 'hasText', target: '[role="dialog"]', value: 'Image 2 of 3' },
@@ -151,13 +155,17 @@ export const lightboxModalParityCatalog: ParityStory[] = [
 	},
 	{
 		name: 'lightbox-hides-delete-button-when-on-delete-callback-omitted',
-		given: 'The LightboxModal is open with image="a.png", stagedImages=["a.png"], and no onDelete callback.',
+		given:
+			'The LightboxModal is open with image="a.png", stagedImages=["a.png"], and no onDelete callback.',
 		when: ['the LightboxModal mounts without onDelete'],
 		then: [
 			// Dialog is open but the delete affordance is absent
 			{ verb: 'hasElement', target: '[role="dialog"]' },
 			// No delete button in the chrome
-			{ verb: 'hasElement', target: '[role="dialog"]:not(:has(button[title="Delete image (Delete key)"]))' },
+			{
+				verb: 'hasElement',
+				target: '[role="dialog"]:not(:has(button[title="Delete image (Delete key)"]))',
+			},
 			// Bottom info strip does NOT reference Delete
 			{ verb: 'hasElement', target: '[role="dialog"]:not(:has-text("Delete to remove"))' },
 		],
@@ -172,7 +180,10 @@ export const lightboxModalParityCatalog: ParityStory[] = [
 			// Lightbox is closed (no dialog in the DOM) via the LayerStack
 			// onEscape handler that the modal registers with priority
 			// MODAL_PRIORITIES.LIGHTBOX.
-			{ verb: 'hasElement', target: 'body:not(:has([role="dialog"][aria-label="Image Lightbox"]))' },
+			{
+				verb: 'hasElement',
+				target: 'body:not(:has([role="dialog"][aria-label="Image Lightbox"]))',
+			},
 		],
 		happyPath: false,
 	},
@@ -187,7 +198,11 @@ export const lightboxModalParityCatalog: ParityStory[] = [
 			// The L2.1 ConfirmModal composes on top with its dialog
 			{ verb: 'hasElement', target: '[role="dialog"][aria-label="Confirm Delete"]' },
 			// Confirmation copy references the destructive action
-			{ verb: 'hasText', target: '[role="dialog"][aria-label="Confirm Delete"]', value: 'remove this image' },
+			{
+				verb: 'hasText',
+				target: '[role="dialog"][aria-label="Confirm Delete"]',
+				value: 'remove this image',
+			},
 		],
 		happyPath: false,
 	},

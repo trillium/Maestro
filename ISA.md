@@ -1151,12 +1151,10 @@ All three paths return the seeded data correctly sorted. Status: **PASS** for en
 #### Decisions
 
 - **Pattern: rewrite-with-primitives for both tabs.** Per the L3.x lift-vs-rewrite rule.
-
   - **DisplayTab.** Renderer source is 715 LOC and fans out into ≥1 IPC namespace beyond `settings` (specifically `fonts:detect` for system font enumeration in `loadFonts()`). That puts it over the "lift if ≤ 1 IPC namespace beyond settings" threshold; rewrite-with-primitives, not verbatim lift.
   - **ShortcutsTab.** Renderer source is 212 LOC and uses ZERO `window.maestro.*` IPC. By the rule it is technically liftable, but rewriting keeps the L3.x catalog uniform and avoids a cross-tree import from `src/renderer/utils/shortcutFormatter.ts` (a utility not part of the L2.x lifted primitives). Inlined a ~20-line platform-aware key formatter in the webFull tab — pure function, no IPC.
 
 - **DisplayTab deferred IPC / Electron-only surface (surfaced inline, NOT silently dropped):**
-
   - `fontFamily` picker + custom-font management (`fonts:detect` — Electron-only system font enumeration).
   - "Window Chrome" toggles (`useNativeTitleBar`, `autoHideMenuBar`) — affect Electron's BrowserWindow chrome; no browser equivalent. Settings keys themselves still writable from a future port.
   - Bionify info modal (non-essential algorithm reference popup). Algorithm input itself stays editable.
@@ -1777,7 +1775,6 @@ Plan-reeval-2 flagged the mini2 deploy execution path as the HIGHEST open risk: 
 1. **`package.json` postinstall — guarded, not removed.** The `postinstall` script that runs `electron-rebuild -f -w node-pty,better-sqlite3` is now wrapped in a shell conditional on `MAESTRO_HEADLESS=1`. Desktop dev (`npm install` with the env var unset) keeps the original behavior — node-pty + better-sqlite3 rebuild against Electron's Node ABI. Headless deploys (`MAESTRO_HEADLESS=1 npm ci`, which `infra/deploy.sh` now exports automatically) print `[postinstall] MAESTRO_HEADLESS=1; skipping electron-rebuild` and proceed without invoking electron-rebuild at all. This avoids the "NODE_MODULE_VERSION mismatch" crash that would have hit `node dist/server/index.js` on first boot of mini2, because the headless server uses system Node's ABI, not Electron's. Choosing a guard over removal preserves the desktop dev workflow unchanged and lets the next plan-reeval consider whether removal is actually warranted now that the env-var gate exists.
 
 2. **`infra/deploy.sh` gains `--probe` and `--auto-probe` modes.** The script previously only had one mode (deploy + curl health check). It now accepts:
-
    - `./infra/deploy.sh` — original behavior (deploy + curl).
    - `./infra/deploy.sh --probe` — skip the deploy entirely; only execute `infra/probe-pty-survival.sh` against the running mini2 environment. Use to re-verify L6.3 persistence without churning the launchd service or rebuilding.
    - `./infra/deploy.sh --auto-probe` — full deploy + curl + run the falsification probe immediately after a green health check. The script propagates the probe's exit code, so a green `--auto-probe` run proves both "service is up on :45678" and "PTY scrollback round-trips through a simulated kill" in one invocation. This wires L6.3's falsification probe into the deploy pipeline rather than leaving it as a parallel manual step.
@@ -2466,7 +2463,6 @@ Branch `leaf-groupchat-messages` cut off `main @ 891d179a7` (post-merge of the `
 1. **`GroupChatMessages.tsx` — verbatim lift, theme-prop pattern continued.** Source (`src/renderer/components/GroupChatMessages.tsx`, 430 LOC) is the message-history view: timestamps outside bubbles, per-participant colors, markdown rendering, collapse/expand for long agent responses, copy and markdown-mode toggle buttons on hover, typing indicator. Pre-flight: `grep -E "window\.maestro\.|from ['\"]electron['\"]|shell\.openExternal|shell\.openPath|ipcRenderer" src/renderer/components/GroupChatMessages.tsx` → empty (exit 1). The component body itself touches none of the banned surface. Lifted body-verbatim with import-path adapts only.
 
 2. **Six import-path adapts; one webFull shim, five renderer-relative re-imports.** Following the `ShortcutsHelpModal` L2.5 precedent of importing non-divergent renderer modules directly (audit risk A — re-exports prevent silent drift; only divergence-required modules get webFull shims):
-
    - `Theme` from `'../types'` → `'../../shared/theme-types'` (standard L2.5 swap).
    - `GroupChatMessage` / `GroupChatParticipant` / `GroupChatState` from `'../types'` → `'../../shared/group-chat-types'` (canonical source — the renderer barrel just re-exports from there).
    - `MarkdownRenderer` from `'./MarkdownRenderer'` → `'../../renderer/components/MarkdownRenderer'`.
@@ -2477,7 +2473,6 @@ Branch `leaf-groupchat-messages` cut off `main @ 891d179a7` (post-merge of the `
    - `formatShortcutKeys` from `'../utils/shortcutFormatter'` → resolves to the webFull-side shim at `'../utils/shortcutFormatter'` (path unchanged because both renderer source and webFull lift use that relative form — but the lifted file resolves into `src/webFull/utils/shortcutFormatter.ts`, which is the divergent shim, not the renderer's).
 
 3. **Transitive `window.maestro` references in the re-imported renderer utilities are all lambda-deferred, not module-load-time.** The audit walked each renderer module the lift pulls in:
-
    - `src/renderer/utils/textProcessing.ts` — pure, zero `window.maestro` references anywhere.
    - `src/renderer/utils/clipboard.ts` — `safeClipboardWrite` (text) uses `navigator.clipboard.writeText` only. `safeClipboardWriteImage` uses `window.maestro?.shell?.copyImageToClipboard` with optional chaining (browser-safe even if invoked); but this view never calls the image variant.
    - `src/renderer/utils/participantColors.ts` — `generateParticipantColor` and `buildParticipantColorMap` (the ones imported here) are pure. `loadColorPreferences` / `saveColorPreferences` touch `window.maestro.settings` but are NOT imported by this view; their definitions are in the module body but only run when called.
@@ -2836,7 +2831,6 @@ Branch `leaf-groupchat-header` cut off `main @ c0d2904f0` (post-merge of the `le
 1. **`GroupChatHeader.tsx` — verbatim lift, theme-prop pattern continued.** Source (`src/renderer/components/GroupChatHeader.tsx`, 143 LOC) is the chrome row above the Group Chat scrollback: chat headline + click-to-rename + pencil-icon rename button, a Stop All button (only when `state !== 'idle'`), a participant-count pill (with pluralization), an optional total-cost pill (with the incomplete-data asterisk + tooltip swap), an Info button, and an optional right-panel toggle button. Pre-flight: `grep -E "window\.maestro\.|from ['\"]electron['\"]|shell\.openExternal|shell\.openPath|ipcRenderer" src/renderer/components/GroupChatHeader.tsx` → empty (exit 1). The component body itself touches none of the banned surface — all side effects are delivered via prop callbacks that the host wires. Lifted body-verbatim with import-path adapts only.
 
 2. **Four import-path adapts; one webFull shim, two shared-types swaps, one renderer-types reach.** Following the L2.5 sibling precedent set by `GroupChatMessages` (the immediately prior lift):
-
    - `Theme` from `'../types'` → `'../../shared/theme-types'` (standard L2.5 swap).
    - `GroupChatState` from `'../types'` → `'../../shared/group-chat-types'` (canonical source — the renderer barrel re-exports from there; same swap `GroupChatMessages` made).
    - `Shortcut` from `'../types'` → `'../../renderer/types'` (the interface lives in the renderer types barrel only — `src/renderer/types/index.ts` line 165 — and is not yet replicated to `src/shared/`; matches the L2.5 `ShortcutsHelpModal` precedent of pulling specific types from the canonical aggregator rather than copying into `src/shared/` which would create the silent-drift surface audit risk A explicitly warns against; `Shortcut` is a pure `{ id, label, keys }` data shape with no transitive `window.maestro` references).
@@ -2919,7 +2913,6 @@ Branch `leaf-autorun-search-bar` cut off `main @ 1e71f7030` (post-merge of the `
 1. **`AutoRunSearchBar.tsx` — verbatim lift, layer-stack-aware search-bar primitive.** Source (`src/renderer/components/AutoRunSearchBar.tsx`, 132 LOC) is a search bar used by the Auto Run document view. Renders the Search icon, an auto-focused text input (`placeholder="Search..."`), a counter span (`{i+1}/{N}` when matches exist or "No matches" when query is non-empty with zero matches), a previous-match button (`ChevronUp`, title="Previous match (Shift+Enter)"), a next-match button (`ChevronDown`, title="Next match (Enter)"), and an explicit close button (`X`, title="Close search (Esc)"). The counter + prev + next affordances are gated behind the `{searchQuery.trim() && (...)}` guard so they appear only when the query is non-empty. Pre-flight: `grep -E "window\.maestro\.|from ['\"]electron['\"]|shell\.openExternal|shell\.openPath|ipcRenderer" src/renderer/components/AutoRunSearchBar.tsx` → empty (exit 1). The component body itself touches none of the banned surface — all side effects are delivered via prop callbacks (`onSearchQueryChange`, `onNextMatch`, `onPrevMatch`, `onClose`) that the host wires. Lifted body-verbatim with import-path adapts only.
 
 2. **Three import-path adapts; one standard L2.5 swap + two webFull-resolution-paths that are already infrastructure.** Following the L2.5 sibling precedent set by `AgentErrorModal`, `CreateGroupModal`, `ConfirmModal`, and the L2.1 `FirstRunCelebration`:
-
    - `Theme` from `'../types'` → `'../../shared/theme-types'` (standard L2.5 swap — webFull has no `types/` aggregator).
    - `useLayerStack` from `'../contexts/LayerStackContext'` — path string identical to the renderer source; resolves under webFull's tsconfig to the L2.1-lifted context at `src/webFull/contexts/LayerStackContext.tsx`. No swap needed.
    - `MODAL_PRIORITIES` from `'../constants/modalPriorities'` — path string identical to the renderer source; resolves to the existing webFull re-export at `src/webFull/constants/modalPriorities.ts` (which re-exports `../../renderer/constants/modalPriorities` so the priority constants stay in lockstep — same pattern used by `AgentErrorModal`, `CreateGroupModal`, `ConfirmModal`). Consumes `MODAL_PRIORITIES.AUTORUN_SEARCH` (706).
@@ -2949,7 +2942,6 @@ Branch `leaf-groupchat-panel` cut off `main @ 1e71f7030` (post-merge of the `lea
 1. **`GroupChatPanel.tsx` — verbatim lift, theme-prop pattern continued.** Source (`src/renderer/components/GroupChatPanel.tsx`, 172 LOC) is a pure composition shell: zero internal state, zero effects, zero refs owned by the panel itself. It mounts an outer `div.flex.flex-col.h-full` with `backgroundColor: theme.colors.bgMain` and stacks three children vertically: `<GroupChatHeader>`, `<GroupChatMessages>` (with the `messagesRef` forwarded through), and `<GroupChatInput>`. Every other prop is threaded directly into the appropriate child. Pre-flight: `grep -E "window\.maestro\.|from ['\"]electron['\"]|shell\.openExternal|shell\.openPath|ipcRenderer" src/renderer/components/GroupChatPanel.tsx` → empty (exit 1). The component body itself touches none of the banned surface; all side effects are delivered via prop callbacks (`onSendMessage`, `onStopAll`, `onRename`, `onShowInfo`, `onToggleRightPanel`, `onDraftChange`, `onOpenPromptComposer`, `onRemoveQueuedItem`, `onReorderQueuedItems`, `onToggleMarkdownEditMode`, `onOpenLightbox`, `handlePaste`, `handleDrop`, `showFlashNotification`) which the host wires to its own runtime. Lifted body-verbatim with import-path adapts only.
 
 2. **Six import-path adapts; two webFull-sibling reaches, three shared-types swaps, one renderer-types reach, one accepted cross-fork import.** Following the L2.5 sibling precedent set by `GroupChatMessages` and `GroupChatHeader`:
-
    - `Theme` from `'../types'` → `'../../shared/theme-types'` (standard L2.5 swap).
    - `GroupChat` / `GroupChatMessage` / `GroupChatState` from `'../types'` → `'../../shared/group-chat-types'` (canonical source — the renderer barrel re-exports from there anyway; same swap the L2.5 `GroupChatMessages` / `GroupChatHeader` sibling lifts made).
    - `Group` from `'../types'` → `'../../shared/types'` (the renderer barrel re-exports `Group` from there — line 16 of `src/renderer/types/index.ts`; pull from the canonical source rather than the aggregator).
@@ -3016,7 +3008,6 @@ Branch `leaf-font-configuration-panel` cut off `main @ 714337edf` (post the pret
 1. **Source verbatim.** Body of the component is identical to `src/renderer/components/FontConfigurationPanel.tsx`. Only the `Theme` import path is swapped to the canonical `src/shared/theme-types` source, matching the L2.5 precedent (`SettingCheckbox`, `ToggleButtonGroup`, `GroupChatPanel`, `AutoRunSearchBar`, etc.). Per the brief's "verbatim with relative-path adapts" rule, no behavioral edits were made — the `useMemo` font-normalization, the substring-fallback availability check, the Enter-key Add behavior, and the chip-list × removal affordance are all preserved.
 
 2. **No webFull-side data adapter shipped with this lift.** The brief identifies the W2-fonts REST route (`GET /api/fonts/detected`, already on `main` via `src/server/index.ts` `registerFontsProvider`) as the webFull data source for system fonts. This lift is the panel itself, not the data plumbing. The consuming parent (currently `Settings/tabs/DisplayTab.tsx` in Electron, and a future webFull-mode equivalent) is responsible for:
-
    - Calling `fetch('/api/fonts/detected')` (webFull) or `window.maestro.fonts.detect()` (Electron) at the appropriate lifecycle moment.
    - Threading the response through `systemFonts` / `fontsLoaded` / `fontLoading` props.
    - Persisting `customFonts` and the active `fontFamily` (settings-store concern in Electron, REST-backed `useSettings()` in webFull).
@@ -3098,7 +3089,6 @@ Branch `leaf-silhouette-and-autocomplete` cut off `main @ 714337edf`. This branc
 #### Decisions
 
 1. **`MaestroSilhouette.tsx` — verbatim lift, asset-path-only adapt, dual exports preserved.** Source (`src/renderer/components/MaestroSilhouette.tsx`, 88 LOC) exports two named components plus a module-load side effect:
-
    - `MaestroSilhouette` — static `<img>` with `alt="Maestro conductor silhouette"`, `objectFit: 'contain'`, default `variant='dark'` (`conductor-dark.png`) / `size=200`, the caller's `style` spread last.
    - `AnimatedMaestro` — same shape but `alt="Animated maestro conductor"` and `animation: 'conductingMotion 2s ease-in-out infinite'`.
    - Module-load `document.head.appendChild` of the `@keyframes conductingMotion` rule, guarded by both `typeof document !== 'undefined'` (SSR-safe) and an `#maestro-animation-styles` id-check (idempotent on hot-reload). The guards make the side effect safe to ship in a webFull host that may pre-render or run in a worker context.
@@ -3106,7 +3096,6 @@ Branch `leaf-silhouette-and-autocomplete` cut off `main @ 714337edf`. This branc
    Pre-flight: `grep -E "window\.maestro\.|from ['\"]electron['\"]" src/renderer/components/MaestroSilhouette.tsx` → empty (exit 1). The component body itself touches none of the banned surface; all inputs are via the `MaestroSilhouetteProps` prop bag (`className?`, `style?`, `variant?: 'dark' | 'light'`, `size?`); all outputs are a single `<img>` element. Lifted body-verbatim with one import-path adapt only.
 
 2. **`TemplateAutocompleteDropdown.tsx` — verbatim lift, two standard L2.5 swaps.** Source (`src/renderer/components/TemplateAutocompleteDropdown.tsx`, 108 LOC) is a `forwardRef<HTMLDivElement>` presentational dropdown rendering the absolute-positioned template-variable picker used by both `AgentPromptComposerModal` and the Auto Run document editor. Behavior is gated entirely on the `state` prop:
-
    - returns `null` when `!state.isOpen` OR `state.filteredVariables.length === 0` (the two short-circuits — both pinned by the catalog)
    - emits a scrollable list of rows (each `data-index={index}`, a `<code>` chip with the variable name, a `<span>` with the description) plus a footer of three `<kbd>` chips (↑↓ navigate / Tab select / Esc close)
    - selection state lives entirely in the prop bag; the host owns the autocomplete reducer
@@ -3234,7 +3223,6 @@ Branch `leaf-git-status-widget` cut off `main @ 714337edf`. This lift ports the 
    The widget body itself, however, is IPC-clean: pre-flight `grep -E "window\.maestro\.|from ['\"]electron['\"]" src/renderer/components/GitStatusWidget.tsx` → empty (exit 1). The IPC site is one transitive hop away (in the context provider, not in the widget). So the lift is feasible if the hook self-source is severed at the lift boundary.
 
    Matching webFull pattern (per `AppOverlays` and `SessionList` L4.1 precedents): **promote the self-sourced values to props.** Two new inputs replace the hook calls:
-
    - `fileCount: number` — replaces `getFileCount(sessionId)`
    - `fileDetails?: GitFileDetails` — replaces `getFileDetails(sessionId)`
 
@@ -3243,7 +3231,6 @@ Branch `leaf-git-status-widget` cut off `main @ 714337edf`. This lift ports the 
 2. **`sessionId` prop dropped from the lifted surface.** The renderer source uses `sessionId` only to key into the two stripped hooks (`getFileCount(sessionId)` / `getFileDetails(sessionId)`). With the hooks gone, the widget no longer needs to know which session it's representing — that key is the host's responsibility. A future host that wants to surface "this widget is for session X" for debugging or analytics can wrap with `<div data-session-id={id}>` at the call site. This is consistent with the `ExecutionQueueIndicator` precedent of accepting only the data shape the widget actually renders.
 
 3. **Type-resolution adapts (matching the L2.5 precedent):**
-
    - `Theme` from `'../types'` → `'../../shared/theme-types'` (standard L2.5 swap; renderer aggregator routes through `src/renderer/types/index.ts` which re-exports from `src/shared/theme-types`).
    - `GitFileChange` is NOT pulled from `'../contexts/GitStatusContext'` (which re-exports it from `useGitStatusPolling`). The renderer's `GitFileChange` interface is small and stable (5 primitive fields: `path`, `status`, `additions`, `deletions`, `modified`). Instead, the lifted module defines it locally. This matches the `ExecutionQueueIndicator` / `DeleteWorktreeModal` precedent of pulling only the specific data shape each lifted module consumes, rather than copying the entire renderer hook + context graph into the webFull tree (which would drag the IPC site through the bundle, defeating the whole purpose of the lift).
    - A new `GitFileDetails` aggregate type captures the shape the renderer hook's `getFileDetails(sessionId)` returns: `{ fileChanges?: GitFileChange[], totalAdditions: number, totalDeletions: number, modifiedCount: number }`. The renderer declares this shape inline inside `GitDetailContextValue`; lifting it to a named type here keeps the prop contract greppable.
@@ -3253,7 +3240,6 @@ Branch `leaf-git-status-widget` cut off `main @ 714337edf`. This lift ports the 
 5. **Theme access pattern.** Kept the renderer's `theme: Theme` prop convention per the L2.1 / L2.3 / L2.4 / L2.5 precedent. Host calls `const { theme } = useTheme()` at the feature-component level and threads it down.
 
 6. **Parity catalog scope.** Nine stories total (5 happy + 4 negative — meets the brief's "≥3 happy + ≥1 negative" floor) covering:
-
    - Happy: compact-pill rendering with file count text + `title="+0 −0 ~0"` summary; full-breakdown rendering with additions / deletions / modified counts + summary title; tooltip listing changed files with per-file `+N` / `−N` counts on hover; "View Full Diff" affordance presence; "View Git Log" affordance presence when `onViewLog` is supplied.
    - Negative: suppression when `!isGitRepo` (no compact or full pill in DOM); suppression when `fileCount === 0` (even though `isGitRepo === true`); "View Git Log" hidden when `onViewLog` callback absent; lifecycle no-IPC / no-WS pin (the component does not reach into `window.maestro` or any transport — action callbacks are the caller's contract).
 
@@ -3462,6 +3448,7 @@ Additive only — no prior exports changed.
 - The renderer-side `markdownConfig.ts` continues to ship its full surface (`generateProseStyles`, `createMarkdownComponents` family, `generateAutoRunProseStyles`, `generateDiffViewStyles`). webFull will need further surgical extracts when consumers for those symbols land in `src/webFull/`. This lift deliberately did NOT pre-lift speculative surface; bias new files, minimize speculative cross-fork debt either way.
 - The renderer-side `bionifyReadingMode.tsx` continues to own the React-side `BionifyText` / `BionifyTextBlock` component surface. A webFull-side lift of those components is a downstream brief; until then, the extracted CSS string is the parity contract.
 - The remaining two cross-fork imports inside `GroupChatMessages` referenced by the brief are NONE. With this branch landed, `GroupChatMessages` has zero `renderer/` imports — the per-component cross-fork debt is fully drained. The next leaf-parade target on this view is `GroupChatInput` (per Architect audit #7).
+
 ### 2026-06-08 — Layer 2.5 leaf-parade — `KeyboardMasteryCelebration` lift
 
 #### Why this lift exists
