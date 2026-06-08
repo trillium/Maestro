@@ -45,6 +45,71 @@ import { getMaestroConfig } from '../utils/config';
 import { webLogger } from '../utils/logger';
 
 /**
+ * ISC-44.global.settings_broadcast — module-level event bus for
+ * `settings_changed` WS frames.
+ *
+ * Why a module-level bus: `useSettings()` is called by three independent
+ * tab components today (GeneralTab, DisplayTab, ShortcutsTab) — each gets
+ * its own state. The WS handler lives in mobile/App.tsx (a single
+ * `useWebSocket()` consumer). Rather than thread a context provider from
+ * mobile/App.tsx down through every tab (which would require lifting state
+ * to a SettingsProvider), we publish the broadcast on a module-level bus
+ * and every active `useSettings()` hook subscribes via `useEffect`.
+ *
+ * Side effect: `publishSettingsChanged` is also exported so the WS handler
+ * wiring in App.tsx / mobile/App.tsx can dispatch without importing the
+ * hook itself. Test code can call it directly to simulate broadcasts.
+ */
+type SettingsListener = (
+	changedKeys: string[],
+	newValues: Record<string, unknown>,
+	timestamp: number
+) => void;
+
+const settingsListeners: Set<SettingsListener> = new Set();
+
+/**
+ * Publish a `settings_changed` event. Called from the WS handler wiring in
+ * App.tsx / mobile/App.tsx (after the `onSettingsChanged` handler fires)
+ * and directly from parity/contract tests.
+ */
+export function publishSettingsChanged(
+	changedKeys: string[],
+	newValues: Record<string, unknown>,
+	timestamp: number = Date.now()
+): void {
+	for (const listener of settingsListeners) {
+		try {
+			listener(changedKeys, newValues, timestamp);
+		} catch (err) {
+			webLogger.error(
+				`publishSettingsChanged listener threw: ${String(err)}`,
+				'useSettings'
+			);
+		}
+	}
+}
+
+/**
+ * Subscribe a listener. Returns the unsubscribe function. Exposed for tests
+ * that want to assert listener registration; production callers use the
+ * hook's internal `useEffect`-based subscription.
+ */
+export function subscribeSettingsChanged(listener: SettingsListener): () => void {
+	settingsListeners.add(listener);
+	return () => {
+		settingsListeners.delete(listener);
+	};
+}
+
+/**
+ * Test helper — reset the listener set. Not used in prod.
+ */
+export function _resetSettingsListeners(): void {
+	settingsListeners.clear();
+}
+
+/**
  * Generic settings shape — flat key/value map. The exact shape is whatever
  * lives in `~/.config/maestro/maestro-settings.json` (or the Electron equivalent).
  * Consumers narrow the field types at the call site.
@@ -108,6 +173,28 @@ export function useSettings(): UseSettingsReturn {
 	useEffect(() => {
 		void fetchSettings();
 	}, [fetchSettings]);
+
+	// ISC-44.global.settings_broadcast — subscribe to server-pushed changes.
+	// Last-writer-wins per ISA Principle 2: the broadcast carries the
+	// authoritative value (the on-disk state after the PATCH), so we
+	// overwrite local state for every changed key. If this client was
+	// mid-edit on a key when the broadcast arrives, its in-flight value
+	// is replaced — the next PATCH from this client will re-apply the
+	// edit and win the race.
+	useEffect(() => {
+		const unsubscribe = subscribeSettingsChanged((changedKeys, newValues) => {
+			setSettings((prev) => {
+				const next = { ...prev };
+				for (const key of changedKeys) {
+					if (key in newValues) {
+						next[key] = newValues[key];
+					}
+				}
+				return next;
+			});
+		});
+		return unsubscribe;
+	}, []);
 
 	const setSetting = useCallback(
 		async <T = unknown>(key: string, value: T): Promise<void> => {

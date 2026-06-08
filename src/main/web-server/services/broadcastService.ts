@@ -221,6 +221,43 @@ export class BroadcastService {
 	}
 
 	/**
+	 * ISC-44.global.settings_broadcast — fan-out a settings change to every
+	 * connected web client. Wired by the headless server's PATCH /api/settings
+	 * route after the SettingsProvider has persisted the patch (see
+	 * `src/server/index.ts` → `setSettingsChangedCallback`).
+	 *
+	 * Wire shape: `{ type: 'settings_changed', changedKeys, newValues, timestamp }`.
+	 * `changedKeys` is `Object.keys(patch)` and `newValues` is the patch itself
+	 * (NOT the full settings object — clients merge into local state, so we
+	 * only send what changed). This keeps frame size proportional to the edit
+	 * and avoids races where browser A's in-flight edit gets clobbered by
+	 * browser B's broadcast of unrelated keys.
+	 *
+	 * Conflict resolution per ISA Principles §2: last-writer-wins. The PATCH
+	 * route runs the broadcast AFTER `SettingsProvider.setSettings()` returns,
+	 * so the on-disk value (and therefore every client's view after the
+	 * broadcast lands) reflects whoever wrote last. If browser A is mid-edit
+	 * on a key when browser B's broadcast for that key arrives, A's local
+	 * state is overwritten — A's next PATCH will then re-apply A's edit and
+	 * win the race.
+	 *
+	 * Fan-out (not point-to-point) — the same payload goes to every connected
+	 * client including the originator. The originator's hook treats its own
+	 * echo as a no-op merge since the local state already reflects the patch.
+	 */
+	broadcastSettingsChanged(
+		changedKeys: string[],
+		newValues: Record<string, unknown>
+	): void {
+		this.broadcastToAll({
+			type: 'settings_changed',
+			changedKeys,
+			newValues,
+			timestamp: Date.now(),
+		});
+	}
+
+	/**
 	 * Broadcast AutoRun state to all connected web clients
 	 * Called when batch processing starts, progresses, or stops
 	 */

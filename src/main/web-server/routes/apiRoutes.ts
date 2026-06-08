@@ -49,6 +49,17 @@ export interface ApiRouteCallbacks {
 	getHistory: (projectPath?: string, sessionId?: string) => HistoryEntry[];
 	getLiveSessionInfo: (sessionId: string) => LiveSessionInfo | undefined;
 	isSessionLive: (sessionId: string) => boolean;
+	/**
+	 * ISC-44.global.settings_broadcast — invoked AFTER the SettingsProvider
+	 * has persisted a patch from PATCH /api/settings, BEFORE the response is
+	 * returned. Optional: if undefined the PATCH route still functions, but
+	 * no broadcast fires (the Electron path doesn't wire this; the headless
+	 * server in `src/server/index.ts` does).
+	 */
+	onSettingsChanged?: (
+		changedKeys: string[],
+		newValues: Record<string, unknown>
+	) => void;
 }
 
 /**
@@ -501,6 +512,23 @@ export class ApiRoutes {
 				try {
 					const provider = getSettingsProvider();
 					const settings = provider.setSettings(patch);
+					// ISC-44.global.settings_broadcast — fire the broadcast hook
+					// AFTER persist succeeds, BEFORE we return. If persist throws
+					// (caught below) the broadcast never fires, which matches
+					// the parity story "PATCH fails → no broadcast → no
+					// client state update".
+					if (this.callbacks.onSettingsChanged) {
+						try {
+							this.callbacks.onSettingsChanged(Object.keys(patch), patch);
+						} catch (err) {
+							// Broadcast failure must NOT fail the PATCH — the
+							// settings are already on disk. Log and continue.
+							logger.warn(
+								`onSettingsChanged callback threw: ${String(err)}`,
+								LOG_CONTEXT
+							);
+						}
+					}
 					return {
 						settings,
 						timestamp: Date.now(),

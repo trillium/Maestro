@@ -139,6 +139,7 @@ export type ServerMessageType =
 	| 'custom_commands'
 	| 'autorun_state'
 	| 'tabs_changed'
+	| 'settings_changed'
 	| 'pong'
 	| 'subscribed'
 	| 'echo'
@@ -328,6 +329,24 @@ export interface TabsChangedMessage extends ServerMessage {
 }
 
 /**
+ * Settings changed message from server (ISC-44.global.settings_broadcast).
+ * Fan-out frame sent by the headless server to every connected web client
+ * after `PATCH /api/settings` persists. `newValues` is the patch object —
+ * only the keys that changed — so clients merge into local state without
+ * needing a full refetch. `changedKeys` is the explicit list (also
+ * `Object.keys(newValues)`) so a consumer can short-circuit unrelated tabs.
+ *
+ * Conflict resolution: last-writer-wins. If a client is mid-edit on a key
+ * when this frame arrives, its local state is overwritten — the next
+ * PATCH from that client will re-apply its edit and win the race.
+ */
+export interface SettingsChangedMessage extends ServerMessage {
+	type: 'settings_changed';
+	changedKeys: string[];
+	newValues: Record<string, unknown>;
+}
+
+/**
  * Error message from server
  */
 export interface ErrorMessage extends ServerMessage {
@@ -432,6 +451,7 @@ export type TypedServerMessage =
 	| CustomCommandsMessage
 	| AutoRunStateMessage
 	| TabsChangedMessage
+	| SettingsChangedMessage
 	| ErrorMessage
 	| PtyDataMessage
 	| PtyBackfillMessage
@@ -480,6 +500,18 @@ export interface WebSocketEventHandlers {
 	onAutoRunStateChange?: (sessionId: string, state: AutoRunState | null) => void;
 	/** Called when tabs change in a session */
 	onTabsChanged?: (sessionId: string, aiTabs: AITabData[], activeTabId: string) => void;
+	/**
+	 * ISC-44.global.settings_broadcast — called when the server broadcasts
+	 * a settings change. `newValues` is the patch object (only the changed
+	 * keys); `changedKeys` is the explicit list. `timestamp` is the server-
+	 * side broadcast time in ms-since-epoch. Consumers typically merge
+	 * `newValues` into their local settings cache.
+	 */
+	onSettingsChanged?: (
+		changedKeys: string[],
+		newValues: Record<string, unknown>,
+		timestamp: number
+	) => void;
 	/** Called when connection state changes */
 	onConnectionChange?: (state: WebSocketState) => void;
 	/** Called when an error occurs */
@@ -849,6 +881,20 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
 							tabsMsg.sessionId,
 							tabsMsg.aiTabs,
 							tabsMsg.activeTabId
+						);
+						break;
+					}
+
+					case 'settings_changed': {
+						// ISC-44.global.settings_broadcast — fan-out frame from the
+						// headless server's PATCH /api/settings route. Route to the
+						// optional onSettingsChanged handler (useSettings subscribes
+						// via the module-level event bus, see useSettings.ts).
+						const settingsMsg = message as SettingsChangedMessage;
+						handlersRef.current?.onSettingsChanged?.(
+							settingsMsg.changedKeys,
+							settingsMsg.newValues,
+							(settingsMsg.timestamp as number) ?? Date.now()
 						);
 						break;
 					}

@@ -18,6 +18,7 @@ import { useNotifications } from '../hooks/useNotifications';
 import { useUnreadBadge } from '../hooks/useUnreadBadge';
 import { useOfflineQueue } from '../hooks/useOfflineQueue';
 import { useMobileSessionManagement } from '../hooks/useMobileSessionManagement';
+import { publishSettingsChanged } from '../hooks/useSettings';
 import { useOfflineStatus, useMaestroMode, useDesktopTheme } from '../main';
 import { buildApiUrl } from '../utils/config';
 import { formatCost } from '../../shared/formatters';
@@ -498,6 +499,12 @@ export default function MobileApp() {
 	// here we just attach its dispatch methods alongside the existing
 	// sessionsHandlers. The router holds listeners in refs, so this merge
 	// is stable and doesn't re-render on PTY traffic.
+	//
+	// ISC-44.global.settings_broadcast — also spread sessionsHandlers and add
+	// the settings_changed handler. Routes the WS frame to the module-level
+	// event bus in useSettings.ts so every active useSettings() hook (across
+	// all Settings tabs) receives the patch and merges into its local state.
+	// Last-writer-wins per ISA Principle 2.
 	const ptyRouter = usePtyMessageRouter();
 	const mergedHandlers = useMemo(
 		() => ({
@@ -505,6 +512,17 @@ export default function MobileApp() {
 			onPtyData: ptyRouter.dispatchData,
 			onPtyBackfill: ptyRouter.dispatchBackfill,
 			onPtyDropped: ptyRouter.dispatchDropped,
+			onSettingsChanged: (
+				changedKeys: string[],
+				newValues: Record<string, unknown>,
+				timestamp: number
+			) => {
+				webLogger.debug(
+					`[App] Settings changed: keys=[${changedKeys.join(',')}]`,
+					'Mobile'
+				);
+				publishSettingsChanged(changedKeys, newValues, timestamp);
+			},
 		}),
 		[sessionsHandlers, ptyRouter]
 	);
