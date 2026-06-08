@@ -86,3 +86,4 @@ export type {
 	ExecutionQueueItem,
 	ExecutionQueueSession,
 } from './ExecutionQueueIndicator';
+export { FirstRunCelebration } from './FirstRunCelebration';
