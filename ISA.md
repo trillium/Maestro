@@ -2172,6 +2172,7 @@ Branch `leaf-delete-agent-confirm` originally cut off `main @ f9d29340a`; rebase
 - **Parity test:** `MAESTRO_HEADLESS=1 npx vitest run src/webFull/components/HistoryHelpModal.parity.test.ts` → `Test Files 1 passed (1); Tests 6 passed (6)` in ~483 ms. Catalog declares 8 stories total (4 happy + 4 negative ≥ the brief's "≥3 happy + ≥1 negative-path per happy" minimum), uses only the allowed assertion vocabulary (`hasElement`, `hasText`, `wsFrameMatches`, `dbHasRow`, `fsHas`, `processHas`, `notificationFired`, `broadcast`), and passes the IPC-leakage guard.
 - **Symlink hygiene:** `node_modules` symlink to `/Users/trilliumsmith/code/maestro/node_modules` was created for the build/test run; ignored by `.gitignore` and not committed.
 - **Push status:** NOT pushed per brief instruction. Branch will be reviewed and merged by the parent.
+
 ### 2026-06-08 — Layer 2.5 evidence (leaf-parade — AutoRunnerHelpModal lift)
 
 Branch `leaf-autorunner-help` cut off `main @ c1e2694a4` (post-merge of L4.2 `layer-4.2-tab-switch`). This branch is the L2.5 leaf-parade lift of the largest pure-presentational modal in the audit set. Lifts `src/renderer/components/AutoRunnerHelpModal.tsx` (504 LOC) verbatim into `src/webFull/components/` and ships a parity catalog. One precursor-infrastructure file (`src/webFull/utils/shortcutFormatter.ts`) is added to swap the renderer formatter's transitive `window.maestro.platform` dependency at the shim boundary; the shim unblocks ~N future renderer components whose only lift blocker was that same dependency chain.
