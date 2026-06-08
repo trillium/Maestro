@@ -77,3 +77,5 @@ export { ToggleButtonGroup } from './ToggleButtonGroup';
 export type { ToggleButtonOption } from './ToggleButtonGroup';
 export { AgentErrorModal } from './AgentErrorModal';
 export type { RecoveryAction } from './AgentErrorModal';
+export { ContextWarningSash } from './ContextWarningSash';
+export type { ContextWarningSashProps } from './ContextWarningSash';
