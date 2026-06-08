@@ -105,3 +105,4 @@ export type {
 } from './AppOverlays';
 export { AutoRunSearchBar } from './AutoRunSearchBar';
 export type { AutoRunSearchBarProps } from './AutoRunSearchBar';
+export { GroupChatPanel } from './GroupChatPanel';
