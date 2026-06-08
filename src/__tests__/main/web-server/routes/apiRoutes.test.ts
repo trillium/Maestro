@@ -151,8 +151,13 @@ describe('ApiRoutes', () => {
 
 	describe('Route Registration', () => {
 		it('should register all API routes', () => {
-			expect(mockFastify.get).toHaveBeenCalledTimes(4); // sessions, session/:id, theme, history
-			expect(mockFastify.post).toHaveBeenCalledTimes(2); // send, interrupt
+			// Brittle count assertion — must bump as new routes land. Current set:
+			// GET: sessions, session/:id, theme, history, settings, wakatime/status,
+			//      stats/summary, stats/aggregation, stats/query-events,
+			//      stats/session-lifecycle (10 total).
+			expect(mockFastify.get).toHaveBeenCalledTimes(10);
+			// POST: send, interrupt, wakatime/validate-key, stats/clear-old-data (4 total).
+			expect(mockFastify.post).toHaveBeenCalledTimes(4);
 		});
 
 		it('should register routes with correct token prefix', () => {
