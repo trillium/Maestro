@@ -2913,6 +2913,7 @@ Branch `leaf-autorun-search-bar` cut off `main @ 1e71f7030` (post-merge of the `
 
 - `src/webFull/components/index.ts` — appended a single `export { AutoRunSearchBar } from './AutoRunSearchBar';` line plus a `export type { AutoRunSearchBarProps } from './AutoRunSearchBar';` line under the existing Layer 2.5 leaf-parade section, immediately after the `GroupChatHeader` line. No prior exports changed.
 - `ISA.md` — appended this evidence block; added `ISC-44.layer-2.5.autorun_search_bar` directly as `[x]` CLOSED at the per-feature ISC list (line precedes `ISC-44.layer-2.5.groupchat_header` placement, ordered by lift sequence).
+
 ### 2026-06-08 — Layer 2.5 evidence (leaf-parade — `GroupChatPanel` lift)
 
 Branch `leaf-groupchat-panel` cut off `main @ 1e71f7030` (post-merge of the `leaf-groupchat-header` lift). This branch closes out the GroupChat module composition shell — `GroupChatPanel` is the parent that stacks `GroupChatHeader` (lifted) + `GroupChatMessages` (lifted) + `GroupChatInput` (still cross-fork) into the full Group Chat view. The header + messages siblings are now resolved against the webFull-internal lifts; the input remains imported from the renderer source by relative path per the L2.5 precedent for not-yet-lifted siblings (and will be neutralized when the input lands on its own brief).
