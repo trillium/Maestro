@@ -120,4 +120,19 @@ export const registry: Record<string, ComponentAdapter> = {
 	FirstRunCelebration: {
 		load: () => import('./adapters/FirstRunCelebration.adapter').then((m) => m.default),
 	},
+	CreateGroupModal: {
+		load: () => import('./adapters/CreateGroupModal.adapter').then((m) => m.default),
+	},
+	DeleteAgentConfirmModal: {
+		load: () => import('./adapters/DeleteAgentConfirmModal.adapter').then((m) => m.default),
+	},
+	RenameGroupChatModal: {
+		load: () => import('./adapters/RenameGroupChatModal.adapter').then((m) => m.default),
+	},
+	RenameGroupModal: {
+		load: () => import('./adapters/RenameGroupModal.adapter').then((m) => m.default),
+	},
+	PlaybookNameModal: {
+		load: () => import('./adapters/PlaybookNameModal.adapter').then((m) => m.default),
+	},
 };
