@@ -1470,3 +1470,79 @@ Branch `layer-2.3-platform-shim-and-3-lifts` off `main` at `d7bbd4b9f`. The L2.2
 - **ISC-13 (PTY survives disconnect):** closure conditional. The on-disk format is correct (local probe PASS), so the unit-level claim is verified. End-to-end re-attach on the mini2 deploy requires the WS path to also use the persisted `lastSeq` (L6.2 client-side already does; L6.1 server-side `pty_subscribe` already routes through the multiplexer). Closure pending the manual mini2 probe per `infra/PROBE_ISC45.md`.
 - **ISC-45 (falsification probe):** local-layer falsification: NOT TRIGGERED. The persistence layer round-trips scrollback across a simulated SIGKILL exactly as required. Full closure also pending the manual mini2 probe; if that probe passes ISC-45 closes; if it fails, the failure is in the integration path (WS dispatch, session-id resolution, or client-side `lastSeq` persistence) — the disk layer is sound. Both probes share the same disk format so a passing local probe + failing mini2 probe localizes the bug cleanly.
 - **L6.3 remaining work (out of scope for this brief, tracked for follow-on):** fsync on rotation (currently a fire-and-forget write; under power loss a rotation could leave the `.log`+`.seq` mid-update — the `.meta` write is atomic via `writeFileSync` but the surrounding files aren't). gzip compression on rotated files. Per-session retention configurability (currently one global `diskHardCapBytes`). These are polish items, not gate-blockers.
+
+### 2026-06-08 — Layer 2.4 evidence (3 leaf-modal lifts)
+
+Branch `layer-2.4-more-modals` off `main @ 89fd6f797`. Continuation of the L2.3 leaf-component wave per `/tmp/renderer-leaf-hunt.md` Tier A recommendations. This wave lifts the next three top-5 candidates verbatim into `src/webFull/components/` and ships a parity catalog for each.
+
+#### Decisions
+
+1. **`ResetTasksConfirmModal.tsx` — verbatim lift, theme-prop pattern continued.** Source (`src/renderer/components/ResetTasksConfirmModal.tsx`, 66 LOC) is a pure Modal/ModalFooter consumer. Pre-flight: `grep "window\.maestro"` → empty; `grep -E "(dialog|shell:|devtools:|power:|tunnel:|clipboard:|fonts:|notification:show)"` → empty; `grep "import.*from.*electron"` → empty. Lifted with two import-path adjustments: `Theme` from `'../types'` → `'../../shared/theme-types'`; `MODAL_PRIORITIES` resolved via the existing webFull re-export at `src/webFull/constants/modalPriorities.ts` (per Architect 2026-06-08 audit risk A — non-divergent constants stay re-exported from renderer to prevent silent drift). Modal + ModalFooter imports against the L2.1 lifted primitives. Theme access pattern: kept the renderer's `theme: Theme` prop convention, matching L2.1's policy and the L2.3 RenameTabModal precedent. `RotateCcw` from `lucide-react` is already a transitive dep used by Settings/ConfirmModal/L2.1 Modal.
+
+2. **`PlaybookNameModal.tsx` — verbatim lift, theme-prop pattern continued.** Source (`src/renderer/components/PlaybookNameModal.tsx`, 81 LOC) composes Modal + FormInput. Pre-flight: all three IPC/Electron greps empty. Same two import-path adjustments as ResetTasksConfirmModal. FormInput imports against the L2.1 lifted primitive at `src/webFull/components/ui/FormInput.tsx`. Theme access pattern: prop-threaded. `Save` from `lucide-react` is already a transitive dep.
+
+3. **`CreateGroupModal.tsx` — verbatim lift NOT BLOCKED on infra; lifted in this wave.** Source (`src/renderer/components/CreateGroupModal.tsx`, 87 LOC) composes Modal + FormInput + EmojiPickerField and consumes the `Group` interface from `'../types'`. The leaf-component audit's "blocked-on-infra" note about `Group` and `GroupChat*` types living only in `src/renderer/types/index.ts` was checked and found stale for `Group` specifically: `grep -n "Group" src/renderer/types/index.ts` shows line 16 re-exports `Group` from `'../../shared/types'` (the actual interface declaration is at `src/shared/types.ts` near line 24). webFull therefore imports `Group` directly from `'../../shared/types'` — no type-ownership change required. The bailout-rule in the brief ("if you find yourself wanting to lift the `Group` type into `src/shared/`, STOP — that's a different brief") is honored: the type is already there. Pre-flight greps empty for IPC/Electron/electron-import. Same `Theme` + `MODAL_PRIORITIES` adjustments as the other two. Theme access pattern: prop-threaded.
+
+4. **Renderer composes via `from './ui'` barrel; webFull splits to direct imports.** The renderer `CreateGroupModal` reads `import { Modal, ModalFooter, EmojiPickerField, FormInput } from './ui';` — that resolves to `src/renderer/components/ui/index.ts`. webFull does NOT maintain `src/webFull/components/ui/index.ts` (Modal/FormInput/EmojiPickerField are exposed via the top-level `src/webFull/components/index.ts` barrel instead). The lift therefore splits the single barrel import into three direct module imports: `./ui/Modal`, `./ui/FormInput`, `./ui/EmojiPickerField`. Pure plumbing change — no behavior diff. Rejected the alternative of adding a new `src/webFull/components/ui/index.ts` barrel because that adds surface area not justified by any current import requirement.
+
+5. **`generateId` — re-export shim, not verbatim copy.** Source uses `generateId` from `'../utils/ids'` (renderer), which is a one-liner over `crypto.randomUUID()` — zero IPC, zero Electron-only APIs, zero divergence reason. Added `src/webFull/utils/ids.ts` as a single-line `export { generateId } from '../../renderer/utils/ids';` shim. Same Architect 2026-06-08 audit risk A rationale as L2.3's `historyConstants.tsx` re-export precedent: renderer is the single source of truth; webFull reaches `generateId` through the shim; forking later is cheap, forking up front is hard to walk back.
+
+#### Files added
+
+- `src/webFull/components/ResetTasksConfirmModal.tsx` (~85 LOC including extended header — verbatim lift of the 66-LOC source).
+- `src/webFull/components/PlaybookNameModal.tsx` (~95 LOC including extended header — verbatim lift of the 81-LOC source).
+- `src/webFull/components/CreateGroupModal.tsx` (~110 LOC including extended header — verbatim lift of the 87-LOC source).
+- `src/webFull/utils/ids.ts` (~12 LOC including header, 1 LOC re-export line).
+- `src/webFull/components/ResetTasksConfirmModal.parity.test.ts` (5 stories: 3 happy + 2 negative; 6 catalog-shape vitest guards).
+- `src/webFull/components/PlaybookNameModal.parity.test.ts` (5 stories: 3 happy + 2 negative; 6 catalog-shape vitest guards).
+- `src/webFull/components/CreateGroupModal.parity.test.ts` (5 stories: 3 happy + 2 negative; 6 catalog-shape vitest guards).
+- This ISA append.
+
+#### Files modified (additive only)
+
+- `src/webFull/components/index.ts` — appended Layer 2.4 section re-exporting `ResetTasksConfirmModal`, `PlaybookNameModal`, `CreateGroupModal`. No prior exports changed.
+
+#### Files SKIPPED
+
+- None. The brief's bailout condition (lifting `Group` into `src/shared/`) was not triggered because `Group` already lives at `src/shared/types.ts:24` and is re-exported from `src/renderer/types/index.ts:16` — the leaf-hunt's "blocked-on-infra" note for `Group` is stale.
+
+#### Files NOT touched
+
+- `src/web/` — `git diff main..HEAD -- src/web/ | wc -c` → `0` (zero bytes — upstream-mirror web tree untouched).
+- `src/renderer/` — `git diff main..HEAD -- src/renderer/ | wc -c` → `0` (zero bytes — renderer is bias-away).
+- `src/main/` — `git diff main..HEAD -- src/main/ | wc -c` → `0` (zero bytes — no new server routes needed for this purely visual wave).
+- `src/server/` — `git diff main..HEAD -- src/server/ | wc -c` → `0`.
+
+#### Verification
+
+- **0-IPC + 0-Electron-API confirmation:**
+  - `grep "window\.maestro" src/renderer/components/{ResetTasksConfirmModal,PlaybookNameModal,CreateGroupModal}.tsx` → empty.
+  - `grep -E "(dialog|shell:|devtools:|power:|tunnel:|clipboard:|fonts:|notification:show)" <same-3-files>` → empty.
+  - `grep "import.*from.*electron" <same-3-files>` → empty.
+  - Transitive deps: `Modal`, `FormInput`, `EmojiPickerField` re-checked clean during L2.1+L2.2; `generateId` re-export points at `crypto.randomUUID()`; `lucide-react` has no Electron surface.
+- **Pre-flight (from the lift template):** Tailwind glob includes `'./src/webFull/**/*.{js,ts,jsx,tsx}'` (line 3 of `tailwind.config.mjs`); `LayerStackProvider` mounted at `src/webFull/App.tsx:294`; `src/webFull/components/ui/Modal.tsx` present; `src/webFull/components/ui/FormInput.tsx` present; `src/webFull/components/ui/EmojiPickerField.tsx` present.
+- **Build:** `eval "$(/opt/homebrew/bin/fnm env --shell bash)" && fnm use 22.22.1 && npm run build:webfull` → exit 0. Bundle output: `index.html` 3.54 kB, `mobile-...css` 51.95 kB, `main-...js` 0.81 kB, `react-...js` 141.58 kB, `index-...js` 395.61 kB, `mobile-...js` 1,254.83 kB. 3026 modules transformed. The pre-existing CSS minification warning on `<stdin>:2924` is unrelated to this layer. New files are not yet reachable from the entry — they ship as latent surface area for L2.5+ feature consumers (matches L2.3 pattern).
+- **Parity tests:** `npx vitest run src/webFull/components/ResetTasksConfirmModal.parity.test.ts src/webFull/components/PlaybookNameModal.parity.test.ts src/webFull/components/CreateGroupModal.parity.test.ts` → `Test Files 3 passed (3); Tests 18 passed (18)` in 516 ms. Each catalog declares 5 stories total (3 happy + 2 negative ≥ the brief's "≥3 stories with ≥1 negative" minimum), uses only the allowed assertion vocabulary (`hasElement`, `hasText`, `wsFrameMatches`, `dbHasRow`, `fsHas`, `processHas`, `notificationFired`, `broadcast`), and passes the IPC-leakage guard.
+- **Dist mount check:** `grep -c '<div id="root">' dist/webfull/index.html` → `1`. SPA mount intact.
+- **Symlink hygiene:** `node_modules` symlink to `/Users/trilliumsmith/code/maestro/node_modules` was created for the build/test run and removed before commit; `ls -la node_modules` → "No such file or directory".
+
+#### Scope checks (post-write, pre-commit)
+
+- Working-tree changes for this layer (before commit):
+  - `M  src/webFull/components/index.ts`
+  - `?? src/webFull/components/CreateGroupModal.parity.test.ts`
+  - `?? src/webFull/components/CreateGroupModal.tsx`
+  - `?? src/webFull/components/PlaybookNameModal.parity.test.ts`
+  - `?? src/webFull/components/PlaybookNameModal.tsx`
+  - `?? src/webFull/components/ResetTasksConfirmModal.parity.test.ts`
+  - `?? src/webFull/components/ResetTasksConfirmModal.tsx`
+  - `?? src/webFull/utils/ids.ts`
+  - `M  ISA.md` (this block)
+- All authorized: NEW files under `src/webFull/`, the additive append to `src/webFull/components/index.ts`, plus the append-only `ISA.md` block.
+- No edits to `src/main/`, `src/web/`, `src/renderer/`, `src/server/`.
+
+#### Deferred / out-of-scope for this brief
+
+- Lifting consumers (`AutoRun/`, `BatchRunner/`, `SessionList/` features) that would actually wire these modals into the webFull tree — those have transitive store / IPC dependencies and are downstream-layer scope.
+- Building a `src/webFull/components/ui/index.ts` barrel to mirror the renderer's barrel pattern — punted (no current consumer needs it; adding it now is unjustified surface area).
+- Backfilling re-exports for `src/renderer/utils/ids.ts` siblings (the file has only `generateId` today, so the shim is exhaustive).

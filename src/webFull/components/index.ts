@@ -34,3 +34,11 @@ export { ConfirmModal } from './ConfirmModal';
 
 export { EmojiPickerField } from './ui/EmojiPickerField';
 export type { EmojiPickerFieldProps } from './ui/EmojiPickerField';
+
+// ============================================================================
+// Layer 2.4 lifted primitives (verbatim from renderer with relative-path adapts)
+// ============================================================================
+
+export { ResetTasksConfirmModal } from './ResetTasksConfirmModal';
+export { PlaybookNameModal } from './PlaybookNameModal';
+export { CreateGroupModal } from './CreateGroupModal';
