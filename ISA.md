@@ -1226,3 +1226,66 @@ Branch `docs-isa-hygiene-cleanup` off `main` at `b82c60841`. Doc-only turn — n
 
 - **ISC-13 (PTY survives disconnect):** partial PASS. Ring-buffer scrollback is now live in-memory; backfill on `pty_subscribe { lastSeq }` works (test coverage confirms). Persistence across server restarts is L6.3.
 - **ISC-42 (xterm scope gate):** server-protocol half complete. Client-side renderer (L6.2) and persistence (L6.3) remain.
+
+### 2026-06-08 — Layer 2.3 evidence (platform shim + 3 leaf-component lifts)
+
+Branch `layer-2.3-platform-shim-and-3-lifts` off `main` at `d7bbd4b9f`. The L2.2.5 leaf-component audit (`/tmp/renderer-leaf-hunt.md`, 790 lines, 137 unlifted 0-IPC candidates) identified the next concrete wave: three small visual leaves plus one precursor infrastructure piece that unblocks ~25 future candidates.
+
+#### Decisions
+
+1. **Platform shim — new infrastructure, not a re-export.** Added `src/webFull/utils/platformUtils.ts` mirroring the public API of `src/renderer/utils/platformUtils.ts` (`isMacOSPlatform`, `isWindowsPlatform`, `isLinuxPlatform`, `getRevealLabel`, `getOpenInLabel`) plus a webFull-only `isMobilePlatform`. The renderer reads `window.maestro.platform` (set by Electron's preload bridge to Node's `process.platform`); webFull has no preload bridge and instead uses `navigator.userAgent` regex matching (`/Mac|iPhone|iPad/i`, `/Windows/i`, `/Linux/i` excluding `/Android/i`). This is a deliberate platform-specific divergence — re-export was rejected because the source-of-truth signal differs between environments. Per the leaf-component audit, this shim unblocks ~25 future renderer components whose only lift blocker is a transitive dependency on `window.maestro.platform` via these helpers. The shim is precursor for L2.4+; no existing webFull callsite was rewired this turn (`grep -rE "window\.maestro\.platform|isMacOSPlatform|isWindowsPlatform|isLinuxPlatform" src/webFull/` returned empty before the shim was added).
+
+2. **`historyConstants.tsx` — re-export pattern, not verbatim copy.** Added `src/webFull/components/History/historyConstants.tsx` as a single-line `export *` shim against `src/renderer/components/History/historyConstants.tsx`. The constants (`LOOKBACK_OPTIONS`, `MAX_HISTORY_IN_MEMORY`, `ESTIMATED_ROW_HEIGHT`, `ESTIMATED_ROW_HEIGHT_SIMPLE`, the `DoubleCheck` SVG component, the `LookbackPeriod` type) are non-divergent between renderer and webFull. Per Architect 2026-06-08 audit risk A ("verbatim duplication of stable constants creates silent drift surfaces"), the renderer remains the single source of truth and webFull reaches them through this shim. Forking later is cheap; up-front divergence is hard to walk back.
+
+3. **`RenameTabModal.tsx` + `UsageDashboard/EmptyState.tsx` — verbatim lifts, theme-prop pattern continued.** Both components copied with implementation unchanged except for import-path adjustments:
+   - `Theme` import: renderer routes through `'../types'` → `src/renderer/types/index.ts` → `src/shared/theme-types`. webFull imports directly from `'../../shared/theme-types'` (RenameTabModal) or `'../../../shared/theme-types'` (EmptyState's deeper nesting), matching the L2.1 Modal/FormInput primitive convention.
+   - `MODAL_PRIORITIES` import (RenameTabModal only): resolves via the existing webFull re-export at `src/webFull/constants/modalPriorities.ts`.
+   - Modal + ModalFooter + FormInput imports (RenameTabModal): unchanged relative paths against the L2.1 lifted primitives at `src/webFull/components/ui/{Modal,FormInput}.tsx`.
+   - `BarChart3` from `lucide-react` (EmptyState): identical — `lucide-react` is already a transitive dep used by `src/webFull/components/ConfirmModal.tsx`, `Settings/SettingsModal.tsx`, and the L2.1 Modal primitive.
+   Theme access pattern: kept the renderer's `theme: Theme` prop convention rather than refactoring to `useTheme()` — matches L2.1's policy decision and keeps the primitives portable. Both components retain their `memo()` wrapper and (for EmptyState) the `default` export alongside the named export.
+
+#### Files added
+
+- `src/webFull/utils/platformUtils.ts` (~95 LOC, new infrastructure — webFull-divergent browser-side detection).
+- `src/webFull/components/History/historyConstants.tsx` (~20 LOC including header, of which 1 LOC is the actual `export *` re-export line).
+- `src/webFull/components/RenameTabModal.tsx` (~70 LOC verbatim lift + extended header).
+- `src/webFull/components/UsageDashboard/EmptyState.tsx` (~85 LOC verbatim lift + extended header).
+- `src/webFull/components/RenameTabModal.parity.test.ts` (~165 LOC — 5 stories: 3 happy + 2 negative, plus 5 catalog-shape vitest guards).
+- `src/webFull/components/UsageDashboard/EmptyState.parity.test.ts` (~185 LOC — 4 stories: 2 happy + 2 negative, plus 5 catalog-shape vitest guards).
+- This ISA append.
+
+#### Files NOT touched
+
+- `src/web/` — `git diff HEAD -- src/web/ | wc -c` → `0` (zero bytes — upstream-mirror web tree untouched).
+- `src/renderer/` — `git diff HEAD -- src/renderer/ | wc -c` → `0` (zero bytes — renderer is bias-away).
+- `src/main/` — `git diff HEAD -- src/main/ | wc -c` → `0` (zero bytes — no new server routes were needed for this purely visual wave).
+
+#### Verification
+
+- **0-IPC + 0-Electron-API confirmation:**
+  - `grep -nE "window\.maestro\." src/renderer/components/RenameTabModal.tsx src/renderer/components/History/historyConstants.tsx src/renderer/components/UsageDashboard/EmptyState.tsx` → empty.
+  - `grep -nE "\.shell\.|\.dialog\.|\.devtools\.|\.power\.|\.tunnel\.|@sentry/electron" <same-3-files>` → empty.
+  - Transitive deps (`Modal`, `FormInput`, `BarChart3`) re-checked — webFull copies of Modal + FormInput were already verified clean during L2.1; lucide-react has no Electron surface.
+- **Pre-flight (from the lift template):** Tailwind glob includes `src/webFull/**` (line 3 of `tailwind.config.mjs`); `LayerStackProvider` mounted at `src/webFull/App.tsx:293`; `src/webFull/components/ui/Modal.tsx` present.
+- **Build:** `eval "$(/opt/homebrew/bin/fnm env --shell bash)" && fnm use 22.22.1 && npm run build:webfull` → exit 0, identical output bundle to baseline (asset hashes unchanged because the new files aren't reachable from the existing entry yet — they ship as latent surface area for future consumers). The CSS warning at `<stdin>:2714` is pre-existing and unrelated to this layer.
+- **Parity tests:** `npx vitest run src/webFull/components/RenameTabModal.parity.test.ts src/webFull/components/UsageDashboard/EmptyState.parity.test.ts` → `Test Files 2 passed (2); Tests 10 passed (10)`. Both catalogs declare ≥1 happy + ≥1 negative story, use only the allowed assertion vocabulary (`hasElement`, `hasText`, `wsFrameMatches`, `dbHasRow`, `fsHas`, `processHas`, `notificationFired`, `broadcast`), and pass the IPC-leakage guard.
+- **Dist mount check:** `grep -o 'id="root"' dist/webfull/index.html` → `id="root"` present. SPA still mounts.
+- **Symlink hygiene:** `node_modules` symlink to the main checkout was created for the build/test run and removed before commit; `ls -la node_modules` → "No such file or directory".
+
+#### Scope checks (post-write, pre-commit)
+
+- Working-tree changes for this layer (before commit):
+  - `?? src/webFull/components/History/` (new directory: `historyConstants.tsx`)
+  - `?? src/webFull/components/RenameTabModal.parity.test.ts`
+  - `?? src/webFull/components/RenameTabModal.tsx`
+  - `?? src/webFull/components/UsageDashboard/` (new directory: `EmptyState.tsx`, `EmptyState.parity.test.ts`)
+  - `?? src/webFull/utils/platformUtils.ts`
+  - `M ISA.md` (this Decisions + Verification block)
+- All authorized: NEW under `src/webFull/` plus the append-only `ISA.md` block.
+- No edits to `src/main/`, `src/web/`, `src/renderer/`.
+
+#### Deferred / out-of-scope for this brief
+
+- Rewiring the platform shim into an existing webFull callsite — there is none to rewire today. Subsequent agents lifting components that read `window.maestro.platform` will route through `src/webFull/utils/platformUtils.ts` instead of touching `window.maestro`.
+- Lifting `Settings/`, `UsageDashboard/` siblings, History `entry-card` / `summary-row` components — those have transitive context dependencies (UsageStore, HistoryContext) not yet in webFull and are the next-wave targets per the audit's tier-2 list.
+- An auto-tracking ISC for "components depending on platform shim" — left for the audit's next pass when consumers actually land.
