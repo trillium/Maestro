@@ -20,6 +20,7 @@ export default tseslint.config(
 			'src/__tests__/**',
 			'src/web/utils/serviceWorker.ts', // Service worker has special globals
 			'src/web/public/**', // Service worker and static assets
+			'src/webFull/public/**', // webFull fork's service worker and static assets
 			'src/renderer/public/**', // Static browser scripts (splash, devtools)
 		],
 	},
