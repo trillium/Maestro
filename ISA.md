@@ -422,3 +422,98 @@ The lifted primitives compile correctly but are not yet reachable from `src/webF
 - `git diff main..HEAD -- src/web/ | wc -c` → `0` (zero bytes — `src/web/` untouched).
 - `git diff main..HEAD -- tailwind.config.mjs` shows exactly one line changed (the `content` array literal).
 - `node_modules` symlink (created for the build) removed before commit; not tracked.
+
+### 2026-06-08 — Layer 0c evidence (remaining WRITE callbacks via sessions store + broadcast)
+
+**Environment:** Node 22.22.1 via fnm; macOS arm64 (laptop); branch `layer-0c-remaining-writes`; worktree `/Users/trilliumsmith/code/maestro-l0c`; base SHA `3963a6bc0`. `node_modules` symlinked from the main repo (`/Users/trilliumsmith/code/maestro/node_modules`) for the test session; removed before commit.
+
+#### Strategic framing — pattern per callback
+
+The brief identified three patterns for the remaining WRITE callbacks. L0c lands the six (A) cases and the two (C) cases; `newTab` (B-pattern) is deferred to L0d because spawning a process is fundamentally not a store mutation — it needs a server-side session-creation pipeline that the renderer currently owns.
+
+| Callback | Pattern | Implementation |
+| --- | --- | --- |
+| `switchMode` | (A) persist + broadcast | mutate `inputMode` on the session, `broadcastSessionStateChange(id, state, {inputMode, ...})` — matches the desktop persistence handler's existing broadcast contract (`src/main/ipc/handlers/persistence.ts` lines 145-158). |
+| `closeTab` | (A) persist + broadcast | filter the tab out of `aiTabs`, reassign `activeTabId` to the first remaining tab if the closed one was active, `broadcastTabsChange`. |
+| `renameTab` | (A) persist + broadcast | mutate `name` on the tab record, `broadcastTabsChange`. |
+| `starTab` | (A) persist + broadcast | mutate `starred` on the tab record, `broadcastTabsChange`. |
+| `reorderTab` | (A) persist + broadcast | splice the `aiTabs` array, `broadcastTabsChange`. Bounds-checked: out-of-range indices return false; equal-indices is a no-op success. |
+| `toggleBookmark` | (A) persist, no broadcast | flip `bookmarked`. The WebServer's broadcast surface has no dedicated bookmark channel and the desktop renderer also handles bookmark toggle as a local-only Zustand update (`src/renderer/stores/sessionStore.ts` lines 245-250), so headless matches desktop behavior. Web clients pick up the new state on the next sessions read. |
+| `selectSession` | (C) headless no-op | log and return true. There is no global "visible session" in headless mode — each browser tab manages its own view state. The WS round-trip succeeds so the client doesn't surface an error. |
+| `selectTab` | (C) headless no-op | same rationale; "active tab" is a per-browser-tab concept in web mode. |
+| `newTab` | DEFERRED to L0d | spawn is a real side effect, not a store mutation. Tracked as the only remaining unwired callback. Stub returns `null` matching the type contract. |
+
+#### File layout
+
+- New: `src/server/sessions-mutator.ts` (151 LOC) — pure data-in/data-out functions per mutation (no I/O, no WebServer reference). Keeps `index.ts` declarative and opens unit-test surface for L0c-onwards.
+- Edited: `src/server/index.ts` — replaced the L0a `notImplementedWrite(...)` stub block with the nine callback implementations above. Added the `applyMutation()` helper that does read → mutate → persist → broadcast in one transaction, and the `tabsForBroadcast()` helper that shapes a stored session's tabs to match the `AITabData` broadcast contract.
+- Edited: `ISA.md` (this section).
+- No edits to `src/main/`, `src/web/`, or `src/server/process-manager-adapter.ts`. The L0c implementations consume the existing `WebServer.broadcast*` public surface — no new broadcast methods were added.
+
+#### Build verification — `tsc -p tsconfig.server.json`
+
+- **Probe:** `npx tsc -p tsconfig.server.json && echo "BUILD OK exit=$?"`
+- **Result:** `BUILD OK exit=0`. Zero TS errors. `dist/server/sessions-mutator.js` added alongside the existing `dist/server/index.js` and `dist/server/process-manager-adapter.js`. Status: **PASS**.
+
+#### Electron-leak guard
+
+- **Probe:** `grep -r "from 'electron'" dist/server/; echo "exit=$?"`
+- **Result:** `exit=1` (grep no-match). The new mutator module pulls zero new dependencies; the `WebServer.broadcast*` methods called from `index.ts` go through `BroadcastService`, which itself imports only `ws` and the WebServer types. Status: **PASS**.
+
+#### Boot — Layer 0c log line
+
+- **Probe:** `MAESTRO_DATA_DIR=/tmp/maestro-l0c MAESTRO_WEB_PORT=45687 node dist/server/index.js`
+- **Result:** Server listens at `http://192.168.86.26:45687/<token>`. New boot log:
+	```
+	[maestro-server] Layer 0c: 9/10 WRITE callbacks active (L0b: writeToSession,
+	executeCommand, interruptSession via ProcessManager; L0c-A: switchMode,
+	closeTab, renameTab, starTab, reorderTab, toggleBookmark via sessions store +
+	broadcast; L0c-C: selectSession, selectTab as headless no-ops). newTab
+	deferred to L0d (requires server-side spawn pipeline).
+	```
+- The "1 session visible" line confirmed the FileStore read pulled the seeded synthetic session (`sess-l0c-1` with two tabs `tab-a` and `tab-b`, written directly to `/tmp/maestro-l0c/maestro-sessions.json` before boot). Status: **PASS**.
+
+#### Smoke — WebSocket probe drives each new callback
+
+A small node WS client (`/tmp/maestro-l0c-smoke.mjs`) connected to `/<token>/ws`, then fired one message per callback against the seeded session plus one against a non-existent session. Every callback responded with its expected `*_result` envelope:
+
+| Probe | Message → Response | Server-log trace |
+| --- | --- | --- |
+| `switch_mode` ai | `mode_switch_result success=true` + `session_state_change inputMode=ai` broadcast | `switchMode sess-l0c-1 -> ai: true` |
+| `star_tab` tab-a true | `star_tab_result success=true` + `tabs_changed` broadcast (tab-a.starred=true) | `starTab sess-l0c-1/tab-a -> true: true` |
+| `select_session` | `select_session_result success=true` | `selectSession sess-l0c-1 tab=tab-a — no-op in headless mode` |
+| `toggle_bookmark` | `toggle_bookmark_result success=true` (no broadcast, by design) | `toggleBookmark sess-l0c-1: true` |
+| `close_tab` against `sess-does-not-exist` | `close_tab_result success=false` (404-equivalent) | `closeTab: session not found or no-op; skipping` + `closeTab sess-does-not-exist/tab-x: false` |
+| `reorder_tab` 1→0 | `reorder_tab_result success=true` + `tabs_changed` broadcast with new order | `reorderTab sess-l0c-1 1->0: true` |
+| `rename_tab` tab-a "renamed-by-l0c" | `rename_tab_result success=true` + `tabs_changed` broadcast with new name | `renameTab sess-l0c-1/tab-a -> "renamed-by-l0c": true` |
+
+#### Persistence verification
+
+After the smoke probe, the on-disk sessions file (`/tmp/maestro-l0c/maestro-sessions.json`) shows the cumulative result of every mutation:
+
+- `inputMode: "terminal" → "ai"` (switchMode)
+- `bookmarked: false → true` (toggleBookmark)
+- `aiTabs[0]: tab-a → tab-b`, `aiTabs[1]: tab-b → tab-a` (reorderTab)
+- `tab-a.starred: false → true` (starTab)
+- `tab-a.name: "first" → "renamed-by-l0c"` (renameTab)
+
+Every mutation hit the disk via `FileStore.set('sessions', ...)`. The "not found" probe (`sess-does-not-exist`) left the store unchanged. Status: **PASS** for store + broadcast wiring; full UI-level verification deferred to webFull integration in a later layer.
+
+#### Scope check
+
+- `git diff main..HEAD -- src/web/ | wc -c` → `0` (zero bytes — `src/web/` still untouched).
+- L0c diff against `3963a6bc0` (base):
+	- 1 new file: `src/server/sessions-mutator.ts`.
+	- 2 edited files: `src/server/index.ts`, `ISA.md`.
+	- No edits to `src/main/`, `src/server/process-manager-adapter.ts`, or any web-side file.
+- `node_modules` symlink removed before commit; worktree tree clean.
+
+#### Deferred — newTab
+
+`newTab` is the only WRITE callback still stubbed (returns `null`). It needs:
+
+1. A server-side `ProcessManager.spawn(...)` call to create the pty/agent.
+2. Persistence of the new `aiTabs[]` entry (the mutator already handles this if given the new tab record).
+3. A response shape `{ tabId: string }` returned to the caller.
+
+The spawn pipeline is the L0d boundary — same scope as the missing "New Session" flow, which today lives in the renderer. Tracked separately.
