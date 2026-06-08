@@ -146,3 +146,6 @@ export type { CsvTableRendererProps } from './CsvTableRenderer';
 export { GroupChatList } from './GroupChatList';
 export type { GroupChatListProps } from './GroupChatList';
 export { MermaidRenderer } from './MermaidRenderer';
+export { FileSearchModal, flattenPreviewableFiles } from './FileSearchModal';
+export type { FlatFileItem } from './FileSearchModal';
+export { AICommandsPanel } from './AICommandsPanel';
