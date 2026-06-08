@@ -17,6 +17,7 @@ import {
 	useCallback,
 } from 'react';
 import { ThemeProvider } from './components/ThemeProvider';
+import { PtyMessageRouterProvider } from './components/Terminal';
 import { LayerStackProvider } from './contexts/LayerStackContext';
 import { registerServiceWorker, isOffline } from './utils/serviceWorker';
 import { getMaestroConfig } from './utils/config';
@@ -291,9 +292,19 @@ export function App() {
             priority-based stacking. See ISA Decisions 2026-06-08 (Layer 2.1).
           */}
 						<LayerStackProvider>
-							<Suspense fallback={<LoadingFallback />}>
-								<WebApp />
-							</Suspense>
+							{/*
+            PtyMessageRouterProvider — added in Layer 6.2 (xterm.js raw PTY
+            renderer). Bridges App-level useWebSocket onPty* handlers to
+            per-session <Terminal> instances. Mounted above WebApp so any
+            terminal component anywhere in the tree (mobile / future panel
+            layouts) shares one routing surface. The MobileApp wires the
+            dispatch methods into useWebSocket via the router context.
+          */}
+							<PtyMessageRouterProvider>
+								<Suspense fallback={<LoadingFallback />}>
+									<WebApp />
+								</Suspense>
+							</PtyMessageRouterProvider>
 						</LayerStackProvider>
 					</ThemeProvider>
 				</ThemeUpdateContext.Provider>
