@@ -149,3 +149,6 @@ export { MermaidRenderer } from './MermaidRenderer';
 export { FileSearchModal, flattenPreviewableFiles } from './FileSearchModal';
 export type { FlatFileItem } from './FileSearchModal';
 export { AICommandsPanel } from './AICommandsPanel';
+export { AutoRunDocumentSelector } from './AutoRunDocumentSelector';
+export type { DocTreeNode, DocumentTaskCount } from './AutoRunDocumentSelector';
+export { AutoRunExpandedModal } from './AutoRunExpandedModal';
