@@ -2632,6 +2632,7 @@ Branch `leaf-theme-picker` cut off `main`. Smallest leaf in the parade so far: t
 
 - `src/webFull/components/ThemePicker.tsx` (~105 LOC including extended header — verbatim lift of the 70-LOC source).
 - `src/webFull/components/ThemePicker.parity.test.ts` (8 stories: 4 happy + 4 negative; 6 catalog-shape vitest guards).
+
 ### 2026-06-08 — Layer 2.5 evidence (leaf-parade — `WelcomeContent` lift)
 
 Branch `leaf-welcome-content` cut off `main @ c0d2904f0` (post-merge of the `leaf-groupchat-messages` lift). This branch is the L2.5 lift of the shared welcome content block used by both the first-launch empty state and the tour introduction overlay. Pure presentational content — 113 LOC, zero hooks, zero IPC, zero effects, zero state. Smallest L2.5 lift to date.
@@ -2676,6 +2677,7 @@ Branch `leaf-welcome-content` cut off `main @ c0d2904f0` (post-merge of the `lea
 - `src/renderer/` — `git diff main..HEAD -- src/renderer/ | wc -c` → `0` (renderer is bias-away per fork hygiene).
 - `src/renderer/` — `git diff main..HEAD -- src/renderer/ | wc -c` → `0` (renderer is bias-away per fork hygiene; the asset is read in-place, not modified).
 - `src/main/` — `git diff main..HEAD -- src/main/ | wc -c` → `0` (no new server routes — this is a purely visual leaf lift).
+
 ### 2026-06-08 — Layer 2.5 evidence (leaf-parade — `MarkdownRenderer` lift; neutralizes cross-fork import from `leaf-groupchat-messages`)
 
 Branch `leaf-markdown-renderer` cut off `main @ c0d2904f0` (HEAD after the merge of `leaf-groupchat-messages` at `1bfbdad8d`). This lift is a direct follow-up to the `GroupChatMessages` lift — it gives webFull its own `MarkdownRenderer` and rewires the existing webFull consumer to the sibling path, removing one cross-fork edge from the leaf-parade-accepted transitive surface.
@@ -2796,6 +2798,7 @@ The lift moves the viewer into `src/webFull/components/CollapsibleJsonViewer.tsx
 - `src/renderer/` — read-only oracle for this leaf lift. **`AgentErrorModal`'s cross-fork import of the viewer remains intact in this branch by design** — retargeting it onto the webFull copy is the follow-up cleanup wave per the brief.
 - `src/web/` — fork-hygiene rule; upstream-mirror web tree untouched.
 - `src/main/` — no new routes; this is a purely visual leaf lift.
+
 ### 2026-06-08 — Layer 2.5 evidence (leaf-parade — `GroupChatHeader` lift)
 
 Branch `leaf-groupchat-header` cut off `main @ c0d2904f0` (post-merge of the `leaf-groupchat-messages` lift). This branch continues the GroupChat module port — `GroupChatHeader` is the direct sibling of the `GroupChatMessages` view that just landed. Lifts `src/renderer/components/GroupChatHeader.tsx` (143 LOC) verbatim into `src/webFull/components/` and ships a parity catalog. The `shortcutFormatter` shim landed by the `leaf-autorunner-help` lift is the precursor infrastructure that unblocks this lift's only divergent import; this is the third consumer of that shim after `AutoRunnerHelpModal` and `GroupChatMessages`.
