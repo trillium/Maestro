@@ -42,7 +42,7 @@
 		"start": "electron .",
 		"clean": "rm -rf dist release node_modules/.vite",
 		"prepare": "node scripts/setup-git-hooks.mjs",
-		"postinstall": "electron-rebuild -f -w node-pty,better-sqlite3",
+		"postinstall": "if [ \"${MAESTRO_HEADLESS:-0}\" = \"1\" ]; then echo '[postinstall] MAESTRO_HEADLESS=1; skipping electron-rebuild'; else electron-rebuild -f -w node-pty,better-sqlite3; fi",
 		"lint": "tsc -p tsconfig.lint.json && tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.cli.json --noEmit",
 		"lint:eslint": "eslint src/",
 		"format": "prettier --write \"src/**/*.{ts,tsx}\"",
