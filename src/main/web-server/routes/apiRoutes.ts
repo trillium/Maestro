@@ -483,6 +483,33 @@ export interface AgentsProvider {
 	 * contract.
 	 */
 	getCapabilities: (agentId: string) => Record<string, unknown>;
+	/**
+	 * Get the merged config for an agent id — `configOptions[*].default`
+	 * overlaid with the stored per-agent config from the FileStore. Mirrors
+	 * the `agents:getConfig` IPC reply at agents.ts:556 byte-for-byte
+	 * (defaults first, stored overrides). Unknown ids return the stored
+	 * config (or `{}` if none) — matches the renderer-side handler's
+	 * behavior. W3-agents-writers extension.
+	 */
+	getConfig: (agentId: string) => Promise<Record<string, unknown>>;
+	/**
+	 * Overwrite the stored config for an agent id. Mirrors `agents:setConfig`
+	 * at agents.ts:578 — replaces (does NOT merge) the per-agent record.
+	 * Returns `true` on success to match the renderer-side handler's reply
+	 * shape. W3-agents-writers extension.
+	 */
+	setConfig: (agentId: string, config: Record<string, unknown>) => Promise<boolean>;
+	/**
+	 * Discover available models for an agent id (local-only — SSH-remote
+	 * dispatch is a sibling brief). Returns `[]` when the agent is not
+	 * detected, when the agent does not support model selection, or when
+	 * the agent has no `models` subcommand implementation. Currently only
+	 * `opencode` actually shells out; other agents return `[]`. Mirrors
+	 * `agents:getModels` (local path) at agents.ts:810. Cache TTL is 5
+	 * minutes inside the manager; pass `forceRefresh: true` to bypass.
+	 * W3-agents-writers extension.
+	 */
+	getModels: (agentId: string, forceRefresh?: boolean) => Promise<string[]>;
 }
 
 let agentsProvider: AgentsProvider | null = null;
@@ -2328,6 +2355,226 @@ export class ApiRoutes {
 					return reply.code(500).send({
 						error: 'Internal Server Error',
 						message: `Failed to get capabilities: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// ============ W3-agents-writers — writer routes (closes ISC-44.shim.agents_writers) ============
+		//
+		// Extends the W3-agents detection-only surface with the writer routes
+		// that the umbrella `ISC-44.shim.big_3_ipc_strategy` Decision named as a
+		// follow-up. Closes the remaining 6 of 11 NewInstanceModal IPC call
+		// sites the original W3-agents brief audit named (lines 284, 405, 971,
+		// 1277, 1288, 1482, 1791 in NewInstanceModal.tsx). With these 3 routes
+		// shipped, NewInstanceModal becomes fully unblocked for the webFull
+		// port (the original W3-agents brief shipped detection + capabilities;
+		// this brief ships config CRUD + model discovery — the per-IPC-shim
+		// Decision agents cluster is now complete).
+		//
+		// Route surface (3 endpoints):
+		//   GET /api/agents/config/:agentId   — merged defaults + stored config
+		//   PUT /api/agents/config/:agentId   — overwrite stored config
+		//   GET /api/agents/models/:agentId   — discover available models
+		//
+		// All routes 503 cleanly when no `AgentsProvider` is registered. Per
+		// the per-IPC-shim Decision, the writer cluster does NOT accept
+		// `?sshRemoteId=` — config is local-only (the SSH-remote sub-ISC ships
+		// remote config CRUD on its own surface). The `models` route also
+		// rejects `?sshRemoteId=` with 501 to match the W3-agents read-side
+		// posture (the SSH-remote `agents:getModels` path lives behind the
+		// `ssh-remote:*` cluster, not under `/api/agents/`).
+
+		// GET /api/agents/config/:agentId — mirrors `agents:getConfig`.
+		// Returns the merged shape: defaults from `configOptions[*].default`
+		// overlaid with the stored per-agent config from
+		// `<dataDir>/agents-config.json`. Unknown agent ids return just the
+		// stored config (or `{}` if none) — matches the renderer-side handler.
+		server.get(
+			`/${token}/api/agents/config/:agentId`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getAgentsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Agents provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { agentId } = request.params as { agentId?: string };
+				const reason = validateAgentId(agentId);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const config = await provider.getConfig(agentId as string);
+					return {
+						agentId,
+						config,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get config: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// PUT /api/agents/config/:agentId — mirrors `agents:setConfig`.
+		// Body: `{ config: Record<string, unknown> }` — replaces (does NOT
+		// merge) the stored per-agent config. The body shape matches the
+		// renderer-side handler's call site: `setConfig(agentId, config)`. The
+		// route uses PUT (idempotent overwrite) rather than POST (create) to
+		// match the renderer-side write semantics — repeated calls with the
+		// same body produce the same on-disk state.
+		//
+		// Validation: `config` MUST be a plain object (not array, not null,
+		// not a primitive). The renderer-side handler accepts any
+		// `Record<string, unknown>` and writes it through; we validate at the
+		// route boundary because HTTP bodies can be anything, where IPC payloads
+		// are typed at the preload bridge.
+		server.put(
+			`/${token}/api/agents/config/:agentId`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.maxPost,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getAgentsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Agents provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { agentId } = request.params as { agentId?: string };
+				const reason = validateAgentId(agentId);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				const body = request.body as { config?: unknown } | undefined;
+				const config = body?.config;
+				if (
+					config === null ||
+					config === undefined ||
+					typeof config !== 'object' ||
+					Array.isArray(config)
+				) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'config must be a plain object (not array, not null)',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const success = await provider.setConfig(
+						agentId as string,
+						config as Record<string, unknown>
+					);
+					return {
+						agentId,
+						success,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to set config: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/agents/models/:agentId — mirrors `agents:getModels` (local
+		// path only — SSH-remote dispatch is a sibling cluster). Returns
+		// `{ agentId, models, timestamp }`. Currently only `opencode` actually
+		// shells out (`opencode models` returns one model per line); other
+		// agents that don't support model selection or that have no `models`
+		// subcommand implementation return `[]` (this matches the renderer-side
+		// `AgentDetector.runModelDiscovery` posture — see detector.ts:279).
+		//
+		// Query params:
+		//   ?forceRefresh=true  — bypass the 5-minute model-cache TTL
+		//   ?sshRemoteId=...    — 501 (sibling cluster owns remote)
+		server.get(
+			`/${token}/api/agents/models/:agentId`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getAgentsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Agents provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { sshRemoteId, forceRefresh } =
+					(request.query as { sshRemoteId?: string; forceRefresh?: string }) || {};
+				if (sshRemoteId) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side agents routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const { agentId } = request.params as { agentId?: string };
+				const reason = validateAgentId(agentId);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					// `forceRefresh` query param is the string "true"/"false" in
+					// HTTP land — coerce to boolean before forwarding to the
+					// provider.
+					const force = forceRefresh === 'true' || forceRefresh === '1';
+					const models = await provider.getModels(agentId as string, force);
+					return {
+						agentId,
+						models,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to discover models: ${error.message}`,
 						timestamp: Date.now(),
 					});
 				}

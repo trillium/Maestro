@@ -335,7 +335,14 @@ registerMarketplaceProvider({
 // discovery) need follow-up briefs once their server-side state shape is
 // designed (config CRUD wants a FileStore equivalent; model discovery wants
 // per-agent subcommand fan-out).
-const agentsManager = getAgentsManager();
+//
+// W3-agents-writers (2026-06-08 update): config CRUD + model discovery
+// NOW SHIPPED via the writer-route extension. The manager constructor now
+// takes `dataDir` (lazy-used by `getConfig`/`setConfig` to back the
+// `<dataDir>/agents-config.json` FileStore — mirrors the marketplace JSON
+// store pattern). All 6 NewInstanceModal preconditions for the agents
+// cluster are now unblocked.
+const agentsManager = getAgentsManager(dataDir);
 
 // Register the manager as the default Agents provider for the REST routes.
 // MUST run before `server.start()` so the routes have a backing provider by
@@ -348,6 +355,11 @@ registerAgentsProvider({
 	detectAgent: (agentId: string) => agentsManager.detectAgent(agentId),
 	getCapabilities: (agentId: string) =>
 		agentsManager.getCapabilities(agentId) as unknown as Record<string, unknown>,
+	getConfig: (agentId: string) => agentsManager.getConfig(agentId),
+	setConfig: (agentId: string, config: Record<string, unknown>) =>
+		agentsManager.setConfig(agentId, config),
+	getModels: (agentId: string, forceRefresh?: boolean) =>
+		agentsManager.getModels(agentId, forceRefresh),
 });
 
 // W3-ssh-remotes — SshRemotes manager. Server-side port of the read-side
