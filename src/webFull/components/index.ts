@@ -42,3 +42,10 @@ export type { EmojiPickerFieldProps } from './ui/EmojiPickerField';
 export { ResetTasksConfirmModal } from './ResetTasksConfirmModal';
 export { PlaybookNameModal } from './PlaybookNameModal';
 export { CreateGroupModal } from './CreateGroupModal';
+
+// ============================================================================
+// Layer 4.1 lifted surface — Left Bar (SessionList)
+// ============================================================================
+
+export { SessionList } from './SessionList';
+export type { SessionListProps } from './SessionList';

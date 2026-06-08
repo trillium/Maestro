@@ -28,6 +28,7 @@ import { estimateContextUsage } from '../../renderer/utils/contextUsage';
 import { triggerHaptic, HAPTIC_PATTERNS } from './constants';
 import { webLogger } from '../utils/logger';
 import { SessionPillBar } from './SessionPillBar';
+import { DesktopSidebar } from './DesktopSidebar';
 import { AllSessionsView } from './AllSessionsView';
 import { MobileHistoryPanel } from './MobileHistoryPanel';
 import { CommandInputBar, type InputMode } from './CommandInputBar';
@@ -1197,181 +1198,200 @@ export default function MobileApp() {
 		sessions.length > 0;
 
 	return (
-		<div style={containerStyle}>
-			{/* Header with session info */}
-			<MobileHeader activeSession={activeSession} />
+		<div
+			style={{
+				display: 'flex',
+				flexDirection: isSmallScreen ? 'column' : 'row',
+				height: '100dvh',
+				maxHeight: '100dvh',
+				overflow: 'hidden',
+				backgroundColor: colors.bgMain,
+				color: colors.textMain,
+			}}
+		>
+			{/* Layer 4.1 — Left Bar (renders only on desktop widths) */}
+			<DesktopSidebar
+				sessions={sessions}
+				activeSessionId={activeSessionId}
+				onSelectSession={handleSelectSession}
+				isSmallScreen={isSmallScreen}
+			/>
+			<div style={{ ...containerStyle, flex: 1, height: '100%' }}>
+				{/* Header with session info */}
+				<MobileHeader activeSession={activeSession} />
 
-			{/* Session pill bar - Row 1: Groups/Sessions with search button */}
-			{showSessionPillBar && (
-				<SessionPillBar
-					sessions={sessions}
-					activeSessionId={activeSessionId}
-					onSelectSession={handleSelectSession}
-					onOpenAllSessions={handleOpenAllSessions}
-					onOpenHistory={handleOpenHistoryPanel}
-					onToggleBookmark={handleToggleBookmark}
-				/>
-			)}
-
-			{/* Tab bar - Row 2: Tabs for active session with search button */}
-			{activeSession?.inputMode === 'ai' &&
-				activeSession?.aiTabs &&
-				activeSession.aiTabs.length > 1 &&
-				activeSession.activeTabId && (
-					<TabBar
-						tabs={activeSession.aiTabs}
-						activeTabId={activeSession.activeTabId}
-						onSelectTab={handleSelectTab}
-						onNewTab={handleNewTab}
-						onCloseTab={handleCloseTab}
-						onOpenTabSearch={handleOpenTabSearch}
-						onRenameTab={handleRenameTab}
-						onStarTab={handleStarTab}
-						onReorderTab={handleReorderTab}
+				{/* Session pill bar - Row 1: Groups/Sessions with search button */}
+				{showSessionPillBar && (
+					<SessionPillBar
+						sessions={sessions}
+						activeSessionId={activeSessionId}
+						onSelectSession={handleSelectSession}
+						onOpenAllSessions={handleOpenAllSessions}
+						onOpenHistory={handleOpenHistoryPanel}
+						onToggleBookmark={handleToggleBookmark}
 					/>
 				)}
 
-			{/* AutoRun indicator - shown when batch processing is active on desktop */}
-			{activeSessionId && autoRunStates[activeSessionId] && (
-				<AutoRunIndicator
-					state={autoRunStates[activeSessionId]}
-					sessionName={activeSession?.name}
-				/>
-			)}
+				{/* Tab bar - Row 2: Tabs for active session with search button */}
+				{activeSession?.inputMode === 'ai' &&
+					activeSession?.aiTabs &&
+					activeSession.aiTabs.length > 1 &&
+					activeSession.activeTabId && (
+						<TabBar
+							tabs={activeSession.aiTabs}
+							activeTabId={activeSession.activeTabId}
+							onSelectTab={handleSelectTab}
+							onNewTab={handleNewTab}
+							onCloseTab={handleCloseTab}
+							onOpenTabSearch={handleOpenTabSearch}
+							onRenameTab={handleRenameTab}
+							onStarTab={handleStarTab}
+							onReorderTab={handleReorderTab}
+						/>
+					)}
 
-			{/* Offline queue banner - shown when there are queued commands */}
-			{offlineQueueLength > 0 && (
-				<OfflineQueueBanner
-					queue={offlineQueue}
-					status={offlineQueueStatus}
-					onClearQueue={clearOfflineQueue}
-					onProcessQueue={processOfflineQueue}
-					onRemoveCommand={removeQueuedCommand}
-					isOffline={isOffline}
-					isConnected={isActuallyConnected}
-				/>
-			)}
+				{/* AutoRun indicator - shown when batch processing is active on desktop */}
+				{activeSessionId && autoRunStates[activeSessionId] && (
+					<AutoRunIndicator
+						state={autoRunStates[activeSessionId]}
+						sessionName={activeSession?.name}
+					/>
+				)}
 
-			{/* All Sessions view - full-screen modal with larger session cards */}
-			{showAllSessions && (
-				<AllSessionsView
-					sessions={sessions}
-					activeSessionId={activeSessionId}
-					onSelectSession={handleSelectSession}
-					onClose={handleCloseAllSessions}
-				/>
-			)}
+				{/* Offline queue banner - shown when there are queued commands */}
+				{offlineQueueLength > 0 && (
+					<OfflineQueueBanner
+						queue={offlineQueue}
+						status={offlineQueueStatus}
+						onClearQueue={clearOfflineQueue}
+						onProcessQueue={processOfflineQueue}
+						onRemoveCommand={removeQueuedCommand}
+						isOffline={isOffline}
+						isConnected={isActuallyConnected}
+					/>
+				)}
 
-			{/* History panel - full-screen modal with history entries */}
-			{showHistoryPanel && (
-				<MobileHistoryPanel
-					onClose={handleCloseHistoryPanel}
-					projectPath={activeSession?.cwd}
-					sessionId={activeSessionId || undefined}
-					initialFilter={historyFilter}
-					initialSearchQuery={historySearchQuery}
-					initialSearchOpen={historySearchOpen}
-					onFilterChange={setHistoryFilter}
-					onSearchChange={(query, isOpen) => {
-						setHistorySearchQuery(query);
-						setHistorySearchOpen(isOpen);
-					}}
-				/>
-			)}
+				{/* All Sessions view - full-screen modal with larger session cards */}
+				{showAllSessions && (
+					<AllSessionsView
+						sessions={sessions}
+						activeSessionId={activeSessionId}
+						onSelectSession={handleSelectSession}
+						onClose={handleCloseAllSessions}
+					/>
+				)}
 
-			{/* Tab search modal - full-screen modal for searching tabs */}
-			{showTabSearch && activeSession?.aiTabs && activeSession.activeTabId && (
-				<TabSearchModal
-					tabs={activeSession.aiTabs}
-					activeTabId={activeSession.activeTabId}
-					onSelectTab={handleSelectTab}
-					onClose={handleCloseTabSearch}
-				/>
-			)}
+				{/* History panel - full-screen modal with history entries */}
+				{showHistoryPanel && (
+					<MobileHistoryPanel
+						onClose={handleCloseHistoryPanel}
+						projectPath={activeSession?.cwd}
+						sessionId={activeSessionId || undefined}
+						initialFilter={historyFilter}
+						initialSearchQuery={historySearchQuery}
+						initialSearchOpen={historySearchOpen}
+						onFilterChange={setHistoryFilter}
+						onSearchChange={(query, isOpen) => {
+							setHistorySearchQuery(query);
+							setHistorySearchOpen(isOpen);
+						}}
+					/>
+				)}
 
-			{/* Main content area */}
-			<main
-				style={{
-					flex: 1,
-					display: 'flex',
-					flexDirection: 'column',
-					alignItems: 'center',
-					justifyContent: 'flex-start',
-					padding: '12px',
-					paddingBottom: 'calc(80px + env(safe-area-inset-bottom))', // Account for fixed input bar
-					textAlign: 'center',
-					overflow: 'hidden', // Changed from 'auto' - let MessageHistory handle scrolling
-					minHeight: 0, // Required for flex child to scroll properly
-				}}
-			>
-				{/* Content wrapper */}
-				<div
+				{/* Tab search modal - full-screen modal for searching tabs */}
+				{showTabSearch && activeSession?.aiTabs && activeSession.activeTabId && (
+					<TabSearchModal
+						tabs={activeSession.aiTabs}
+						activeTabId={activeSession.activeTabId}
+						onSelectTab={handleSelectTab}
+						onClose={handleCloseTabSearch}
+					/>
+				)}
+
+				{/* Main content area */}
+				<main
 					style={{
 						flex: 1,
 						display: 'flex',
 						flexDirection: 'column',
 						alignItems: 'center',
-						justifyContent:
-							connectionState === 'connected' || connectionState === 'authenticated'
-								? 'flex-start'
-								: 'center',
-						width: '100%',
-						minHeight: 0,
-						overflow: 'hidden', // Contain child scroll
+						justifyContent: 'flex-start',
+						padding: '12px',
+						paddingBottom: 'calc(80px + env(safe-area-inset-bottom))', // Account for fixed input bar
+						textAlign: 'center',
+						overflow: 'hidden', // Changed from 'auto' - let MessageHistory handle scrolling
+						minHeight: 0, // Required for flex child to scroll properly
 					}}
 				>
-					{renderContent()}
-					{/* Show help text only when disconnected/connecting */}
-					{connectionState !== 'connected' && connectionState !== 'authenticated' && (
-						<p style={{ fontSize: '12px', color: colors.textDim }}>
-							Make sure Maestro desktop app is running
-						</p>
-					)}
-				</div>
-			</main>
+					{/* Content wrapper */}
+					<div
+						style={{
+							flex: 1,
+							display: 'flex',
+							flexDirection: 'column',
+							alignItems: 'center',
+							justifyContent:
+								connectionState === 'connected' || connectionState === 'authenticated'
+									? 'flex-start'
+									: 'center',
+							width: '100%',
+							minHeight: 0,
+							overflow: 'hidden', // Contain child scroll
+						}}
+					>
+						{renderContent()}
+						{/* Show help text only when disconnected/connecting */}
+						{connectionState !== 'connected' && connectionState !== 'authenticated' && (
+							<p style={{ fontSize: '12px', color: colors.textDim }}>
+								Make sure Maestro desktop app is running
+							</p>
+						)}
+					</div>
+				</main>
 
-			{/* Sticky bottom command input bar */}
-			<CommandInputBar
-				isOffline={isOffline}
-				isConnected={connectionState === 'connected' || connectionState === 'authenticated'}
-				value={commandInput}
-				onChange={handleCommandChange}
-				onSubmit={handleCommandSubmit}
-				placeholder={
-					!activeSessionId
-						? 'Select a session first...'
-						: activeSession?.inputMode === 'ai'
-							? isSmallScreen
-								? 'Ask AI...'
-								: `Ask ${
-										activeSession?.toolType === 'claude-code'
-											? 'Claude'
-											: activeSession?.toolType || 'AI'
-									} about ${activeSession?.name || 'this session'}...`
-							: 'Run shell command...'
-				}
-				disabled={!activeSessionId}
-				inputMode={(activeSession?.inputMode as InputMode) || 'ai'}
-				onModeToggle={handleModeToggle}
-				isSessionBusy={activeSession?.state === 'busy'}
-				onInterrupt={activeSessionId ? () => handleInterrupt(activeSessionId) : undefined}
-				hasActiveSession={!!activeSessionId}
-				cwd={activeSession?.cwd}
-				slashCommands={allSlashCommands}
-				showRecentCommands={false}
-			/>
+				{/* Sticky bottom command input bar */}
+				<CommandInputBar
+					isOffline={isOffline}
+					isConnected={connectionState === 'connected' || connectionState === 'authenticated'}
+					value={commandInput}
+					onChange={handleCommandChange}
+					onSubmit={handleCommandSubmit}
+					placeholder={
+						!activeSessionId
+							? 'Select a session first...'
+							: activeSession?.inputMode === 'ai'
+								? isSmallScreen
+									? 'Ask AI...'
+									: `Ask ${
+											activeSession?.toolType === 'claude-code'
+												? 'Claude'
+												: activeSession?.toolType || 'AI'
+										} about ${activeSession?.name || 'this session'}...`
+								: 'Run shell command...'
+					}
+					disabled={!activeSessionId}
+					inputMode={(activeSession?.inputMode as InputMode) || 'ai'}
+					onModeToggle={handleModeToggle}
+					isSessionBusy={activeSession?.state === 'busy'}
+					onInterrupt={activeSessionId ? () => handleInterrupt(activeSessionId) : undefined}
+					hasActiveSession={!!activeSessionId}
+					cwd={activeSession?.cwd}
+					slashCommands={allSlashCommands}
+					showRecentCommands={false}
+				/>
 
-			{/* Full-screen response viewer modal */}
-			<ResponseViewer
-				isOpen={showResponseViewer}
-				response={selectedResponse}
-				allResponses={allResponses.length > 1 ? allResponses : undefined}
-				currentIndex={responseIndex}
-				onNavigate={handleNavigateResponse}
-				onClose={handleCloseResponseViewer}
-				sessionName={activeSession?.name}
-				enableBionifyReadingMode={bionifyReadingMode}
-			/>
+				{/* Full-screen response viewer modal */}
+				<ResponseViewer
+					isOpen={showResponseViewer}
+					response={selectedResponse}
+					allResponses={allResponses.length > 1 ? allResponses : undefined}
+					currentIndex={responseIndex}
+					onNavigate={handleNavigateResponse}
+					onClose={handleCloseResponseViewer}
+					sessionName={activeSession?.name}
+					enableBionifyReadingMode={bionifyReadingMode}
+				/>
+			</div>
 		</div>
 	);
 }

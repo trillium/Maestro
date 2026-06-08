@@ -34,6 +34,7 @@ export type {
 	Session,
 	SessionState,
 	InputMode,
+	GroupInfo,
 	UseSessionsOptions,
 	UseSessionsReturn,
 } from './useSessions';
