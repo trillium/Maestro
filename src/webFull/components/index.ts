@@ -69,3 +69,4 @@ export { SessionListItem, stateToStatus } from './SessionListItem';
 export type { SessionListItemProps } from './SessionListItem';
 export { DeleteWorktreeModal } from './DeleteWorktreeModal';
 export { DeleteAgentConfirmModal } from './DeleteAgentConfirmModal';
+export { HistoryHelpModal } from './HistoryHelpModal';
