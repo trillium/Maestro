@@ -90,4 +90,19 @@ export const registry: Record<string, ComponentAdapter> = {
 	TabBar: {
 		load: () => import('./adapters/TabBar.adapter').then((m) => m.default),
 	},
+	RenameTabModal: {
+		load: () => import('./adapters/RenameTabModal.adapter').then((m) => m.default),
+	},
+	ResetTasksConfirmModal: {
+		load: () => import('./adapters/ResetTasksConfirmModal.adapter').then((m) => m.default),
+	},
+	PlaybookDeleteConfirmModal: {
+		load: () => import('./adapters/PlaybookDeleteConfirmModal.adapter').then((m) => m.default),
+	},
+	DeleteWorktreeModal: {
+		load: () => import('./adapters/DeleteWorktreeModal.adapter').then((m) => m.default),
+	},
+	DeleteGroupChatModal: {
+		load: () => import('./adapters/DeleteGroupChatModal.adapter').then((m) => m.default),
+	},
 };
