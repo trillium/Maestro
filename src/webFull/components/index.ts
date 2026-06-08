@@ -120,3 +120,5 @@ export type {
 	QueuedItem as QueuedItemsListItem,
 	QueuedItemType as QueuedItemsListItemType,
 } from './QueuedItemsList';
+export { ShortcutEditor } from './ShortcutEditor';
+export type { ShortcutEditorProps } from './ShortcutEditor';
