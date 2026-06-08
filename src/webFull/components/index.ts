@@ -130,3 +130,6 @@ export { ParticipantCard } from './ParticipantCard';
 export { MergeProgressOverlay } from './MergeProgressOverlay';
 export type { MergeProgressOverlayProps } from './MergeProgressOverlay';
 export { ThinkingStatusPill } from './ThinkingStatusPill';
+export { SummarizeProgressOverlay } from './SummarizeProgressOverlay';
+export type { SummarizeProgressOverlayProps } from './SummarizeProgressOverlay';
+export { AutoRunLightbox } from './AutoRunLightbox';
