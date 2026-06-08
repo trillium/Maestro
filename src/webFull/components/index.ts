@@ -152,6 +152,8 @@ export { AICommandsPanel } from './AICommandsPanel';
 export { AutoRunDocumentSelector } from './AutoRunDocumentSelector';
 export type { DocTreeNode, DocumentTaskCount } from './AutoRunDocumentSelector';
 export { AutoRunExpandedModal } from './AutoRunExpandedModal';
+export { AutoRun } from './AutoRun';
+export type { AutoRunHandle } from './AutoRun';
 export { SendToAgentModal } from './SendToAgentModal';
 export type {
 	SendToAgentModalProps,
