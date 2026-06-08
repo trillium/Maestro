@@ -8,7 +8,7 @@
 		"resolveJsonModule": true,
 		"strict": false,
 		"noImplicitAny": false,
-		"outDir": "dist/server",
+		"outDir": "dist",
 		"rootDir": "src",
 		"declaration": false,
 		"sourceMap": true,

@@ -78,7 +78,10 @@ const groupsStore = new FileStore<{ groups: StoredGroup[] }>({
 });
 
 // Persistent token: stored in settings if present, otherwise ephemeral per boot.
-let securityToken = settingsStore.get<string>('webAuthToken', '');
+// FileStore's generic-V overload is shadowed by the keyof-T overload when T is
+// Record<string, unknown>, so the result widens to `unknown`. Cast at the call
+// site rather than redesigning the overload set.
+let securityToken = settingsStore.get<string>('webAuthToken', '') as string;
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 if (!securityToken || !UUID_V4_REGEX.test(securityToken)) {
 	securityToken = randomUUID();
@@ -192,7 +195,7 @@ server.setGetSessionDetailCallback((sessionId: string, tabId?: string) => {
 });
 
 server.setGetThemeCallback(() => {
-	const themeId = settingsStore.get<string>('activeThemeId', 'dracula');
+	const themeId = settingsStore.get<string>('activeThemeId', 'dracula') as string;
 	return getThemeById(themeId);
 });
 
