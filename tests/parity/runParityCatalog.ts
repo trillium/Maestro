@@ -112,8 +112,34 @@ async function assertHasText(
 	if (value === undefined) {
 		throw new Error(`[${storyName}] hasText assertion missing 'value' (target=${target})`);
 	}
-	const locator = page.locator(target).first();
-	await expect(locator, `[${storyName}] expected text "${value}" inside ${target}`).toContainText(
+	// `hasText` semantics per WEB_PARITY_VERIFICATION: "some element
+	// matching the selector contains this text". The previous `.first()`
+	// → `toContainText` shape took the FIRST match in document order and
+	// asserted against IT — which yielded a false negative whenever the
+	// catalog's selector was broad enough to catch several candidates and
+	// the first candidate happened not to be the one carrying the text.
+	// Surfaced by the batch-2 adoption wave (GroupChatHeader's
+	// `stop-all-surfaces-when-active` story uses `target: 'button'` and
+	// the first button is the icon-only Rename; the Stop All button is
+	// later in DOM order). The catalog assertion's INTENT is "some button
+	// contains the text Stop All" — which is what
+	// `.filter({ hasText: value }).first()` expresses directly.
+	//
+	// `filter({ hasText })` matches any element whose text content includes
+	// the value substring; selecting `.first()` after the filter keeps the
+	// document-order tiebreak. If NO element matches, the count is zero
+	// and `toBeAttached` fails with a clear "expected at least one" diag —
+	// strictly stronger than the prior "first element's text != value"
+	// shape (which would falsely report a mismatch when the right element
+	// existed elsewhere). The `toContainText` follow-up is now a
+	// belt-and-braces sanity check; `toBeAttached` is the load-bearing
+	// assertion.
+	const haystack = page.locator(target).filter({ hasText: value }).first();
+	await expect(
+		haystack,
+		`[${storyName}] expected some "${target}" to contain text "${value}"`
+	).toBeAttached({ timeout: 2000 });
+	await expect(haystack, `[${storyName}] expected text "${value}" inside ${target}`).toContainText(
 		value,
 		{ timeout: 2000 }
 	);
