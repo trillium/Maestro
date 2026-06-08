@@ -96,3 +96,4 @@ export { WelcomeContent } from './WelcomeContent';
 export { CollapsibleJsonViewer } from './CollapsibleJsonViewer';
 export { MarkdownRenderer, CodeBlockWithCopy } from './MarkdownRenderer';
 export type { CodeBlockWithCopyProps, MarkdownRendererProps } from './MarkdownRenderer';
+export { GroupChatHeader } from './GroupChatHeader';
