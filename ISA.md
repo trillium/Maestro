@@ -185,6 +185,7 @@ Every feature ported into `src/webFull/` gets a parity catalog at `src/webFull/<
 - [ ] ISC-44.layer-4.1.tour_markers: `data-tour` markers + hamburger-menu tour state. Currently DEFERRED.
 - [ ] ISC-44.layer-4.1.jump_numbers: 1-9 / 0 keyboard shortcuts for "jump to N-th visible session". Currently DEFERRED.
 - [ ] ISC-44.layer-4.1.wand_sparkle: "Busy" sparkle animation on the brand-header wand icon when any session is busy. Currently DROPPED (cosmetic, no browser equivalent without porting the renderer's CSS keyframes — re-scope to DEFERRED if visual parity demands).
+- [x] ISC-44.layer-2.5.playbook_delete_confirm: `PlaybookDeleteConfirmModal` parity catalog passes against both Electron and webFull, ≥3 stories, including ≥1 negative-path story per happy-path story. **CLOSED 2026-06-08** on branch `leaf-playbook-delete-confirm`. Source (`src/renderer/components/PlaybookDeleteConfirmModal.tsx`, 70 LOC) lifted verbatim to `src/webFull/components/PlaybookDeleteConfirmModal.tsx` with the standard L2.4 import-path adjustments (`Theme` → `../../shared/theme-types`; `MODAL_PRIORITIES` → `../constants/modalPriorities` re-export). 0 IPC, 0 Electron APIs, 0 `src/main/` touches. Direct sibling of the L2.4 `PlaybookNameModal` lift; same ConfirmModal-shape composition over Modal + ModalFooter. Catalog ships 5 stories (3 happy + 2 negative) honouring the brief's "≥3 happy + ≥1 negative-path per happy" floor.
 
 ## Features
 
@@ -1864,3 +1865,60 @@ Every other `/api/*` route returns a `timestamp`-stamped object — the wrap mat
 - **ISC-44.display.font_family, client-half:** OPEN (next follow-on). webFull's `src/webFull/components/Settings/tabs/DisplayTab.tsx` still shows the fontFamily picker as a deferral in the "Coming in subsequent layers" panel. The follow-on agent will: (a) add a `useDetectedFonts()` hook in `src/webFull/hooks/` reading `GET /api/fonts/detected` (returns `{ fonts: string[], loading, error }` with single-flight caching across the modal lifetime); (b) wire the hook into a font-family `<select>` in `DisplayTab.tsx` replacing the deferral entry; (c) remove the deferral line from the panel; (d) flip ISC-44.display.font_family from "server-half CLOSED" to fully CLOSED in this ISA. Parity catalog stories for the webFull port land in `src/webFull/components/Settings/tabs/DisplayTab.parity.test.ts` per the L3.1 pattern.
 - **Custom-font management:** OPEN, deferred. The original ISC-44.display.font_family line bundled "fontFamily picker + custom-font management" into one entry, but custom-font upload + storage is a meaningfully larger surface (multipart upload, on-disk font cache, IPC for font registration on the renderer side). The renderer side doesn't have it either — `fonts:detect` only enumerates system fonts. Calling this out explicitly: the closure here covers the system-font enumeration half; custom-font management is its own follow-on under a future ISC-44.display.custom_font_management entry. This was flagged in the brief as "if the Electron implementation reaches into Electron-specific APIs that don't translate (unlikely for font detection but possible for some custom-font management flows), flag as 'client-half DEFERRED' — don't try to port the un-portable part." Status: nothing un-portable, custom-font management simply doesn't exist on either side yet.
 - **No new dependencies, no new env vars, no new build steps.** The port reuses existing `child_process` (Node stdlib) and the on-PATH `fc-list` binary (system fontconfig — ships by default on macOS and essentially every Linux distribution). Fallback list activates if `fc-list` is absent. Verified the curl probe returned 459 fonts on the host system (macOS Darwin 25.3.0, fc-list at `/opt/homebrew/bin/fc-list`).
+### 2026-06-08 — Layer 2.5 evidence (leaf-parade batch item #1 — PlaybookDeleteConfirmModal lift)
+
+Branch `leaf-playbook-delete-confirm` off `main @ 1dd700749`. First entry of the L2.5 leaf-parade per the Architect plan-reeval-3 audit. Lifts `src/renderer/components/PlaybookDeleteConfirmModal.tsx` verbatim into `src/webFull/components/` and ships a parity catalog.
+
+#### Decisions
+
+1. **`PlaybookDeleteConfirmModal.tsx` — verbatim lift, theme-prop pattern continued.** Source (`src/renderer/components/PlaybookDeleteConfirmModal.tsx`, 70 LOC) is a pure Modal/ModalFooter consumer with a destructive button posture. Pre-flight: `grep "window\.maestro"` → empty; `grep -E "(dialog|shell:|devtools:|power:|tunnel:|clipboard:|fonts:|notification:show)"` → empty; `grep "import.*from.*electron"` → empty. Lifted with the two standard import-path adjustments inherited from the L2.4 lifts: `Theme` from `'../types'` → `'../../shared/theme-types'`; `MODAL_PRIORITIES` resolved via the existing webFull re-export at `src/webFull/constants/modalPriorities.ts` (per Architect 2026-06-08 audit risk A — non-divergent constants stay re-exported from renderer to prevent silent drift). Modal + ModalFooter imports against the L2.1 lifted primitives. Theme access pattern: kept the renderer's `theme: Theme` prop convention, matching L2.1's policy and the L2.4 sibling lifts (ResetTasksConfirmModal, PlaybookNameModal). `AlertTriangle` + `Trash2` from `lucide-react` are already transitive deps used by Settings/ConfirmModal/L2.1 Modal.
+
+2. **Direct sibling of the L2.4 `PlaybookNameModal` lift.** Same ConfirmModal-shape composition over `Modal` + `ModalFooter`, same prop-threaded theme, same modality settings (`blocksLowerLayers: true`, `capturesFocus: true`, `focusTrap: 'strict'`). The only meaningful surface diff is `destructive: true` + an explicit `zIndex: 10000` on the destructive modal (top-of-stack semantics for destructive confirms — preserved verbatim from the renderer).
+
+3. **No barrel split needed; index.ts gets a new L2.5 section.** The lift composes only `Modal` + `ModalFooter` from `./ui/Modal`, mirroring the L2.4 `ResetTasksConfirmModal` import shape. No `./ui` barrel was needed in the source; the webFull lift keeps the direct `./ui/Modal` import. The `index.ts` barrel gets a new `Layer 2.5 leaf-parade primitives` header re-exporting `PlaybookDeleteConfirmModal`, matching the L2.4 header convention.
+
+#### Files added
+
+- `src/webFull/components/PlaybookDeleteConfirmModal.tsx` (~90 LOC including extended header — verbatim lift of the 70-LOC source).
+- `src/webFull/components/PlaybookDeleteConfirmModal.parity.test.ts` (5 stories: 3 happy + 2 negative; 6 catalog-shape vitest guards).
+- This ISA append.
+
+#### Files modified (additive only)
+
+- `src/webFull/components/index.ts` — appended Layer 2.5 section re-exporting `PlaybookDeleteConfirmModal`. No prior exports changed.
+- `ISA.md` — appended this evidence block; flipped `ISC-44.layer-2.5.playbook_delete_confirm` from a new entry directly to `[x]` CLOSED at the per-feature ISC list.
+
+#### Files NOT touched
+
+- `src/web/` — `git diff main..HEAD -- src/web/ | wc -c` → `0` (upstream-mirror web tree untouched).
+- `src/renderer/` — `git diff main..HEAD -- src/renderer/ | wc -c` → `0` (renderer is bias-away).
+- `src/main/` — `git diff main..HEAD -- src/main/ | wc -c` → `0` (no new server routes — this is a purely visual leaf lift).
+- `src/server/` — `git diff main..HEAD -- src/server/ | wc -c` → `0`.
+
+#### Verification
+
+- **0-IPC + 0-Electron-API confirmation:**
+  - `grep "window\.maestro" src/renderer/components/PlaybookDeleteConfirmModal.tsx` → empty.
+  - `grep -E "(dialog|shell:|devtools:|power:|tunnel:|clipboard:|fonts:|notification:show)" src/renderer/components/PlaybookDeleteConfirmModal.tsx` → empty.
+  - `grep "import.*from.*electron" src/renderer/components/PlaybookDeleteConfirmModal.tsx` → empty.
+  - Transitive deps: `Modal`, `ModalFooter` re-checked clean during L2.1; `lucide-react` (`AlertTriangle`, `Trash2`) has no Electron surface.
+- **Pre-flight (from the lift template):** Tailwind glob includes `'./src/webFull/**/*.{js,ts,jsx,tsx}'`; `LayerStackProvider` mounted at `src/webFull/App.tsx`; `src/webFull/components/ui/Modal.tsx` present.
+- **Lint:** `npm run lint` → exits with a single pre-existing `TS2307` error on `src/prompts/index.ts:51` (`Cannot find module '../generated/prompts'`) that reproduces on `main` at HEAD `1dd700749` before this branch was created. No new lint diagnostics introduced by this layer.
+- **Parity test:** `npx vitest run src/webFull/components/PlaybookDeleteConfirmModal.parity.test.ts` → `Test Files 1 passed (1); Tests 6 passed (6)` in ~450 ms. Catalog declares 5 stories total (3 happy + 2 negative ≥ the brief's "≥3 happy + ≥1 negative-path per happy" minimum), uses only the allowed assertion vocabulary (`hasElement`, `hasText`, `wsFrameMatches`, `dbHasRow`, `fsHas`, `processHas`, `notificationFired`, `broadcast`), and passes the IPC-leakage guard.
+- **Sibling co-pass check:** `npx vitest run src/webFull/components/PlaybookDeleteConfirmModal.parity.test.ts src/webFull/components/PlaybookNameModal.parity.test.ts` → `Test Files 2 passed (2); Tests 12 passed (12)` — no regression in the L2.4 sibling catalog.
+- **Symlink hygiene:** `node_modules` symlink to `/Users/trilliumsmith/code/maestro/node_modules` was created for the build/test run; ignored by `.gitignore` and not committed.
+
+#### Scope checks (post-write, pre-commit)
+
+- Working-tree changes for this layer (before commit):
+  - `M  src/webFull/components/index.ts`
+  - `?? src/webFull/components/PlaybookDeleteConfirmModal.parity.test.ts`
+  - `?? src/webFull/components/PlaybookDeleteConfirmModal.tsx`
+  - `M  ISA.md` (this block + the new ISC-44.layer-2.5.playbook_delete_confirm checkbox line)
+- All authorized: NEW files under `src/webFull/`, the additive append to `src/webFull/components/index.ts`, plus the append-only `ISA.md` block + ISC checkbox.
+- No edits to `src/main/`, `src/web/`, `src/renderer/`, `src/server/`.
+
+#### Deferred / out-of-scope for this brief
+
+- Lifting consumers (the playbook list view that would actually wire this modal into the webFull tree) — that has transitive store / IPC dependencies and is downstream-layer scope.
+- The next leaf-parade batch items beyond #1 — each lands as its own branch + ISA append.
