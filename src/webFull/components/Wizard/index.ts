@@ -11,3 +11,9 @@ export { WizardExitConfirmModal } from './WizardExitConfirmModal';
 export { ExistingAutoRunDocsModal } from './ExistingAutoRunDocsModal';
 export { ScreenReaderAnnouncement, useAnnouncement } from './ScreenReaderAnnouncement';
 export type { AnnouncementPoliteness } from './ScreenReaderAnnouncement';
+
+// Phase 2 medium-IPC lifts
+export { WizardResumeModal } from './WizardResumeModal';
+export { DocumentEditor } from './shared/DocumentEditor';
+export type { DocumentEditorProps } from './shared/DocumentEditor';
+export { PhaseReviewScreen } from './screens/PhaseReviewScreen';
