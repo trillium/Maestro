@@ -69,6 +69,16 @@ import type {
 //   - QuitConfirmModal (debug trigger via keyboard chord)
 //   - FileSearchModal (debug trigger via keyboard chord)
 //
+// Mount-wave 2 (2026-06-08, this commit) extends the same pattern with:
+//   - NewInstanceModal (Cmd+Shift+N triggers; 9 strip-and-promoted props
+//     stubbed with safe defaults — no real session creation yet)
+//   - MarketplaceModal (Cmd+Shift+M triggers; wires `useMarketplace()` for
+//     real playbook listing + SSE-driven import)
+//   - SettingsModal (Cmd+, triggers; OS-canonical Settings shortcut, modal
+//     already self-contained via `useSettings()`)
+//   - AgentErrorModal (Cmd+Alt+E triggers; synthetic stub AgentError to
+//     prove the surface is reachable until structured-error WS frames ship)
+//
 // Host-data wiring intentionally minimal: gate state lives via `useModalGate`,
 // data values default to safe placeholders where the host doesn't yet
 // surface them. The point is to close the trigger gap so the surface is
@@ -84,9 +94,16 @@ import {
 	HistoryHelpModal,
 	QuitConfirmModal,
 	FileSearchModal,
+	NewInstanceModal,
+	MarketplaceModal,
+	SettingsModal,
+	AgentErrorModal,
 	type AppOverlaysStandingOvationData,
 	type AppOverlaysFirstRunCelebrationData,
+	type RecoveryAction,
 } from '../components';
+import type { AgentError } from '../../shared/types';
+import { useMarketplace } from '../hooks/useMarketplace';
 import { DEFAULT_SHORTCUTS, TAB_SHORTCUTS } from '../../renderer/constants/shortcuts';
 import type { Session, LastResponsePreview } from '../hooks/useSessions';
 // View state utilities are now accessed through useMobileViewState hook
@@ -373,6 +390,17 @@ export default function MobileApp() {
 	const historyHelpGate = useModalGate();
 	const quitConfirmGate = useModalGate();
 	const fileSearchGate = useModalGate();
+
+	// ====================================================================
+	// Audit #10 mount-wave 2 — additional gate state for newly-mounted
+	// high-impact modals (NewInstanceModal, MarketplaceModal, SettingsModal,
+	// AgentErrorModal). Same `useModalGate()` primitive as wave 1; the
+	// debug-keybinding wiring below routes each gate to a `show()` call.
+	// ====================================================================
+	const newInstanceGate = useModalGate();
+	const marketplaceGate = useModalGate();
+	const settingsGate = useModalGate();
+	const agentErrorGate = useModalGate();
 
 	// AppOverlays trio — data sources. `null` means "do not render this overlay".
 	// Host-data wiring TODO: surface these from the modal-store / settings-store
@@ -1156,6 +1184,39 @@ export default function MobileApp() {
 					fileSearchGate.show();
 					return;
 				}
+				// Mount-wave 2 debug keybindings ----------------------------------
+				// Cmd+Shift+N → NewInstanceModal (renderer-canonical is Cmd+N for
+				// `newInstance`, but Cmd+N collides with the browser's
+				// "new window" — Cmd+Shift+N is the safe webFull-debug variant).
+				if (e.shiftKey && (e.key === 'N' || e.key === 'n')) {
+					e.preventDefault();
+					newInstanceGate.show();
+					return;
+				}
+				// Cmd+Shift+M → MarketplaceModal. No renderer-canonical shortcut
+				// (renderer surfaces the marketplace via an explicit button), so
+				// Cmd+Shift+M is a webFull-debug pick.
+				if (e.shiftKey && (e.key === 'M' || e.key === 'm')) {
+					e.preventDefault();
+					marketplaceGate.show();
+					return;
+				}
+				// Cmd+, → SettingsModal. OS-canonical "open Settings" shortcut
+				// across macOS apps. The `,` key has no Shift requirement.
+				if (!e.shiftKey && !e.altKey && e.key === ',') {
+					e.preventDefault();
+					settingsGate.show();
+					return;
+				}
+				// Cmd+Alt+E → AgentErrorModal (debug only). Real surface fires
+				// when an agent emits a structured AgentError; until that wiring
+				// lands, the debug trigger mounts a synthetic stub so the
+				// surface is reachable for visual / parity verification.
+				if (e.altKey && (e.key === 'e' || e.key === 'E' || e.key === '´')) {
+					e.preventDefault();
+					agentErrorGate.show();
+					return;
+				}
 				// Cmd+Alt+F → first run celebration (debug)
 				if (e.altKey && (e.key === 'f' || e.key === 'F' || e.key === 'ƒ')) {
 					e.preventDefault();
@@ -1177,7 +1238,17 @@ export default function MobileApp() {
 
 		window.addEventListener('keydown', handler);
 		return () => window.removeEventListener('keydown', handler);
-	}, [shortcutsHelpGate, autoRunnerHelpGate, historyHelpGate, quitConfirmGate, fileSearchGate]);
+	}, [
+		shortcutsHelpGate,
+		autoRunnerHelpGate,
+		historyHelpGate,
+		quitConfirmGate,
+		fileSearchGate,
+		newInstanceGate,
+		marketplaceGate,
+		settingsGate,
+		agentErrorGate,
+	]);
 
 	// Derive ContextWarningSash threshold inputs from the active tab's usage
 	// stats — same formula MobileHeader already uses. Render the sash only
@@ -1405,6 +1476,147 @@ export default function MobileApp() {
 			thinkingStartTime: activeSession.thinkingStartTime ?? undefined,
 		} as RendererSession;
 	}, [activeSession, sessionLogs]);
+
+	// ====================================================================
+	// Audit #10 mount-wave 2 — host wiring for newly-mounted modals
+	// ====================================================================
+	//
+	// NewInstanceModal needs a small fan-out of stubbed callbacks because
+	// the renderer modal's IPC sites were strip-and-promoted to props per
+	// the L2.5 lift policy. Until the host writers ship (per the W3-agents
+	// posture — agents config CRUD is deferred), every promoted prop is
+	// stubbed with an inert default that logs through `webLogger` so it's
+	// visible in the observability path. None of the stubs throw — the
+	// modal renders, the user can fill the form, the host just doesn't
+	// persist anything. Host-data TODO comments mark each wiring site for
+	// the next wave.
+	//
+	// MarketplaceModal wires the `useMarketplace()` browser-runtime hook
+	// for the playbook listing / SSE / import path. The folder-picker
+	// callback is stubbed (web has no native folder-picker; the affordance
+	// hides per the lift policy's `hasFolderPicker` gate).
+	//
+	// SettingsModal mounts via the local gate — no host props needed; the
+	// modal owns its own tab state and the tab bodies thread through the
+	// existing `useSettings()` hook.
+	//
+	// AgentErrorModal mounts a synthetic stub `AgentError` + `RecoveryAction`
+	// when the debug keybinding fires. Real surface lands when WS frames
+	// for structured agent errors get wired through the parent agent-error
+	// handler — for now this proves the modal renders, the recovery action
+	// dispatches, and the LayerStack Escape handling works.
+
+	// NewInstanceModal: host-data callbacks (all stubbed; none persist) -----
+	const newInstanceAgentConfigs = useMemo<Record<string, Record<string, any>>>(() => ({}), []);
+	const newInstanceAvailableModels = useMemo<Record<string, string[]>>(() => ({}), []);
+	const handleNewInstanceConfigSave = useCallback(
+		async (agentId: string, _config: Record<string, any>) => {
+			// host-data TODO: wire to PATCH /api/agents/config once the W3-agents
+			// write sub-surface ships. Until then the save is a no-op observable
+			// via the webFull logger transport.
+			webLogger.warn(
+				`[NewInstanceModal] onAgentConfigSave stub fired for agent=${agentId} (no persistence yet)`,
+				'Mobile'
+			);
+		},
+		[]
+	);
+	const handleNewInstanceRefreshModels = useCallback(
+		async (agentId: string, _forceRefresh: boolean) => {
+			// host-data TODO: thread `agents.getModels` once the host model
+			// discovery flow ships. Renderer parity allows this to be a no-op
+			// without crashing — AgentConfigPanel degrades to text-input.
+			webLogger.warn(
+				`[NewInstanceModal] onRefreshModels stub fired for agent=${agentId} (no models source yet)`,
+				'Mobile'
+			);
+		},
+		[]
+	);
+	const handleNewInstanceRemotePathValidate = useCallback(
+		async (
+			_path: string,
+			_sshRemoteId: string
+		): Promise<{ valid: boolean; isDirectory: boolean; error?: string }> => {
+			// host-data TODO: the W3-fs route deliberately 501s on
+			// `?sshRemoteId=`; either Electron IPC or a future remote-aware
+			// route needs to fulfill this. Returning `valid: false` keeps the
+			// indicator inert without blocking creation (renderer comment:
+			// "Remote path validation is informational only").
+			return { valid: false, isDirectory: false };
+		},
+		[]
+	);
+	const handleNewInstanceFolderPick = useCallback(async (): Promise<string | null> => {
+		// host-data TODO: web has no native folder-picker. When the host
+		// wires a webFull file-picker overlay this becomes a real call;
+		// returning null leaves the input unchanged.
+		webLogger.warn('[NewInstanceModal] onFolderPick stub fired (no picker surface yet)', 'Mobile');
+		return null;
+	}, []);
+	const handleNewInstanceCreate = useCallback(
+		(agentId: string, workingDir: string, name: string, ..._rest: any[]) => {
+			// host-data TODO: wire to the create-session WS frame
+			// (`type: 'create_session'`) once the server-side surface accepts
+			// the full agent + customPath + customArgs + ssh-remote shape.
+			// Today's webFull WS protocol only carries a thin create-session
+			// frame; the rich shape needs a follow-up brief.
+			webLogger.warn(
+				`[NewInstanceModal] onCreate stub fired (agent=${agentId} name=${name} cwd=${workingDir}) — no session created`,
+				'Mobile'
+			);
+			newInstanceGate.hide();
+		},
+		[newInstanceGate]
+	);
+
+	// MarketplaceModal: useMarketplace() browser-runtime hook + stubs --------
+	const marketplaceHook = useMarketplace();
+	const handleMarketplaceImportComplete = useCallback(
+		(folderName: string) => {
+			webLogger.info(`[MarketplaceModal] import complete (folder=${folderName})`, 'Mobile');
+			marketplaceGate.hide();
+		},
+		[marketplaceGate]
+	);
+	const handleMarketplaceFolderPick = useCallback(async (): Promise<string | null> => {
+		// host-data TODO: same picker gap as NewInstanceModal.
+		webLogger.warn('[MarketplaceModal] onFolderPick stub fired (no picker surface yet)', 'Mobile');
+		return null;
+	}, []);
+	// Reference the marketplace hook so the import side-effects (cache hydration,
+	// SSE listeners) initialize. The modal itself owns the visual surface and
+	// re-calls the hook internally; we mainly hold the reference to avoid the
+	// "unused" lint and document the runtime port.
+	void marketplaceHook;
+
+	// AgentErrorModal: synthetic debug stub ----------------------------------
+	const syntheticAgentError = useMemo<AgentError>(
+		() => ({
+			type: 'agent_crashed',
+			message:
+				'Debug stub agent error. Real surface fires on structured AgentError WS frames; this proves the modal renders.',
+			recoverable: true,
+			agentId: activeSession?.toolType ?? 'claude-code',
+			sessionId: activeSession?.id,
+			timestamp: Date.now(),
+		}),
+		[activeSession?.toolType, activeSession?.id]
+	);
+	const syntheticRecoveryActions = useMemo<RecoveryAction[]>(
+		() => [
+			{
+				id: 'dismiss',
+				label: 'Dismiss',
+				primary: true,
+				onClick: () => {
+					webLogger.info('[AgentErrorModal] dismiss (debug stub)', 'Mobile');
+					agentErrorGate.hide();
+				},
+			},
+		],
+		[agentErrorGate]
+	);
 
 	// Determine content based on connection state
 	const renderContent = () => {
@@ -1996,6 +2208,87 @@ export default function MobileApp() {
 							fileSearchGate.hide();
 						}}
 						onClose={fileSearchGate.hide}
+					/>
+				)}
+
+				{/* ============================================================ */}
+				{/* Audit #10 mount-wave 2 — NewInstanceModal, MarketplaceModal,  */}
+				{/* SettingsModal, AgentErrorModal                                */}
+				{/* ============================================================ */}
+
+				{/* NewInstanceModal — Cmd+Shift+N triggers (debug).               */}
+				{/* All 9 strip-and-promoted props are stubbed with safe defaults  */}
+				{/* per the wave-2 brief: empty `agentConfigs` / `availableModels` */}
+				{/* maps, no-op `onAgentConfigSave` / `onRefreshModels`, a `valid: */}
+				{/* false` `onRemotePathValidate`, and a `null` `onFolderPick`.    */}
+				{/* `existingSessions` is `[]` because the webFull Session shape   */}
+				{/* differs from the renderer Session shape the modal expects;     */}
+				{/* shape impedance + the no-op `onCreate` keep this strictly a    */}
+				{/* reachability proof, not a real session-creation flow. The     */}
+				{/* lifted modal does not crash with `[]` (validateNewSession      */}
+				{/* iterates and dedup-checks — an empty array is the trivial     */}
+				{/* "no conflicts" case). Host-data TODO: thread real sessions     */}
+				{/* + wire `onCreate` to the create-session WS frame.              */}
+				{newInstanceGate.open && (
+					<NewInstanceModal
+						isOpen={newInstanceGate.open}
+						onClose={newInstanceGate.hide}
+						onCreate={handleNewInstanceCreate}
+						theme={theme}
+						existingSessions={[]}
+						agentConfigs={newInstanceAgentConfigs}
+						availableModels={newInstanceAvailableModels}
+						onRefreshModels={handleNewInstanceRefreshModels}
+						onAgentConfigSave={handleNewInstanceConfigSave}
+						onFolderPick={handleNewInstanceFolderPick}
+						onRemotePathValidate={handleNewInstanceRemotePathValidate}
+					/>
+				)}
+
+				{/* MarketplaceModal — Cmd+Shift+M triggers (debug). Wires the     */}
+				{/* `useMarketplace()` browser-runtime port for the playbook       */}
+				{/* listing + SSE-driven cache. `autoRunFolderPath` is empty       */}
+				{/* (host doesn't yet thread an AutoRun folder path on webFull);   */}
+				{/* `sessionId` falls back to the active session id when present.  */}
+				{/* `sshRemoteId` intentionally omitted — the headless server      */}
+				{/* import path 500s on SSH remotes (W3-marketplace posture).      */}
+				{/* `onFolderPick` is stubbed (web has no native folder picker —   */}
+				{/* the browse button hides per the lift policy's gating).         */}
+				{marketplaceGate.open && (
+					<MarketplaceModal
+						theme={theme}
+						isOpen={marketplaceGate.open}
+						onClose={marketplaceGate.hide}
+						autoRunFolderPath=""
+						sessionId={activeSessionId ?? ''}
+						onImportComplete={handleMarketplaceImportComplete}
+						onFolderPick={handleMarketplaceFolderPick}
+					/>
+				)}
+
+				{/* SettingsModal — Cmd+, triggers (OS-canonical Settings        */}
+				{/* shortcut). The modal already wraps the three lifted tab        */}
+				{/* bodies (GeneralTab, DisplayTab, ShortcutsTab) and threads      */}
+				{/* their state through `useSettings()` internally. No host-data   */}
+				{/* TODO — this surface is complete on the webFull side.           */}
+				{settingsGate.open && (
+					<SettingsModal isOpen={settingsGate.open} onClose={settingsGate.hide} theme={theme} />
+				)}
+
+				{/* AgentErrorModal — Cmd+Alt+E triggers (debug). Real surface     */}
+				{/* fires when the agent emits a structured AgentError WS frame.   */}
+				{/* Until that handler ships, the debug trigger mounts a synthetic */}
+				{/* `agent_crashed` error + a single "Dismiss" recovery action so  */}
+				{/* the modal's chrome (error-color icon, JSON-details affordance, */}
+				{/* primary action focus) is reachable for visual / parity check.  */}
+				{agentErrorGate.open && (
+					<AgentErrorModal
+						theme={theme}
+						error={syntheticAgentError}
+						agentName={activeSession?.toolType}
+						sessionName={activeSession?.name}
+						recoveryActions={syntheticRecoveryActions}
+						onDismiss={agentErrorGate.hide}
 					/>
 				)}
 			</div>

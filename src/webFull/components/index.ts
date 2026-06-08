@@ -198,3 +198,15 @@ export type { MarketplaceModalProps } from './MarketplaceModal';
 
 export { NewInstanceModal, EditAgentModal } from './NewInstanceModal';
 export type { RemotePathValidate, RemotePathValidateResult } from './NewInstanceModal';
+
+// ============================================================================
+// Audit #10 mount-wave 2 — SettingsModal surface re-export
+// ============================================================================
+//
+// SettingsModal was lifted as part of Layer 3.1/3.2 but never wired through
+// the public `components/` barrel. Mount-wave 2 wires it into mobile/App.tsx
+// behind a Cmd+, debug keybinding; this re-export lets the host import it
+// alongside the rest of the barrel rather than reaching into the nested
+// `./Settings/SettingsModal` path.
+export { SettingsModal } from './Settings/SettingsModal';
+export type { SettingsModalProps, SettingsTabId } from './Settings/SettingsModal';
