@@ -18,6 +18,7 @@ import { useNotifications } from '../hooks/useNotifications';
 import { useUnreadBadge } from '../hooks/useUnreadBadge';
 import { useOfflineQueue } from '../hooks/useOfflineQueue';
 import { useMobileSessionManagement } from '../hooks/useMobileSessionManagement';
+import { publishSettingsChanged } from '../hooks/useSettings';
 import { useOfflineStatus, useMaestroMode, useDesktopTheme } from '../main';
 import { buildApiUrl } from '../utils/config';
 import { formatCost } from '../../shared/formatters';
@@ -492,6 +493,29 @@ export default function MobileApp() {
 		persistSessionSelection({ activeSessionId, activeTabId });
 	}, [activeSessionId, activeTabId, persistSessionSelection]);
 
+	// ISC-44.global.settings_broadcast — spread sessionsHandlers and add the
+	// settings_changed handler. Routes the WS frame to the module-level event
+	// bus in useSettings.ts so every active useSettings() hook (across all
+	// Settings tabs) receives the patch and merges into its local state.
+	// Last-writer-wins per ISA Principle 2.
+	const wsHandlers = useMemo(
+		() => ({
+			...sessionsHandlers,
+			onSettingsChanged: (
+				changedKeys: string[],
+				newValues: Record<string, unknown>,
+				timestamp: number
+			) => {
+				webLogger.debug(
+					`[App] Settings changed: keys=[${changedKeys.join(',')}]`,
+					'Mobile'
+				);
+				publishSettingsChanged(changedKeys, newValues, timestamp);
+			},
+		}),
+		[sessionsHandlers]
+	);
+
 	const {
 		state: connectionState,
 		connect,
@@ -500,7 +524,7 @@ export default function MobileApp() {
 		reconnectAttempts,
 	} = useWebSocket({
 		autoReconnect: false, // Only retry manually via the retry button
-		handlers: sessionsHandlers,
+		handlers: wsHandlers,
 	});
 
 	// Update wsSendRef after WebSocket is initialized (for session management hook)

@@ -121,6 +121,37 @@ const processManagerAdapter = new ServerProcessManagerAdapter((sessionId) => {
 
 const server = new WebServer(port, securityToken);
 
+// ============ ISC-44.global.settings_broadcast (closes plan-reeval-1 N2) ============
+//
+// Layer 3.1 added GET/PATCH /api/settings against a FileStore-backed provider
+// but stopped short of broadcasting the change to other connected browsers.
+// `WEB_PORT_ORDER.md` L3.2 and `ISA.md` ISC-14 both promised a `settings:changed`
+// WS broadcast. Without it, two browsers desync on settings until reload.
+//
+// Wire-up: the PATCH route is backed by `apiRoutes.ts`'s default FileStore
+// provider (same `maestro-settings.json` shape as `settingsStore` above; the
+// headless server has not yet called registerSettingsProvider explicitly,
+// and the default path is correct for this server's data directory). We
+// register a callback the route invokes AFTER the patch persists; the
+// callback fans out a `settings_changed` WS frame to every connected client
+// via the broadcast service.
+//
+// Fan-out (not point-to-point): the broadcast goes to every connected client
+// including the originator. The originator's hook is robust to its own echo
+// (the local state already reflects the patch, so the merge is a no-op).
+//
+// Conflict resolution (last-writer-wins per ISA Principle 2): the PATCH route
+// runs the broadcast AFTER `setSettings()` returns, so the on-disk value (and
+// therefore every client's view after the broadcast lands) reflects whoever
+// wrote last. Two simultaneous PATCHes serialize through Fastify's request
+// handler.
+server.setSettingsChangedCallback((changedKeys, newValues) => {
+	console.log(
+		`[maestro-server] settings_changed: keys=[${changedKeys.join(',')}]`
+	);
+	server.broadcastSettingsChanged(changedKeys, newValues);
+});
+
 // ============ READ callbacks (functional in headless mode) ============
 
 server.setGetSessionsCallback(() => {

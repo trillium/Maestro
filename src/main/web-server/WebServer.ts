@@ -435,6 +435,12 @@ export class WebServer {
 				this.callbackRegistry.getHistory(projectPath, sessionId),
 			getLiveSessionInfo: (sessionId) => this.liveSessionManager.getLiveSessionInfo(sessionId),
 			isSessionLive: (sessionId) => this.liveSessionManager.isSessionLive(sessionId),
+			// ISC-44.global.settings_broadcast — proxy through the late-binding
+			// invoker so a consumer that registers AFTER setupRoutes() (or
+			// re-registers later) still gets called. The invoker no-ops when
+			// no callback is registered (Electron path).
+			onSettingsChanged: (changedKeys, newValues) =>
+				this.invokeSettingsChangedCallback(changedKeys, newValues),
 		});
 		this.apiRoutes.registerRoutes(this.server);
 
@@ -558,6 +564,66 @@ export class WebServer {
 
 	broadcastCustomCommands(commands: CustomAICommand[]): void {
 		this.broadcastService.broadcastCustomCommands(commands);
+	}
+
+	/**
+	 * ISC-44.global.settings_broadcast — fan-out a settings change to every
+	 * connected web client. Delegated to the BroadcastService; wired by the
+	 * headless server's PATCH /api/settings route via the
+	 * `setSettingsChangedCallback` setter below.
+	 */
+	broadcastSettingsChanged(
+		changedKeys: string[],
+		newValues: Record<string, unknown>
+	): void {
+		this.broadcastService.broadcastSettingsChanged(changedKeys, newValues);
+	}
+
+	// ============ ISC-44.global.settings_broadcast: PATCH-side callback ============
+	//
+	// The ApiRoutes class doesn't import BroadcastService directly (kept
+	// dependency-free for testability). Instead, the headless server registers
+	// a callback here, ApiRoutes invokes it from the PATCH /api/settings
+	// handler, and this WebServer instance routes it through the broadcast
+	// service. Same callback pattern as `setGetSessionsCallback` etc.
+
+	private settingsChangedCallback:
+		| ((changedKeys: string[], newValues: Record<string, unknown>) => void)
+		| null = null;
+
+	/**
+	 * Register a callback fired by ApiRoutes after a successful
+	 * `PATCH /api/settings`. The headless server wires this to call
+	 * `broadcastSettingsChanged()`. Subsequent calls overwrite the previous
+	 * callback. Pass null to clear.
+	 */
+	setSettingsChangedCallback(
+		callback:
+			| ((changedKeys: string[], newValues: Record<string, unknown>) => void)
+			| null
+	): void {
+		this.settingsChangedCallback = callback;
+	}
+
+	/**
+	 * Internal accessor used by the route-setup path. Exposed as a getter so
+	 * `setupRoutes()` can inject the (closure-friendly) latest callback into
+	 * `apiRoutes.setCallbacks` regardless of when the consumer registers it.
+	 */
+	private invokeSettingsChangedCallback(
+		changedKeys: string[],
+		newValues: Record<string, unknown>
+	): void {
+		if (this.settingsChangedCallback) {
+			try {
+				this.settingsChangedCallback(changedKeys, newValues);
+			} catch (err) {
+				logger.warn(
+					`settingsChangedCallback threw: ${String(err)}`,
+					LOG_CONTEXT
+				);
+			}
+		}
 	}
 
 	broadcastAutoRunState(sessionId: string, state: AutoRunState | null): void {
