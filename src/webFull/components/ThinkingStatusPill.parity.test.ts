@@ -104,8 +104,8 @@ export const thinkingStatusPillParityCatalog: ParityStory[] = [
 		then: [
 			// "Tokens:" label is present
 			{ verb: 'hasText', target: 'body', value: 'Tokens:' },
-			// Formatted token count is rendered (1250 → "1.3k" via formatTokensCompact)
-			{ verb: 'hasText', target: 'body', value: '1.3k' },
+			// Formatted token count is rendered (1250 → "1.3K" via formatTokensCompact)
+			{ verb: 'hasText', target: 'body', value: '1.3K' },
 			// "Thinking..." placeholder is suppressed
 			{ verb: 'hasElement', target: 'body:not(:has-text("Thinking..."))' },
 		],

@@ -5271,3 +5271,4 @@ The rest (`react`, `lucide-react`, `react-markdown`, `rehype-slug`) resolves ide
 **Branch.** `feat/settings-store-disk-backing`. Commit pending — not pushed per the brief's "no push" rule.
 
 - 2026-06-08 /api/processes cluster: GET /api/processes, GET /api/processes/:sessionId. Pattern matches fs/agents. ISC: ISC-44.server.api_processes_cluster.
+- 2026-06-08 catalog-flaw fix wave C: 1 catalog edit — ThinkingStatusPill `'1.3k'` → `'1.3K'` to match formatTokensCompact's uppercase output.
