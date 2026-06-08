@@ -44,6 +44,10 @@ import { getDataDir } from '../shared/data-dir';
 import { ServerProcessManagerAdapter, resolveProcessId } from './process-manager-adapter';
 import * as mutator from './sessions-mutator';
 import { initSentry, captureException } from './sentry';
+import { wrapSpawnWithSsh } from '../main/utils/ssh-spawn-wrapper';
+import { createSshRemoteStoreAdapter } from '../main/utils/ssh-remote-resolver';
+import type { SshRemoteConfig } from '../shared/types';
+import type { ToolExecution } from '../main/process-manager/types';
 import { getHistoryManager } from './history-manager';
 import { RawPtyMultiplexer } from './raw-pty-multiplexer';
 import { getWakaTimeManager } from './wakatime-manager';
@@ -1045,6 +1049,136 @@ server.setCreateSessionCallback(async (request): Promise<{ sessionId: string } |
 	);
 	return { sessionId };
 });
+
+// ============ WS process-lifecycle family ============
+//
+// Umbrella Decision 2026-06-08 (`docs/ws-process-lifecycle-decision`,
+// commit `9ec71a510`). Wires the 2 Client→Server frames (process_spawn /
+// process_kill) and the 4 Server→Client emission listeners (process_data,
+// process_exit, process_thinking_chunk, process_tool_execution) against
+// the shared `processManagerAdapter.processManager` singleton — the SAME
+// instance the REST /api/processes view + the L0b write callbacks read.
+//
+// Three contract vectors enforced here:
+//   (1) SSH passthrough — `process_spawn` payload threads
+//       `sessionSshRemoteConfig` through `wrapSpawnWithSsh()` BEFORE
+//       `ProcessManager.spawn`. Mirrors the `create_session` precedent
+//       (which persists the same field for lazy-spawn).
+//   (2) `process_data` raw chunking — the listener forwards each
+//       ProcessManager `'data'` chunk verbatim, NO batching, NO newline
+//       framing. The chunk stream is identical to what the existing
+//       `session_output` broadcast at `data-listener.ts:151-159`
+//       delivers, minus the renderer-side base-session-id rewriting.
+//   (3) Optional capability flags — `'thinking-chunk'` and
+//       `'tool-execution'` listeners are always registered, but they
+//       only fire for agents that emit those events (Claude Code emits
+//       thinking-chunk; OpenCode / Codex emit tool-execution). webFull
+//       subscribers MUST optional-chain.
+//
+// SSH adapter — settingsStore satisfies `createSshRemoteStoreAdapter`'s
+// constraint because the FileStore generic `get<V>(key, defaultValue)`
+// overload accepts the `(key: 'sshRemotes', defaultValue: SshRemoteConfig[])`
+// shape the adapter requires.
+const sshStoreAdapter = createSshRemoteStoreAdapter({
+	get: (_key: 'sshRemotes', defaultValue: SshRemoteConfig[]): SshRemoteConfig[] =>
+		settingsStore.get<SshRemoteConfig[]>('sshRemotes', defaultValue),
+});
+
+server.setProcessSpawnCallback(async (request) => {
+	// Contract vector 1 — SSH passthrough. wrapSpawnWithSsh early-returns
+	// the original config when sessionSshRemoteConfig is undefined/disabled,
+	// so this single code path covers both local and remote execution.
+	let wrapped;
+	try {
+		wrapped = await wrapSpawnWithSsh(
+			{
+				command: request.command,
+				args: request.args,
+				cwd: request.cwd,
+				prompt: request.prompt,
+				customEnvVars: request.sessionCustomEnvVars,
+			},
+			request.sessionSshRemoteConfig,
+			sshStoreAdapter
+		);
+	} catch (err) {
+		console.error(
+			`[maestro-server] process_spawn ${request.sessionId}: wrapSpawnWithSsh threw`,
+			err
+		);
+		return null;
+	}
+
+	const result = processManagerAdapter.processManager.spawn({
+		sessionId: request.sessionId,
+		toolType: request.toolType,
+		cwd: wrapped.cwd,
+		command: wrapped.command,
+		args: wrapped.args,
+		prompt: wrapped.prompt,
+		shell: request.shell,
+		images: request.images,
+		customEnvVars: wrapped.customEnvVars,
+		querySource: request.querySource,
+		tabId: request.tabId,
+	});
+
+	console.log(
+		`[maestro-server] process_spawn ${request.sessionId} (toolType=${request.toolType}, ` +
+			`ssh=${wrapped.sshRemoteUsed ? wrapped.sshRemoteUsed.id : 'none'}) -> ` +
+			`pid=${result.pid} success=${result.success}`
+	);
+
+	return {
+		pid: result.pid,
+		success: result.success,
+		sshRemoteUsed: wrapped.sshRemoteUsed?.id ?? null,
+	};
+});
+
+server.setProcessKillCallback(async (sessionId) => {
+	const ok = processManagerAdapter.processManager.kill(sessionId);
+	console.log(`[maestro-server] process_kill ${sessionId} -> ${ok}`);
+	return ok;
+});
+
+// Server→Client emission listeners. Registered ONCE on the shared
+// ProcessManager — fan-out to WS clients happens inside the broadcast
+// service. Listener handlers stay thin: forward verbatim, no transform.
+//
+// Contract vector 2 — raw chunking. The 'data' event delivers one chunk
+// per emit; we broadcast each emit as a single `process_data` frame
+// without buffering. stderr arrives on the separate 'stderr' channel
+// (matches the Electron `process:stderr` IPC at `forwarding-listeners.ts`).
+processManagerAdapter.processManager.on('data', (sessionId: string, data: string) => {
+	server.broadcastProcessData(sessionId, data, 'stdout');
+});
+
+processManagerAdapter.processManager.on('stderr', (sessionId: string, data: string) => {
+	server.broadcastProcessData(sessionId, data, 'stderr');
+});
+
+processManagerAdapter.processManager.on('exit', (sessionId: string, code: number) => {
+	server.broadcastProcessExit(sessionId, code);
+});
+
+// Contract vector 3 — OPTIONAL capability listeners. Always registered;
+// the events only fire for agents that surface partial-thinking /
+// structured-tool-execution. webFull subscribers MUST optional-chain.
+processManagerAdapter.processManager.on('thinking-chunk', (sessionId: string, content: string) => {
+	server.broadcastProcessThinkingChunk(sessionId, content);
+});
+
+processManagerAdapter.processManager.on(
+	'tool-execution',
+	(sessionId: string, tool: ToolExecution) => {
+		server.broadcastProcessToolExecution(sessionId, {
+			toolName: tool.toolName,
+			state: tool.state,
+			timestamp: tool.timestamp,
+		});
+	}
+);
 
 // closeTab — (A) drop the tab from aiTabs, broadcast new tab array.
 server.setCloseTabCallback(async (sessionId: string, tabId: string): Promise<boolean> => {

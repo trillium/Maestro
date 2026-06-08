@@ -299,6 +299,66 @@ export type CreateSessionCallback = (
 ) => Promise<{ sessionId: string } | null>;
 
 /**
+ * WS process-lifecycle family — `process_spawn` Client→Server frame payload.
+ *
+ * Umbrella Decision 2026-06-08 (`docs/ws-process-lifecycle-decision`,
+ * commit `9ec71a510`). Mirrors the relevant subset of the Electron
+ * `process:spawn` IPC payload at `src/main/ipc/handlers/process.ts:85-117`.
+ *
+ * Optional fields are forwarded verbatim when present, OMITTED when
+ * undefined (no `undefined` leaks). `sessionSshRemoteConfig` is
+ * load-bearing — see contract vector 1 in the Decision.
+ *
+ * NOTE: duplicated in `web-server/handlers/messageHandlers.ts` as
+ * `ProcessSpawnMessageRequest` to keep that module free of cross-imports
+ * (same convention as `CreateSessionMessageRequest`).
+ */
+export interface ProcessSpawnRequest {
+	sessionId: string;
+	toolType: string;
+	cwd: string;
+	command: string;
+	args: string[];
+	prompt?: string;
+	shell?: string;
+	images?: string[];
+	agentSessionId?: string;
+	readOnlyMode?: boolean;
+	modelId?: string;
+	yoloMode?: boolean;
+	querySource?: 'user' | 'auto';
+	tabId?: string;
+	sessionCustomPath?: string;
+	sessionCustomArgs?: string;
+	sessionCustomEnvVars?: Record<string, string>;
+	sessionCustomModel?: string;
+	sessionCustomContextWindow?: number;
+	sessionSshRemoteConfig?: {
+		enabled: boolean;
+		remoteId: string | null;
+		workingDirOverride?: string;
+	};
+}
+
+/**
+ * WS process-lifecycle family — server-side spawn callback.
+ *
+ * Returns `{pid, success, sshRemoteUsed?}` on a fulfilled spawn attempt,
+ * or `null` when the spawn could not proceed (e.g. validation failure).
+ * The callback MUST route through `wrapSpawnWithSsh()` BEFORE invoking
+ * `ProcessManager.spawn` — see contract vector 1.
+ */
+export type ProcessSpawnCallback = (
+	request: ProcessSpawnRequest
+) => Promise<{ pid: number; success: boolean; sshRemoteUsed?: string | null } | null>;
+
+/**
+ * WS process-lifecycle family — server-side kill callback.
+ * Mirrors `process:kill` IPC at `src/main/ipc/handlers/process.ts:599`.
+ */
+export type ProcessKillCallback = (sessionId: string) => Promise<boolean>;
+
+/**
  * Tab operation callbacks for multi-tab support.
  */
 export type SelectTabCallback = (sessionId: string, tabId: string) => Promise<boolean>;

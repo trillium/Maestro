@@ -96,6 +96,75 @@ export interface CreateSessionMessageRequest {
 }
 
 /**
+ * WS process-lifecycle family — `process_spawn` Client→Server frame payload.
+ *
+ * Mirror of the Electron `process:spawn` payload at
+ * `src/main/ipc/handlers/process.ts:85-117` — the relevant subset that
+ * webFull callers send across the wire. Renderer-side spawn options that
+ * the webFull surface doesn't yet expose (`querySource`, `tabId`,
+ * `readOnlyMode`, `yoloMode`, `modelId`, `agentSessionId`, etc.) are kept
+ * optional so future client features can opt in without a contract bump.
+ *
+ * **SSH passthrough.** `sessionSshRemoteConfig` is the load-bearing field —
+ * the server-side handler MUST forward it to `wrapSpawnWithSsh()` BEFORE
+ * `ProcessManager.spawn()` (matches the `create_session` precedent at
+ * `messageHandlers.ts:609-611`).
+ *
+ * Per umbrella Decision 2026-06-08
+ * (`docs/ws-process-lifecycle-decision`, commit `9ec71a510`):
+ * snake_case frame field on the wire, camelCase TS field in code.
+ */
+export interface ProcessSpawnMessageRequest {
+	sessionId: string;
+	toolType: string;
+	cwd: string;
+	command: string;
+	args: string[];
+	prompt?: string;
+	shell?: string;
+	images?: string[];
+	agentSessionId?: string;
+	readOnlyMode?: boolean;
+	modelId?: string;
+	yoloMode?: boolean;
+	querySource?: 'user' | 'auto';
+	tabId?: string;
+	sessionCustomPath?: string;
+	sessionCustomArgs?: string;
+	sessionCustomEnvVars?: Record<string, string>;
+	sessionCustomModel?: string;
+	sessionCustomContextWindow?: number;
+	/** Load-bearing SSH passthrough — see contract vector 1 in umbrella Decision. */
+	sessionSshRemoteConfig?: {
+		enabled: boolean;
+		remoteId: string | null;
+		workingDirOverride?: string;
+	};
+}
+
+/**
+ * WS process-lifecycle family — server-side spawn callback contract.
+ *
+ * Returns `{pid, success}` matching the Electron `process:spawn` IPC return
+ * shape. `null` indicates the callback is not configured OR the spawn
+ * failed before producing a result. The server-side wiring in
+ * `src/server/index.ts` MUST route through `wrapSpawnWithSsh` BEFORE
+ * invoking `ProcessManager.spawn`.
+ */
+export type ProcessSpawnCallback = (
+	request: ProcessSpawnMessageRequest
+) => Promise<{ pid: number; success: boolean; sshRemoteUsed?: string | null } | null>;
+
+/**
+ * WS process-lifecycle family — server-side kill callback contract.
+ *
+ * Mirrors the Electron `process:kill` IPC at
+ * `src/main/ipc/handlers/process.ts:599`. Returns whether the process was
+ * tracked + signaled; `false` includes the "no such process" case.
+ */
+export type ProcessKillCallback = (sessionId: string) => Promise<boolean>;
+
+/**
  * Layer 6.1: raw PTY callbacks. Implemented server-side by wiring through
  * RawPtyMultiplexer + ProcessManager. The MessageHandler stays decoupled
  * from those concretions via this callback shape. All four are optional —
@@ -157,6 +226,18 @@ export interface MessageHandlerCallbacks {
 	}>;
 	getLiveSessionInfo: (sessionId: string) => LiveSessionInfo | undefined;
 	isSessionLive: (sessionId: string) => boolean;
+	/**
+	 * WS process-lifecycle family — `process_spawn` Client→Server frame.
+	 * Optional so the Electron desktop server (which owns the `process:*`
+	 * IPC namespace directly) can omit; the headless webFull server wires
+	 * it through `wrapSpawnWithSsh` + `ProcessManager.spawn`.
+	 */
+	processSpawn?: ProcessSpawnCallback;
+	/**
+	 * WS process-lifecycle family — `process_kill` Client→Server frame.
+	 * Optional for the same reason as `processSpawn`.
+	 */
+	processKill?: ProcessKillCallback;
 	// Layer 6.1 raw PTY surface (optional — Electron desktop server omits)
 	ptySubscribe?: PtyMessageCallbacks['ptySubscribe'];
 	ptyUnsubscribe?: PtyMessageCallbacks['ptyUnsubscribe'];
@@ -262,6 +343,20 @@ export class WebSocketMessageHandler {
 
 			case 'toggle_bookmark':
 				this.handleToggleBookmark(client, message);
+				break;
+
+			// WS process-lifecycle family (umbrella Decision 2026-06-08).
+			// `process_spawn` / `process_kill` are the Client→Server frames;
+			// the matching Server→Client emissions (`process_data`,
+			// `process_exit`, `process_thinking_chunk`, `process_tool_execution`)
+			// are pushed by listeners wired in `src/server/index.ts` against
+			// the shared `ProcessManager` singleton.
+			case 'process_spawn':
+				this.handleProcessSpawn(client, message);
+				break;
+
+			case 'process_kill':
+				this.handleProcessKill(client, message);
 				break;
 
 			// Layer 6.1: raw PTY protocol — see scoping doc §2.
@@ -629,6 +724,130 @@ export class WebSocketMessageHandler {
 			})
 			.catch((error) => {
 				this.sendError(client, `Failed to create session: ${error.message}`);
+			});
+	}
+
+	/**
+	 * Handle process_spawn message — spawn a managed process for a session.
+	 *
+	 * Umbrella Decision 2026-06-08 (`docs/ws-process-lifecycle-decision`).
+	 * Mirrors the Electron `process:spawn` IPC handler at
+	 * `src/main/ipc/handlers/process.ts:81-117`.
+	 *
+	 * **SSH passthrough is load-bearing.** This handler forwards the entire
+	 * payload (including `sessionSshRemoteConfig`) to the wired callback,
+	 * which MUST route through `wrapSpawnWithSsh()` BEFORE invoking
+	 * `ProcessManager.spawn` — matching the `create_session` precedent.
+	 * The handler itself does NOT touch the SSH layer; that contract lives
+	 * with the callback wiring in `src/server/index.ts`.
+	 *
+	 * Validation surface is intentionally thin (mirrors `handleCreateSession`):
+	 * required {sessionId, toolType, cwd, command, args} only. Optional
+	 * fields are forwarded verbatim when present, OMITTED when undefined.
+	 */
+	private handleProcessSpawn(client: WebClient, message: WebClientMessage): void {
+		const sessionId = message.sessionId as string | undefined;
+		const toolType = message.toolType as string | undefined;
+		const cwd = message.cwd as string | undefined;
+		const command = message.command as string | undefined;
+		const args = message.args as string[] | undefined;
+
+		logger.info(
+			`[Web] Received process_spawn message: session=${sessionId}, toolType=${toolType}, cmd=${command}`,
+			LOG_CONTEXT
+		);
+
+		if (!sessionId || !toolType || !cwd || !command || !Array.isArray(args)) {
+			this.sendError(client, 'Missing required fields (sessionId, toolType, cwd, command, args[])');
+			return;
+		}
+
+		if (!this.callbacks.processSpawn) {
+			this.sendError(client, 'Process spawn not configured');
+			return;
+		}
+
+		const request: ProcessSpawnMessageRequest = {
+			sessionId,
+			toolType,
+			cwd,
+			command,
+			args,
+			prompt: message.prompt as string | undefined,
+			shell: message.shell as string | undefined,
+			images: message.images as string[] | undefined,
+			agentSessionId: message.agentSessionId as string | undefined,
+			readOnlyMode: message.readOnlyMode as boolean | undefined,
+			modelId: message.modelId as string | undefined,
+			yoloMode: message.yoloMode as boolean | undefined,
+			querySource: message.querySource as 'user' | 'auto' | undefined,
+			tabId: message.tabId as string | undefined,
+			sessionCustomPath: message.sessionCustomPath as string | undefined,
+			sessionCustomArgs: message.sessionCustomArgs as string | undefined,
+			sessionCustomEnvVars: message.sessionCustomEnvVars as Record<string, string> | undefined,
+			sessionCustomModel: message.sessionCustomModel as string | undefined,
+			sessionCustomContextWindow: message.sessionCustomContextWindow as number | undefined,
+			// SSH passthrough — contract vector 1 in umbrella Decision. Forwarded
+			// verbatim; the callback wires it to `wrapSpawnWithSsh`.
+			sessionSshRemoteConfig: message.sessionSshRemoteConfig as
+				| { enabled: boolean; remoteId: string | null; workingDirOverride?: string }
+				| undefined,
+		};
+
+		this.callbacks
+			.processSpawn(request)
+			.then((result) => {
+				this.send(client, {
+					type: 'process_spawn_result',
+					success: !!result?.success,
+					sessionId,
+					pid: result?.pid ?? -1,
+					sshRemoteUsed: result?.sshRemoteUsed ?? null,
+				});
+				if (!result || !result.success) {
+					logger.warn(
+						`[Web] process_spawn failed (session=${sessionId}, toolType=${toolType})`,
+						LOG_CONTEXT
+					);
+				}
+			})
+			.catch((error) => {
+				this.sendError(client, `Failed to spawn process: ${error.message}`);
+			});
+	}
+
+	/**
+	 * Handle process_kill message — terminate a managed process by sessionId.
+	 *
+	 * Umbrella Decision 2026-06-08. Mirrors the Electron `process:kill`
+	 * IPC handler at `src/main/ipc/handlers/process.ts:599`.
+	 */
+	private handleProcessKill(client: WebClient, message: WebClientMessage): void {
+		const sessionId = message.sessionId as string | undefined;
+
+		logger.info(`[Web] Received process_kill message: session=${sessionId}`, LOG_CONTEXT);
+
+		if (!sessionId) {
+			this.sendError(client, 'Missing sessionId');
+			return;
+		}
+
+		if (!this.callbacks.processKill) {
+			this.sendError(client, 'Process kill not configured');
+			return;
+		}
+
+		this.callbacks
+			.processKill(sessionId)
+			.then((success) => {
+				this.send(client, {
+					type: 'process_kill_result',
+					success,
+					sessionId,
+				});
+			})
+			.catch((error) => {
+				this.sendError(client, `Failed to kill process: ${error.message}`);
 			});
 	}
 
