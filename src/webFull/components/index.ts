@@ -60,3 +60,4 @@ export { RenameGroupChatModal } from './RenameGroupChatModal';
 export { DeleteGroupChatModal } from './DeleteGroupChatModal';
 export { SessionListItem, stateToStatus } from './SessionListItem';
 export type { SessionListItemProps } from './SessionListItem';
+export { DeleteWorktreeModal } from './DeleteWorktreeModal';
