@@ -1141,6 +1141,171 @@ export function registerProcessesProvider(provider: ProcessesProvider | null): v
 	processesProvider = provider;
 }
 
+/* ============ Git provider registry (W3-git — closes ISC-44.server.api_git_cluster, server-half) ============ */
+//
+// Mirrors the WakaTimeProvider / StatsProvider / FontsProvider / FsProvider /
+// AgentsProvider / MarketplaceProvider / SshRemotesProvider patterns above.
+// Headless entrypoints register a provider backed by `src/server/git-manager.ts`;
+// the Electron path leaves it unset and the routes 503 cleanly. NO fallback
+// default is constructed here — the headless boot path is the only legitimate
+// registrant. The renderer-side `git:*` IPC handlers in
+// `src/main/ipc/handlers/git.ts` continue to own the git surface inside
+// Electron, and the routes here do NOT touch them. Both stacks can run
+// side-by-side because the underlying git repository on disk is the
+// cross-mode contract.
+//
+// LOCAL-ONLY scope (this brief):
+//   - Read-side git operations: status, diff, isRepo, numstat, branch,
+//     branches, tags, remote, info, log, commitCount, show, showFile,
+//     worktreeInfo, getRepoRoot, getDefaultBranch, listWorktrees,
+//     scanWorktreeDirectory.
+//
+// Out of scope for THIS brief (each is a sibling open ISC):
+//   - `ISC-44.server.api_git_ssh_support` — SSH-remote git wraps every
+//     git call via `wrapSpawnWithSsh` from `src/main/utils/ssh-spawn-wrapper.ts`
+//     which lives outside the server tsconfig include set. Significant enough
+//     to warrant its own brief; routes here 501 on `?sshRemoteId=` to fail
+//     loud rather than silently serving a local result.
+//   - `ISC-44.server.api_git_gh_cli` — `createPR` / `checkGhCli` / `createGist`
+//     need `resolveGhPath()` + `getShellPath()` + Sentry-aware error paths,
+//     all of which pull in the runtime / utils graph.
+//   - `ISC-44.server.api_git_worktree_watcher` — `watchWorktreeDirectory` /
+//     `unwatchWorktreeDirectory` + the worktree-discovered event channel need
+//     a WebSocket frame replacement for the renderer `webContents.send` path.
+//   - `ISC-44.server.api_git_worktree_writers` — `worktreeSetup` /
+//     `worktreeCheckout` / `removeWorktree` are mutator routes deferred until
+//     a webFull consumer materializes (the current consumers
+//     WizardResumeModal + DirectorySelectionScreen only need `isRepo`).
+//
+// Route surface (18 endpoints) per the renderer-side `git:*` IPC namespace
+// at `src/main/preload/git.ts:74-362`:
+//   GET /api/git/status?cwd=…                 — `{stdout, stderr, timestamp}`
+//   GET /api/git/diff?cwd=…[&file=…]          — `{stdout, stderr, timestamp}`
+//   GET /api/git/is-repo?cwd=…                — `{isRepo: boolean, timestamp}`
+//   GET /api/git/numstat?cwd=…                — `{stdout, stderr, timestamp}`
+//   GET /api/git/branch?cwd=…                 — `{stdout, stderr, timestamp}`
+//   GET /api/git/branches?cwd=…               — `{branches: string[], stderr?, timestamp}`
+//   GET /api/git/tags?cwd=…                   — `{tags: string[], stderr?, timestamp}`
+//   GET /api/git/remote?cwd=…                 — `{stdout, stderr, timestamp}`
+//   GET /api/git/info?cwd=…                   — `{branch, remote, behind, ahead, uncommittedChanges, timestamp}`
+//   GET /api/git/log?cwd=…[&limit=N&search=…] — `{entries, error, timestamp}`
+//   GET /api/git/commit-count?cwd=…           — `{count, error, timestamp}`
+//   GET /api/git/show?cwd=…&hash=…            — `{stdout, stderr, timestamp}`
+//   GET /api/git/show-file?cwd=…&ref=…&filePath=… — `{content?, error?, timestamp}`
+//   GET /api/git/worktree-info?worktreePath=… — `{exists, isWorktree?, currentBranch?, repoRoot?, timestamp}`
+//   GET /api/git/repo-root?cwd=…              — `{root, timestamp}`
+//   GET /api/git/default-branch?cwd=…         — `{branch, timestamp}`
+//   GET /api/git/worktrees?cwd=…              — `{worktrees, timestamp}`
+//   GET /api/git/scan-worktree-directory?parentPath=… — `{gitSubdirs, timestamp}`
+//
+// All path-accepting routes validate the `cwd` / `worktreePath` / `parentPath`
+// input via `validateGitCwd()` BEFORE invoking the provider, so traversal /
+// NUL bytes / non-absolute paths fail loud with a 400 — the provider never
+// sees a hostile path. The provider itself does NOT shell out the path as a
+// string (paths are passed to `execFile` as the `cwd` option, not as args),
+// but defense-in-depth: belt-and-suspenders the path at the route boundary
+// so a future consumer that DOES use it in a shell context can't be
+// blindsided. Mirrors the W3-fs `validateFsPath()` / `isValidFsPath()` pair
+// pattern.
+export interface GitProvider {
+	/** Get git status (porcelain). Mirrors `git:status` IPC reply. */
+	status: (cwd: string) => Promise<{ stdout: string; stderr: string }>;
+	/** Get git diff (whole repo or specific file). Mirrors `git:diff`. */
+	diff: (cwd: string, file?: string) => Promise<{ stdout: string; stderr: string }>;
+	/** Check if a directory is inside a git work tree. Mirrors `git:isRepo`. */
+	isRepo: (cwd: string) => Promise<boolean>;
+	/** Get diff numstat. Mirrors `git:numstat`. */
+	numstat: (cwd: string) => Promise<{ stdout: string; stderr: string }>;
+	/** Get current branch name. Mirrors `git:branch`. */
+	branch: (cwd: string) => Promise<{ stdout: string; stderr: string }>;
+	/** List all branches (local + remote). Mirrors `git:branches`. */
+	branches: (cwd: string) => Promise<{ branches: string[]; stderr?: string }>;
+	/** List all tags. Mirrors `git:tags`. */
+	tags: (cwd: string) => Promise<{ tags: string[]; stderr?: string }>;
+	/** Get origin remote URL. Mirrors `git:remote`. */
+	remote: (cwd: string) => Promise<{ stdout: string; stderr: string }>;
+	/** Get comprehensive git info. Mirrors `git:info`. */
+	info: (cwd: string) => Promise<{
+		branch: string;
+		remote: string;
+		behind: number;
+		ahead: number;
+		uncommittedChanges: number;
+	}>;
+	/** Get git log entries. Mirrors `git:log`. */
+	log: (
+		cwd: string,
+		options?: { limit?: number; search?: string }
+	) => Promise<{
+		entries: Array<{
+			hash: string;
+			shortHash: string;
+			author: string;
+			date: string;
+			refs: string[];
+			subject: string;
+			additions: number;
+			deletions: number;
+		}>;
+		error: string | null;
+	}>;
+	/** Get total commit count for HEAD. Mirrors `git:commitCount`. */
+	commitCount: (cwd: string) => Promise<{ count: number; error: string | null }>;
+	/** Show a specific commit. Mirrors `git:show`. */
+	show: (cwd: string, hash: string) => Promise<{ stdout: string; stderr: string }>;
+	/** Show file content at a specific ref. Mirrors `git:showFile`. */
+	showFile: (
+		cwd: string,
+		ref: string,
+		filePath: string
+	) => Promise<{ content?: string; error?: string }>;
+	/** Get worktree information for a path. Mirrors `git:worktreeInfo`. */
+	worktreeInfo: (worktreePath: string) => Promise<{
+		exists: boolean;
+		isWorktree?: boolean;
+		currentBranch?: string;
+		repoRoot?: string;
+	}>;
+	/** Get the root directory of the git repo. Mirrors `git:getRepoRoot`. */
+	getRepoRoot: (cwd: string) => Promise<{ root: string }>;
+	/** Get the default branch name (main / master). Mirrors `git:getDefaultBranch`. */
+	getDefaultBranch: (cwd: string) => Promise<{ branch: string }>;
+	/** List all worktrees for a repository. Mirrors `git:listWorktrees`. */
+	listWorktrees: (cwd: string) => Promise<{
+		worktrees: Array<{
+			path: string;
+			head: string;
+			branch: string | null;
+			isBare: boolean;
+		}>;
+	}>;
+	/** Scan a parent dir for git subdirs / worktrees. Mirrors `git:scanWorktreeDirectory`. */
+	scanWorktreeDirectory: (parentPath: string) => Promise<{
+		gitSubdirs: Array<{
+			path: string;
+			name: string;
+			isWorktree: boolean;
+			branch: string | null;
+			repoRoot: string | null;
+		}>;
+	}>;
+}
+
+let gitProvider: GitProvider | null = null;
+
+/**
+ * Register the active Git provider. Pass null to clear.
+ *
+ * The headless server boot path calls this once before `WebServer.start()` so
+ * the `/api/git/*` routes are wired by the time the first client request
+ * arrives. Electron-host paths can ignore this — the routes 503 cleanly when
+ * no provider is registered, and the Electron renderer continues to use the
+ * `git:*` IPC namespace directly.
+ */
+export function registerGitProvider(provider: GitProvider | null): void {
+	gitProvider = provider;
+}
+
 /**
  * Internal accessor for the route handlers. Returns the registered provider
  * or `null` if none is registered (the routes translate `null` → HTTP 503).
@@ -1181,6 +1346,49 @@ function validateSessionId(sessionId: string | undefined): string | null {
 		return 'sessionId must not contain path separators';
 	}
 	if (sessionId.includes('..')) return 'sessionId must not contain `..`';
+	return null;
+}
+
+export function getGitProvider(): GitProvider | null {
+	return gitProvider;
+}
+
+/**
+ * Validate a `cwd` / `worktreePath` / `parentPath` for the git routes.
+ *
+ * Same posture as `validateFsPath()` — re-inlined rather than imported so
+ * the routes module stays decoupled from `src/server/`. Rules: absolute,
+ * non-empty, no NUL byte, no `..` segments after split-on-separators, no
+ * encoded `..` (`%2e%2e` / `%2E%2E`).
+ */
+function validateGitCwd(p: unknown): string | null {
+	if (typeof p !== 'string' || p.length === 0) return 'path must be a non-empty string';
+	if (!path.isAbsolute(p)) return 'path must be absolute';
+	if (p.includes('\0')) return 'path must not contain NUL byte';
+	const segments = p.split(/[/\\]/);
+	if (segments.includes('..')) return 'path must not contain `..` segments';
+	if (p.includes('%2e%2e') || p.includes('%2E%2E')) {
+		return 'path must not contain encoded `..` segments';
+	}
+	return null;
+}
+
+/**
+ * Validate a git ref / hash / branch / tag / filePath argument that the
+ * client passes as a query string. Rejects NUL bytes and obvious shell
+ * metacharacters. The git CLI itself rejects most malformed refs, but
+ * defense-in-depth at the route boundary so the manager never sees a
+ * hostile string.
+ *
+ * Returns `null` if accepted, otherwise a short human-readable reason the
+ * route layer includes in the 400 reply body.
+ */
+function validateGitRefArg(p: unknown, fieldName: string): string | null {
+	if (typeof p !== 'string' || p.length === 0) {
+		return `${fieldName} must be a non-empty string`;
+	}
+	if (p.includes('\0')) return `${fieldName} must not contain NUL byte`;
+	if (p.length > 512) return `${fieldName} must be 512 characters or fewer`;
 	return null;
 }
 
@@ -4043,6 +4251,1063 @@ export class ApiRoutes {
 					return reply.code(500).send({
 						error: 'Internal Server Error',
 						message: `Failed to get process: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// ============ Git endpoints (W3-git — closes ISC-44.server.api_git_cluster, server-half) ============
+		//
+		// Additive REST routes that mirror the renderer-side `git:*` IPC namespace
+		// (`src/main/preload/git.ts`). 503 when no GitProvider is registered (the
+		// Electron path leaves it unset). NO touch to `src/main/ipc/handlers/git.ts`
+		// or the renderer-side preload bridge.
+		//
+		// Route surface (18 endpoints — local-only read-side). See the GitProvider
+		// interface above for the per-route reply shape and the manager doc-comment
+		// (`src/server/git-manager.ts`) for the per-shape `git` CLI invocations.
+		//
+		// SSH-remote support: 501 on any `?sshRemoteId=` query param. The Electron
+		// IPC path continues to own SSH-remote git. Tracked as the open sibling
+		// `ISC-44.server.api_git_ssh_support`.
+		//
+		// All `cwd` / `worktreePath` / `parentPath` query params are validated via
+		// `validateGitCwd()` BEFORE invoking the provider. `ref` / `hash` /
+		// `filePath` query params are validated via `validateGitRefArg()`.
+
+		// Helper: detect & reject SSH remote requests up-front. Inlined per-route
+		// rather than wrapped because Fastify handlers must return / send within
+		// the closure for the type-checker to be happy.
+		const gitSshNotImplementedReply = (sshRemoteId: unknown) =>
+			!!sshRemoteId && typeof sshRemoteId === 'string' && sshRemoteId.length > 0;
+
+		// GET /api/git/status?cwd=<absolute>
+		server.get(
+			`/${token}/api/git/status`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, sshRemoteId } = request.query as {
+					cwd?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.status(cwd as string);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get git status: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/diff?cwd=<absolute>[&file=<relative>]
+		server.get(
+			`/${token}/api/git/diff`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, file, sshRemoteId } = request.query as {
+					cwd?: string;
+					file?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				if (file !== undefined) {
+					const fileReason = validateGitRefArg(file, 'file');
+					if (fileReason) {
+						return reply.code(400).send({
+							error: 'Bad Request',
+							message: fileReason,
+							timestamp: Date.now(),
+						});
+					}
+				}
+				try {
+					const result = await provider.diff(cwd as string, file);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get git diff: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/is-repo?cwd=<absolute>
+		server.get(
+			`/${token}/api/git/is-repo`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, sshRemoteId } = request.query as {
+					cwd?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const isRepo = await provider.isRepo(cwd as string);
+					return { isRepo, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to check git repo: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/numstat?cwd=<absolute>
+		server.get(
+			`/${token}/api/git/numstat`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, sshRemoteId } = request.query as {
+					cwd?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.numstat(cwd as string);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get git numstat: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/branch?cwd=<absolute>
+		server.get(
+			`/${token}/api/git/branch`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, sshRemoteId } = request.query as {
+					cwd?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.branch(cwd as string);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get git branch: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/branches?cwd=<absolute>
+		server.get(
+			`/${token}/api/git/branches`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, sshRemoteId } = request.query as {
+					cwd?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.branches(cwd as string);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get git branches: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/tags?cwd=<absolute>
+		server.get(
+			`/${token}/api/git/tags`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, sshRemoteId } = request.query as {
+					cwd?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.tags(cwd as string);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get git tags: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/remote?cwd=<absolute>
+		server.get(
+			`/${token}/api/git/remote`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, sshRemoteId } = request.query as {
+					cwd?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.remote(cwd as string);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get git remote: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/info?cwd=<absolute>
+		server.get(
+			`/${token}/api/git/info`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, sshRemoteId } = request.query as {
+					cwd?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.info(cwd as string);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get git info: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/log?cwd=<absolute>[&limit=N&search=…]
+		server.get(
+			`/${token}/api/git/log`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, sshRemoteId, limit, search } = request.query as {
+					cwd?: string;
+					sshRemoteId?: string;
+					limit?: string;
+					search?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				let parsedLimit: number | undefined;
+				if (limit !== undefined) {
+					parsedLimit = parseInt(limit, 10);
+					if (Number.isNaN(parsedLimit) || parsedLimit <= 0 || parsedLimit > 10000) {
+						return reply.code(400).send({
+							error: 'Bad Request',
+							message: 'limit must be a positive integer no greater than 10000',
+							timestamp: Date.now(),
+						});
+					}
+				}
+				if (search !== undefined) {
+					const searchReason = validateGitRefArg(search, 'search');
+					if (searchReason) {
+						return reply.code(400).send({
+							error: 'Bad Request',
+							message: searchReason,
+							timestamp: Date.now(),
+						});
+					}
+				}
+				try {
+					const result = await provider.log(cwd as string, {
+						limit: parsedLimit,
+						search,
+					});
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get git log: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/commit-count?cwd=<absolute>
+		server.get(
+			`/${token}/api/git/commit-count`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, sshRemoteId } = request.query as {
+					cwd?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.commitCount(cwd as string);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get git commit count: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/show?cwd=<absolute>&hash=<ref>
+		server.get(
+			`/${token}/api/git/show`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, hash, sshRemoteId } = request.query as {
+					cwd?: string;
+					hash?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				const hashReason = validateGitRefArg(hash, 'hash');
+				if (hashReason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: hashReason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.show(cwd as string, hash as string);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get git show: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/show-file?cwd=<absolute>&ref=<ref>&filePath=<relative>
+		server.get(
+			`/${token}/api/git/show-file`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, ref, filePath, sshRemoteId } = request.query as {
+					cwd?: string;
+					ref?: string;
+					filePath?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				const refReason = validateGitRefArg(ref, 'ref');
+				if (refReason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: refReason,
+						timestamp: Date.now(),
+					});
+				}
+				const filePathReason = validateGitRefArg(filePath, 'filePath');
+				if (filePathReason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: filePathReason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.showFile(cwd as string, ref as string, filePath as string);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to show git file: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/worktree-info?worktreePath=<absolute>
+		server.get(
+			`/${token}/api/git/worktree-info`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { worktreePath, sshRemoteId } = request.query as {
+					worktreePath?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(worktreePath);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.worktreeInfo(worktreePath as string);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get worktree info: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/repo-root?cwd=<absolute>
+		server.get(
+			`/${token}/api/git/repo-root`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, sshRemoteId } = request.query as {
+					cwd?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.getRepoRoot(cwd as string);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					if (error?.notARepo === true) {
+						return reply.code(404).send({
+							error: 'Not Found',
+							message: error.message,
+							timestamp: Date.now(),
+						});
+					}
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get repo root: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/default-branch?cwd=<absolute>
+		server.get(
+			`/${token}/api/git/default-branch`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, sshRemoteId } = request.query as {
+					cwd?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.getDefaultBranch(cwd as string);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					if (error?.notFound === true) {
+						return reply.code(404).send({
+							error: 'Not Found',
+							message: error.message,
+							timestamp: Date.now(),
+						});
+					}
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get default branch: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/worktrees?cwd=<absolute>
+		server.get(
+			`/${token}/api/git/worktrees`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { cwd, sshRemoteId } = request.query as {
+					cwd?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(cwd);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.listWorktrees(cwd as string);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to list worktrees: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/git/scan-worktree-directory?parentPath=<absolute>
+		server.get(
+			`/${token}/api/git/scan-worktree-directory`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getGitProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Git provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { parentPath, sshRemoteId } = request.query as {
+					parentPath?: string;
+					sshRemoteId?: string;
+				};
+				if (gitSshNotImplementedReply(sshRemoteId)) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side git routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const reason = validateGitCwd(parentPath);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.scanWorktreeDirectory(parentPath as string);
+					return { ...result, timestamp: Date.now() };
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to scan worktree directory: ${error.message}`,
 						timestamp: Date.now(),
 					});
 				}

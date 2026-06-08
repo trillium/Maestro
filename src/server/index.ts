@@ -56,6 +56,7 @@ import { getAgentsManager } from './agents-manager';
 import { getSshRemotesManager } from './ssh-remotes-manager';
 import { getSettingsManager } from './settings-manager';
 import { getProcessesManager } from './processes-manager';
+import { getGitManager } from './git-manager';
 import {
 	registerWakatimeProvider,
 	registerStatsProvider,
@@ -67,6 +68,7 @@ import {
 	registerSshRemotesProvider,
 	registerSettingsProvider,
 	registerProcessesProvider,
+	registerGitProvider,
 } from '../main/web-server/routes/apiRoutes';
 import type { StatsTimeRange } from '../shared/stats-types';
 
@@ -492,6 +494,64 @@ registerSshRemotesProvider({
 			configOrId as string | import('../shared/types').SshRemoteConfig,
 			agentCommand
 		),
+});
+
+// W3-git — Git manager. Server-side port of the read-side `git:*` IPC handlers
+// at `src/main/ipc/handlers/git.ts` that backs the new `/api/git/*` REST routes
+// (closes ISC-44.server.api_git_cluster, server-half). The renderer-side IPC
+// handlers are NOT touched; both can run side-by-side in a hybrid Electron +
+// headless-sidecar deployment because the underlying git repository on disk is
+// the cross-mode contract.
+//
+// Stateless — no DB handle, no network egress, no async initialization, no
+// watchers. Each call shells out fresh to `git`. No SIGINT/SIGTERM shutdown
+// hook needed (no resources to release).
+//
+// Local-only sub-surface per the umbrella big_3_ipc_strategy Decision's
+// "ship the read sub-surface, defer the writers" posture:
+//   - status / diff / isRepo / numstat / branch / branches / tags / remote /
+//     info / log / commitCount / show / showFile / worktreeInfo /
+//     getRepoRoot / getDefaultBranch / listWorktrees / scanWorktreeDirectory
+//     SHIPPED.
+//   - createPR / checkGhCli / createGist (gh CLI integration),
+//     watchWorktreeDirectory / unwatchWorktreeDirectory (watcher + event
+//     channel), worktreeSetup / worktreeCheckout / removeWorktree (worktree
+//     mutators), SSH-remote dispatch — all DEFERRED to sibling open ISCs
+//     (`ISC-44.server.api_git_gh_cli`, `ISC-44.server.api_git_worktree_watcher`,
+//     `ISC-44.server.api_git_worktree_writers`, `ISC-44.server.api_git_ssh_support`).
+//
+// Unblocks WizardResumeModal + DirectorySelectionScreen which call
+// `window.maestro.git.isRepo()` as a directory-validity gate, plus the
+// transitive consumers (gitService.getStatus / getDiff / getBranches /
+// getTags / getNumstat / getRemoteBrowserUrl) that ride on the same read
+// surface.
+const gitManager = getGitManager();
+
+// Register the manager as the default Git provider for the REST routes.
+// MUST run before `server.start()` so the routes have a backing provider by
+// the time the first client request arrives. The renderer-side Electron path
+// does NOT register a provider — the `git:*` IPC channels continue to own
+// that surface — and the routes correctly 503 when called outside the
+// headless server.
+registerGitProvider({
+	status: (cwd: string) => gitManager.status(cwd),
+	diff: (cwd: string, file?: string) => gitManager.diff(cwd, file),
+	isRepo: (cwd: string) => gitManager.isRepo(cwd),
+	numstat: (cwd: string) => gitManager.numstat(cwd),
+	branch: (cwd: string) => gitManager.branch(cwd),
+	branches: (cwd: string) => gitManager.branches(cwd),
+	tags: (cwd: string) => gitManager.tags(cwd),
+	remote: (cwd: string) => gitManager.remote(cwd),
+	info: (cwd: string) => gitManager.info(cwd),
+	log: (cwd: string, options?: { limit?: number; search?: string }) => gitManager.log(cwd, options),
+	commitCount: (cwd: string) => gitManager.commitCount(cwd),
+	show: (cwd: string, hash: string) => gitManager.show(cwd, hash),
+	showFile: (cwd: string, ref: string, filePath: string) => gitManager.showFile(cwd, ref, filePath),
+	worktreeInfo: (worktreePath: string) => gitManager.worktreeInfo(worktreePath),
+	getRepoRoot: (cwd: string) => gitManager.getRepoRoot(cwd),
+	getDefaultBranch: (cwd: string) => gitManager.getDefaultBranch(cwd),
+	listWorktrees: (cwd: string) => gitManager.listWorktrees(cwd),
+	scanWorktreeDirectory: (parentPath: string) => gitManager.scanWorktreeDirectory(parentPath),
 });
 
 // Persistent token: stored in settings if present, otherwise ephemeral per boot.
