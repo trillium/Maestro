@@ -5235,3 +5235,38 @@ The rest (`react`, `lucide-react`, `react-markdown`, `rehype-slug`) resolves ide
   - Targeted `npm test` for the moved modules + their tests (tokenCounter, remarkFileLinks, markdownConfig, useClickOutside, useTemplateAutocomplete, useAutoRunUndo, batchStore, batchReducer, batchStateMachine): 429/429 passing.
 
   Branch: `chore/autorun-7edge-drawdown`. Commit pending — not pushed per brief.
+### 2026-06-08 — Audit #14 — webFull settings store disk backing (`ISC-44.server.settings_disk_backing`, `ISC-44.webfull.settings_store_webfull_ts`)
+
+- 2026-06-08 settings store disk backing: `<dataDir>/maestro-settings.json` (matches existing electron-store / FileStore on-disk schema; default `<dataDir>` = `getDataDir()`), atomic write via `fs/promises` (`writeFile(<file>.tmp)` → `rename` onto target, serialized through a per-instance promise chain so concurrent PATCHes can't race the temp file), default-empty handled (missing file → `{}`, corrupted file → `{}` + `degraded=true` log + serve-from-memory). Adds `src/webFull/stores/settingsStore.webfull.ts` wrapper (thin `getAll`/`get`/`set`/`patch` over `window.fetch` against `GET`/`PATCH /api/settings`, mirrors the shape of `window.maestro.settings` from the Electron preload). Unblocks `WizardContext.tsx` + `SettingsModal` full functionality.
+
+**Files added.**
+
+- `src/server/settings-manager.ts` — `SettingsManager` class implementing the `SettingsProvider` shape consumed by `src/main/web-server/routes/apiRoutes.ts`. Synchronous `getSettings()` / `setSettings()` (route-handler parity) with an async `load()` boot-step and an async atomic disk write under the hood. Singleton accessor `getSettingsManager(dataDir)` mirrors the `getWakaTimeManager()` / `getStatsManager()` pattern in the rest of `src/server/`. Test helper `_resetSettingsManager()` clears the singleton.
+- `src/webFull/stores/settingsStore.webfull.ts` — webFull-side wrapper. `getAllSettings()` / `getSetting<T>(key, default?)` / `setSetting<T>(key, value)` / `patchSettings(partial)` plus a bundled `settingsStoreWebFull` object for callers that want the Electron-preload-style namespace shape.
+- `src/__tests__/server/settings-manager.test.ts` — 15 unit tests under four contract groups (server reads on boot, persists on set, atomic-write resilience, default-empty case). All pass.
+
+**Files modified (additive only).**
+
+- `src/server/index.ts` — `import { getSettingsManager }` + `import { registerSettingsProvider }`; instantiate `settingsManager` at module scope; inside `main()`, await `settingsManager.load()` and `registerSettingsProvider({ getSettings, setSettings })` BEFORE `server.start()`. Displaces the implicit FileStore fallback in `apiRoutes.ts` (`getDefaultProvider()` stays as the Electron fall-through; headless server now owns the provider explicitly).
+- `ISA.md` — this entry.
+
+**Files NOT touched.**
+
+- `src/main/web-server/routes/apiRoutes.ts` — the route handlers, `SettingsProvider` interface, `registerSettingsProvider()` registry, and `getDefaultProvider()` Electron fallback are unchanged. Headless server registers explicitly; Electron path is unaffected.
+- `src/shared/file-store.ts` — still used by `sessionsStore`, `groupsStore`, etc. The settings store is the only one that moves to the async manager surface in this wave; the others stay sync.
+- `src/web/` — fork-hygiene read-only (zero bytes diff vs main).
+- `src/renderer/` — read-only oracle (zero bytes diff vs main). The renderer's `window.maestro.settings.set` IPC path is unchanged.
+- `src/webFull/hooks/useSettings.ts` — unchanged. The hook continues to call `fetch` directly; the new wrapper is for non-React callers (services, utilities, future imperative code paths).
+
+**Verification.**
+
+- `npm run build:prompts` clean.
+- `npx tsc -p tsconfig.lint.json` (the lint config) → zero errors.
+- `npx tsc -p tsconfig.main.json --noEmit` → zero errors.
+- `npx tsc -p tsconfig.cli.json --noEmit` → zero errors.
+- `npx tsc -p tsconfig.server.json --noEmit` → zero errors.
+- `npx vitest run src/__tests__/server/settings-manager.test.ts` → 15/15 passing.
+- `npm test` full sweep → 819/820 files (1 skipped), 29140/29248 tests (108 skipped), zero new failures. Matches baseline.
+- `./node_modules/.bin/prettier --check` against the four touched/added files → clean.
+
+**Branch.** `feat/settings-store-disk-backing`. Commit pending — not pushed per the brief's "no push" rule.

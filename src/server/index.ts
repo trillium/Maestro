@@ -54,6 +54,7 @@ import { getAutorunManager } from './autorun-manager';
 import { getMarketplaceManager } from './marketplace-manager';
 import { getAgentsManager } from './agents-manager';
 import { getSshRemotesManager } from './ssh-remotes-manager';
+import { getSettingsManager } from './settings-manager';
 import {
 	registerWakatimeProvider,
 	registerStatsProvider,
@@ -63,6 +64,7 @@ import {
 	registerMarketplaceProvider,
 	registerAgentsProvider,
 	registerSshRemotesProvider,
+	registerSettingsProvider,
 } from '../main/web-server/routes/apiRoutes';
 import type { StatsTimeRange } from '../shared/stats-types';
 
@@ -118,6 +120,16 @@ const groupsStore = new FileStore<{ groups: StoredGroup[] }>({
 // `initialize()` is awaited inside main() so the directory + legacy migration
 // land before the server starts responding to history queries.
 const historyManager = getHistoryManager();
+
+// Audit #14 — explicit, async, atomic-write settings store backing
+// `/api/settings/{get,set}`. On-disk schema matches the existing
+// `maestro-settings.json` produced by `electron-store` / `FileStore`
+// above, so an Electron-written settings file is read correctly here
+// (and vice-versa) in a hybrid Electron + headless-sidecar deployment.
+// `load()` is awaited inside `main()` before `server.start()`; the
+// route provider is registered immediately after `load()` resolves so
+// the first client request lands against the persisted state.
+const settingsManager = getSettingsManager(dataDir);
 
 // W2 — WakaTime manager. Server-side port of `src/main/wakatime-manager.ts`
 // that backs the new `GET /api/wakatime/status` + `POST /api/wakatime/validate-key`
@@ -1165,6 +1177,31 @@ async function main() {
 	} catch (err) {
 		console.error('[maestro-server] historyManager.initialize() failed', err);
 		captureException(err, { context: 'history_init' });
+	}
+	// Audit #14 (third audit on this priority) — async, atomic disk
+	// backing for `/api/settings/{get,set}`. Loads the on-disk
+	// `maestro-settings.json` into memory BEFORE `server.start()` so the
+	// first client request lands against the real persisted state, not
+	// against lazy-defaults that get clobbered by the first PATCH.
+	// `registerSettingsProvider()` displaces the implicit FileStore
+	// fallback in `apiRoutes.ts` (`getDefaultProvider()` is the Electron
+	// fall-through; the headless server now owns the provider explicitly).
+	try {
+		await settingsManager.load();
+		registerSettingsProvider({
+			getSettings: () => settingsManager.getSettings(),
+			setSettings: (patch: Record<string, unknown>) => settingsManager.setSettings(patch),
+		});
+		if (settingsManager.isDegraded()) {
+			console.warn(
+				`[maestro-server] settingsManager loaded in degraded mode (in-memory only). On-disk path: ${settingsManager.path}`
+			);
+		} else {
+			console.log(`[maestro-server] settingsManager ready (path: ${settingsManager.path})`);
+		}
+	} catch (err) {
+		console.error('[maestro-server] settingsManager.load() failed', err);
+		captureException(err, { context: 'settings_init' });
 	}
 	const result = await server.start();
 	console.log(`[maestro-server] listening at ${result.url}`);
