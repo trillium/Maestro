@@ -110,11 +110,14 @@
  * `window.maestro.sshRemote.*`.
  */
 
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 
-import type { SshRemoteConfig } from '../shared/types';
+import type { SshRemoteConfig, SshRemoteTestResult } from '../shared/types';
 import { expandTilde } from '../shared/pathUtils';
 
 const LOG_CONTEXT = '[SshRemotes]';
@@ -129,12 +132,13 @@ const LOG_CONTEXT = '[SshRemotes]';
  * `FileStore<Record<string, unknown>>` without dragging the electron-store
  * types tree into the server build.
  *
- * Only `.get(key, default)` is needed — this brief ships read routes only;
- * a follow-up brief that adds save/delete will widen the interface to
- * include `.set(key, value)`.
+ * Widened in the W3-ssh-remotes-writers follow-up brief to include `.set(key,
+ * value)` — needed for `saveConfig` / `deleteConfig` / `setDefaultId`. Reads
+ * still use `.get(key, default)` exclusively.
  */
 export interface SshRemotesSettingsReader {
 	get<V>(key: string, defaultValue: V): V;
+	set<V>(key: string, value: V): void;
 }
 
 /* ============ SSH config parser (inlined; mirrors src/main/utils/ssh-config-parser.ts) ============ */
@@ -313,25 +317,208 @@ function parseSshConfig(): SshConfigParseResult {
 	}
 }
 
+/* ============ Inline execFile shim ============ */
+
+/**
+ * Inline `execFileNoThrow` — mirrors the helper in `agents-manager.ts`.
+ *
+ * `src/main/utils/execFile.ts` is outside `tsconfig.server.json`'s include
+ * set, so the headless port re-implements the minimal subset needed for
+ * SSH connection-testing: spawn a binary with args, never throw, capture
+ * stdout/stderr/exit-code. Matches the renderer-side `execFileNoThrow`
+ * signature so a future shared-helper extraction is a drop-in.
+ */
+const execFileAsync = promisify(execFile);
+
+interface ExecResult {
+	stdout: string;
+	stderr: string;
+	exitCode: number;
+}
+
+async function execFileNoThrow(command: string, args: string[]): Promise<ExecResult> {
+	try {
+		const { stdout, stderr } = await execFileAsync(command, args, {
+			encoding: 'utf-8',
+		});
+		return { stdout, stderr, exitCode: 0 };
+	} catch (err) {
+		const e = err as { stdout?: string; stderr?: string; code?: number; message?: string };
+		return {
+			stdout: e.stdout ?? '',
+			stderr: e.stderr ?? e.message ?? '',
+			exitCode: typeof e.code === 'number' ? e.code : 1,
+		};
+	}
+}
+
+/* ============ SSH validation + arg-building (mirrors src/main/ssh-remote-manager.ts) ============ */
+
+/**
+ * Validation result for SSH remote configuration. Field-for-field mirror of
+ * `SshRemoteValidation` in `src/main/ssh-remote-manager.ts:16` — the two
+ * MUST stay in sync.
+ */
+export interface SshRemoteValidation {
+	valid: boolean;
+	errors: string[];
+}
+
+/**
+ * Default SSH options used for all connections. Mirrors
+ * `defaultSshOptions` in `src/main/ssh-remote-manager.ts:65` 1:1.
+ *
+ * These options ensure non-interactive key-based authentication. Any change
+ * here MUST be mirrored in the renderer-side manager (both stacks must agree
+ * on the connection contract so cross-mode parity holds).
+ */
+const DEFAULT_SSH_OPTIONS: Record<string, string> = {
+	BatchMode: 'yes',
+	StrictHostKeyChecking: 'accept-new',
+	ConnectTimeout: '10',
+	ClearAllForwardings: 'yes',
+	RequestTTY: 'no',
+};
+
+/**
+ * Validate an SSH remote configuration. Mirrors
+ * `SshRemoteManager.validateConfig` in `src/main/ssh-remote-manager.ts:96`
+ * 1:1. Checks required fields, port range, and private-key readability.
+ *
+ * When `useSshConfig` is true, username and privateKeyPath are optional —
+ * they may be inherited from `~/.ssh/config`.
+ */
+export function validateSshRemoteConfig(config: SshRemoteConfig): SshRemoteValidation {
+	const errors: string[] = [];
+
+	if (!config.id || config.id.trim() === '') {
+		errors.push('Configuration ID is required');
+	}
+	if (!config.name || config.name.trim() === '') {
+		errors.push('Name is required');
+	}
+	if (!config.host || config.host.trim() === '') {
+		errors.push('Host is required');
+	}
+
+	// Port validation — required for all configs.
+	if (typeof config.port !== 'number' || config.port < 1 || config.port > 65535) {
+		errors.push('Port must be between 1 and 65535');
+	}
+
+	// Private key file readability (only if a path is provided).
+	if (config.privateKeyPath && config.privateKeyPath.trim() !== '') {
+		const keyPath = expandTilde(config.privateKeyPath);
+		try {
+			fs.accessSync(keyPath, fs.constants.R_OK);
+		} catch {
+			errors.push(`Private key not readable: ${config.privateKeyPath}`);
+		}
+	}
+
+	return {
+		valid: errors.length === 0,
+		errors,
+	};
+}
+
+/**
+ * Build SSH command-line arguments for a remote connection. Mirrors
+ * `SshRemoteManager.buildSshArgs` in `src/main/ssh-remote-manager.ts:227`
+ * 1:1. Any change here MUST be mirrored in the renderer-side manager so
+ * cross-mode connection semantics stay identical.
+ */
+function buildSshArgs(config: SshRemoteConfig): string[] {
+	const args: string[] = [];
+
+	// Force-disable TTY allocation (prevents shell rc files from sourcing).
+	args.push('-T');
+
+	if (config.privateKeyPath && config.privateKeyPath.trim()) {
+		args.push('-i', expandTilde(config.privateKeyPath));
+	}
+
+	for (const [key, value] of Object.entries(DEFAULT_SSH_OPTIONS)) {
+		args.push('-o', `${key}=${value}`);
+	}
+
+	if (!config.useSshConfig || config.port !== 22) {
+		args.push('-p', config.port.toString());
+	}
+
+	if (config.username && config.username.trim()) {
+		args.push(`${config.username}@${config.host}`);
+	} else {
+		args.push(config.host);
+	}
+
+	return args;
+}
+
+/**
+ * Parse SSH stderr into a user-friendly error message. Mirrors
+ * `SshRemoteManager.parseSSHError` in `src/main/ssh-remote-manager.ts:266`
+ * 1:1.
+ */
+function parseSSHError(stderr: string): string | undefined {
+	const lowerStderr = stderr.toLowerCase();
+
+	if (lowerStderr.includes('permission denied')) {
+		return 'Authentication failed. Check username and private key.';
+	}
+	if (lowerStderr.includes('connection refused')) {
+		return 'Connection refused. Check host and port.';
+	}
+	if (lowerStderr.includes('connection timed out') || lowerStderr.includes('timed out')) {
+		return 'Connection timed out. Check host and network.';
+	}
+	if (lowerStderr.includes('no route to host')) {
+		return 'No route to host. Check host address and network.';
+	}
+	if (
+		lowerStderr.includes('could not resolve hostname') ||
+		lowerStderr.includes('name or service not known')
+	) {
+		return 'Could not resolve hostname. Check the host address.';
+	}
+	if (lowerStderr.includes('remote host identification has changed')) {
+		return 'SSH host key changed. Verify server identity and update known_hosts.';
+	}
+	if (lowerStderr.includes('passphrase')) {
+		return 'Private key has a passphrase. Key-based auth requires passphrase-less keys.';
+	}
+	if (lowerStderr.includes('no such file')) {
+		return 'Private key file not found.';
+	}
+	if (stderr.trim()) {
+		return stderr.trim();
+	}
+	return undefined;
+}
+
 /* ============ SshRemotesManager (server-side) ============ */
 
 /**
- * Server-side SSH remotes manager. Mirrors the read-side surface of the
+ * Server-side SSH remotes manager. Mirrors the FULL surface of the
  * renderer-side `ssh-remote:*` IPC handlers.
  *
- * Surface (3 methods — one per route this brief ships):
- *   - `getConfigs()`        → `ssh-remote:getConfigs`
- *   - `getDefaultId()`      → `ssh-remote:getDefaultId`
- *   - `getSshConfigHosts()` → `ssh-remote:getSshConfigHosts`
+ * Surface:
+ *   Reads (shipped in W3-ssh-remotes):
+ *   - `getConfigs()`         → `ssh-remote:getConfigs`
+ *   - `getDefaultId()`       → `ssh-remote:getDefaultId`
+ *   - `getSshConfigHosts()`  → `ssh-remote:getSshConfigHosts`
  *
- * Not ported (deliberately out of scope per design note #5):
- *   - `saveConfig` / `deleteConfig` / `setDefaultId` — config CRUD (writers)
- *   - `test` — needs `ssh` binary + buildSshArgs/parseSSHError extraction
+ *   Writers (added in W3-ssh-remotes-writers, audit #12):
+ *   - `saveConfig(partial)`  → `ssh-remote:saveConfig`
+ *   - `updateConfig(id, u)`  → partial update path (PUT route ergonomic)
+ *   - `deleteConfig(id)`     → `ssh-remote:deleteConfig`
+ *   - `setDefaultId(id)`     → `ssh-remote:setDefaultId`
+ *   - `testConnection(...)`  → `ssh-remote:test`
  *
- * Stateless after construction (the settings store handle is held; no
- * mutation, no event subscriptions, no async initialization). Each call
- * reads the live settings store on invocation, matching the renderer-side
- * handler's posture (every IPC call hits `store.get(...)` fresh).
+ * Stateless after construction (the settings store handle is held; each
+ * call reads the live store on invocation). Writers persist synchronously
+ * via `FileStore.set(...)` — same atomic-rename semantics electron-store
+ * provides on the renderer side.
  */
 export class SshRemotesManager {
 	private settingsStore: SshRemotesSettingsReader;
@@ -377,6 +564,254 @@ export class SshRemotesManager {
 			console.warn(`${LOG_CONTEXT} failed to parse SSH config: ${result.error}`);
 		}
 		return result;
+	}
+
+	/* ============ Writers (W3-ssh-remotes-writers, audit #12) ============ */
+
+	/**
+	 * Save (create or update) an SSH remote configuration. Mirrors
+	 * `ssh-remote:saveConfig` in `src/main/ipc/handlers/ssh-remote.ts:92`
+	 * 1:1. If `config.id` is provided and exists in the store, updates the
+	 * existing entry. Otherwise creates a new entry with a generated UUID.
+	 *
+	 * Validates the completed config before persisting; throws on
+	 * validation failure (the route layer translates this to HTTP 400).
+	 */
+	saveConfig(partial: Partial<SshRemoteConfig>): { config: SshRemoteConfig } {
+		const remotes = this.settingsStore.get<SshRemoteConfig[]>('sshRemotes', []);
+
+		const existingIndex = partial.id ? remotes.findIndex((r) => r.id === partial.id) : -1;
+		const isUpdate = existingIndex !== -1;
+
+		// Build the complete config, defaulting fields the renderer-side
+		// handler defaults (mirrors `ssh-remote.ts:104-115` 1:1).
+		const completeConfig: SshRemoteConfig = {
+			id: partial.id || crypto.randomUUID(),
+			name: partial.name || 'Unnamed Remote',
+			host: partial.host || '',
+			port: partial.port ?? 22,
+			username: partial.username || '',
+			privateKeyPath: partial.privateKeyPath || '',
+			remoteEnv: partial.remoteEnv,
+			enabled: partial.enabled ?? true,
+			useSshConfig: partial.useSshConfig,
+			sshConfigHost: partial.sshConfigHost,
+		};
+
+		const validation = validateSshRemoteConfig(completeConfig);
+		if (!validation.valid) {
+			throw new Error(`Invalid configuration: ${validation.errors.join('; ')}`);
+		}
+
+		if (isUpdate) {
+			remotes[existingIndex] = completeConfig;
+			console.log(
+				`${LOG_CONTEXT} updated SSH remote "${completeConfig.name}" (${completeConfig.id})`
+			);
+		} else {
+			remotes.push(completeConfig);
+			console.log(
+				`${LOG_CONTEXT} created SSH remote "${completeConfig.name}" (${completeConfig.id})`
+			);
+		}
+
+		this.settingsStore.set<SshRemoteConfig[]>('sshRemotes', remotes);
+
+		return { config: completeConfig };
+	}
+
+	/**
+	 * Partial-update an SSH remote configuration. The renderer-side
+	 * handler's `saveConfig` channel covers both create and update under a
+	 * single channel; the REST surface separates them for HTTP-idiomatic
+	 * verb semantics (`POST` create, `PUT` update). This method reads the
+	 * existing config, merges the partial updates, and re-validates before
+	 * persisting.
+	 *
+	 * Throws when the id is not found (the route layer translates to 404).
+	 */
+	updateConfig(id: string, updates: Partial<SshRemoteConfig>): { config: SshRemoteConfig } {
+		const remotes = this.settingsStore.get<SshRemoteConfig[]>('sshRemotes', []);
+		const idx = remotes.findIndex((r) => r.id === id);
+		if (idx === -1) {
+			const err = new Error(`SSH remote not found: ${id}`) as Error & { code?: string };
+			err.code = 'NOT_FOUND';
+			throw err;
+		}
+
+		// Merge — caller-provided fields override; the id field is locked
+		// to the path parameter (callers cannot rename an id via PUT).
+		const merged: SshRemoteConfig = {
+			...remotes[idx],
+			...updates,
+			id,
+		};
+
+		const validation = validateSshRemoteConfig(merged);
+		if (!validation.valid) {
+			throw new Error(`Invalid configuration: ${validation.errors.join('; ')}`);
+		}
+
+		remotes[idx] = merged;
+		this.settingsStore.set<SshRemoteConfig[]>('sshRemotes', remotes);
+		console.log(`${LOG_CONTEXT} updated SSH remote "${merged.name}" (${id})`);
+
+		return { config: merged };
+	}
+
+	/**
+	 * Delete an SSH remote configuration by id. Mirrors
+	 * `ssh-remote:deleteConfig` in `src/main/ipc/handlers/ssh-remote.ts:151`
+	 * 1:1 — also clears `defaultSshRemoteId` if it matches the deleted id
+	 * (the renderer-side handler does the same at lines 167-172).
+	 *
+	 * Throws when the id is not found (the route layer translates to 404).
+	 */
+	deleteConfig(id: string): { deletedName: string } {
+		const remotes = this.settingsStore.get<SshRemoteConfig[]>('sshRemotes', []);
+		const index = remotes.findIndex((r) => r.id === id);
+		if (index === -1) {
+			const err = new Error(`SSH remote not found: ${id}`) as Error & { code?: string };
+			err.code = 'NOT_FOUND';
+			throw err;
+		}
+
+		const deletedName = remotes[index].name;
+		remotes.splice(index, 1);
+		this.settingsStore.set<SshRemoteConfig[]>('sshRemotes', remotes);
+
+		// Clear default if it pointed at the deleted entry.
+		const defaultId = this.settingsStore.get<string | null>('defaultSshRemoteId', null);
+		if (defaultId === id) {
+			this.settingsStore.set<string | null>('defaultSshRemoteId', null);
+			console.log(`${LOG_CONTEXT} cleared default SSH remote (was ${id})`);
+		}
+
+		console.log(`${LOG_CONTEXT} deleted SSH remote "${deletedName}" (${id})`);
+		return { deletedName };
+	}
+
+	/**
+	 * Set (or clear) the global default SSH remote id. Mirrors
+	 * `ssh-remote:setDefaultId` in `src/main/ipc/handlers/ssh-remote.ts:215`
+	 * 1:1 — validates the id exists in the stored configs before persisting
+	 * (so callers cannot point the default at a phantom entry).
+	 *
+	 * Pass `null` to clear the default. Throws when the id is non-null and
+	 * not present in the store (route layer translates to 404).
+	 */
+	setDefaultId(id: string | null): void {
+		if (id !== null) {
+			const remotes = this.settingsStore.get<SshRemoteConfig[]>('sshRemotes', []);
+			const exists = remotes.some((r) => r.id === id);
+			if (!exists) {
+				const err = new Error(`SSH remote not found: ${id}`) as Error & { code?: string };
+				err.code = 'NOT_FOUND';
+				throw err;
+			}
+		}
+		this.settingsStore.set<string | null>('defaultSshRemoteId', id);
+		console.log(`${LOG_CONTEXT} set default SSH remote to ${id ?? 'none'}`);
+	}
+
+	/**
+	 * Test an SSH connection. Mirrors `ssh-remote:test` in
+	 * `src/main/ipc/handlers/ssh-remote.ts:244` 1:1 — accepts either a
+	 * stored config id (string) or a full config object. The route layer
+	 * passes either through; this method resolves the id case against the
+	 * settings store.
+	 *
+	 * Spawns the `ssh` binary via the inline `execFileNoThrow` shim above.
+	 * The binary must be on PATH at the server's runtime environment —
+	 * macOS / Linux both ship it by default; container environments may
+	 * need to add it. Returns `{success:false, error:...}` rather than
+	 * throwing on connection-test failure so callers can render the error
+	 * inline. The wrapping route returns 200 with `result.success=false` —
+	 * the test ran but the connection didn't succeed. A 5xx is reserved
+	 * for unexpected exceptions in the test plumbing itself.
+	 *
+	 * `latencyMs` is the wall-clock duration of the spawn → exit cycle,
+	 * useful for the connection-tester UI affordance.
+	 */
+	async testConnection(
+		configOrId: string | SshRemoteConfig,
+		agentCommand?: string
+	): Promise<SshRemoteTestResult & { latencyMs?: number }> {
+		let config: SshRemoteConfig;
+
+		if (typeof configOrId === 'string') {
+			const remotes = this.settingsStore.get<SshRemoteConfig[]>('sshRemotes', []);
+			const found = remotes.find((r) => r.id === configOrId);
+			if (!found) {
+				const err = new Error(`SSH remote not found: ${configOrId}`) as Error & {
+					code?: string;
+				};
+				err.code = 'NOT_FOUND';
+				throw err;
+			}
+			config = found;
+		} else {
+			config = configOrId;
+		}
+
+		const validation = validateSshRemoteConfig(config);
+		if (!validation.valid) {
+			return {
+				success: false,
+				error: validation.errors.join('; '),
+			};
+		}
+
+		const sshArgs = buildSshArgs(config);
+
+		let testCommand = 'echo "SSH_OK" && hostname';
+		if (agentCommand) {
+			testCommand += ` && which ${agentCommand} 2>/dev/null || echo "AGENT_NOT_FOUND"`;
+		}
+		sshArgs.push(testCommand);
+
+		const startedAt = Date.now();
+		try {
+			const result = await execFileNoThrow('ssh', sshArgs);
+			const latencyMs = Date.now() - startedAt;
+
+			if (result.exitCode !== 0) {
+				const errorMessage = parseSSHError(result.stderr) || 'Connection failed';
+				console.warn(`${LOG_CONTEXT} SSH connection test failed: ${errorMessage}`);
+				return { success: false, error: errorMessage, latencyMs };
+			}
+
+			const lines = result.stdout.trim().split('\n');
+			if (lines[0] !== 'SSH_OK') {
+				return {
+					success: false,
+					error: 'Unexpected response from remote host',
+					latencyMs,
+				};
+			}
+
+			const hostname = lines[1] || 'unknown';
+			let agentVersion: string | undefined;
+			if (agentCommand && lines[2]) {
+				if (lines[2] !== 'AGENT_NOT_FOUND') {
+					agentVersion = 'installed';
+				}
+			}
+
+			console.log(`${LOG_CONTEXT} SSH connection test successful: ${hostname}`);
+			return {
+				success: true,
+				remoteInfo: { hostname, agentVersion },
+				latencyMs,
+			};
+		} catch (err) {
+			const latencyMs = Date.now() - startedAt;
+			return {
+				success: false,
+				error: `Connection test failed: ${String(err)}`,
+				latencyMs,
+			};
+		}
 	}
 }
 

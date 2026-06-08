@@ -392,6 +392,12 @@ const sshRemotesManager = getSshRemotesManager({
 		// cast at the boundary, same pattern used by `let securityToken = ...` below.
 		return settingsStore.get<V>(key, defaultValue) as V;
 	},
+	set: <V>(key: string, value: V): void => {
+		// FileStore.set is symmetric to .get — the overload set accepts
+		// `(string, unknown)` so casting at the boundary keeps the call site
+		// type-clean.
+		settingsStore.set(key, value as unknown);
+	},
 });
 
 // Register the manager as the default SshRemotes provider for the REST routes.
@@ -400,10 +406,30 @@ const sshRemotesManager = getSshRemotesManager({
 // does NOT register a provider — the `ssh-remote:*` IPC channels continue to
 // own that surface — and the routes correctly 503 when called outside the
 // headless server.
+//
+// W3-ssh-remotes-writers (audit #12): writer methods (saveConfig /
+// updateConfig / deleteConfig / setDefaultId / testConnection) are wired
+// alongside the reads. The provider interface marks them optional so older
+// read-only providers keep type-checking during rollout; the route layer
+// 503s on undefined methods.
 registerSshRemotesProvider({
 	getConfigs: () => sshRemotesManager.getConfigs() as { configs: unknown[] },
 	getDefaultId: () => sshRemotesManager.getDefaultId(),
 	getSshConfigHosts: () => sshRemotesManager.getSshConfigHosts(),
+	saveConfig: (partial) =>
+		sshRemotesManager.saveConfig(partial as Partial<import('../shared/types').SshRemoteConfig>),
+	updateConfig: (id, updates) =>
+		sshRemotesManager.updateConfig(
+			id,
+			updates as Partial<import('../shared/types').SshRemoteConfig>
+		),
+	deleteConfig: (id) => sshRemotesManager.deleteConfig(id),
+	setDefaultId: (id) => sshRemotesManager.setDefaultId(id),
+	testConnection: (configOrId, agentCommand) =>
+		sshRemotesManager.testConnection(
+			configOrId as string | import('../shared/types').SshRemoteConfig,
+			agentCommand
+		),
 });
 
 // Persistent token: stored in settings if present, otherwise ephemeral per boot.
