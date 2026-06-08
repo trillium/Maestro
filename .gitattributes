@@ -1,0 +1,9 @@
+# ISA.md is append-only by convention (Decisions / Verification / Changelog
+# sections only ever grow). Use git's union merge driver so parallel branches
+# that all append entries auto-merge by taking the union of both sides,
+# eliminating the conflict class entirely.
+#
+# Convention enforced: ISA.md edits are append-only. Never modify existing
+# entries; only add new ones. Union merge produces correct results only
+# under that discipline.
+ISA.md merge=union
