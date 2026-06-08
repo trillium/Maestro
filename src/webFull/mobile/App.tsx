@@ -101,6 +101,7 @@ import {
 	MarketplaceModal,
 	SettingsModal,
 	AgentErrorModal,
+	AutoRun,
 	type AppOverlaysStandingOvationData,
 	type AppOverlaysFirstRunCelebrationData,
 	type RecoveryAction,
@@ -404,6 +405,28 @@ export default function MobileApp() {
 	const marketplaceGate = useModalGate();
 	const settingsGate = useModalGate();
 	const agentErrorGate = useModalGate();
+
+	// ====================================================================
+	// Audit #10 mount-wave 3 — AutoRun visibility gate
+	// ====================================================================
+	//
+	// AutoRun is the lifted ~2285-LOC L2.5 leaf (`ISC-44.lift.autorun_main`,
+	// closed on `aee55e1d3`). Its host (renderer's `RightPanel.tsx`) renders
+	// it as a docked side-panel; webFull has no equivalent docking surface
+	// yet, so the wave-3 mount uses a keybinding-triggered overlay (same
+	// pattern as the wave-1 / wave-2 help modals). Real host wiring lives
+	// in subsequent waves when webFull surfaces a side-panel chrome.
+	const autoRunGate = useModalGate();
+
+	// AutoRun local state — content + mode + selectedFile. The renderer
+	// sources these from `useAutoRunContext` (still renderer-only), and
+	// since the brief explicitly scopes this wave to "debug keybinding-
+	// triggered" reachability, we hold this state locally with safe
+	// initial values. Host-data TODO: thread `useAutoRunContext` (or its
+	// webFull port when it lands) here in a follow-up wave.
+	const [autoRunContent, setAutoRunContent] = useState<string>('');
+	const [autoRunMode, setAutoRunMode] = useState<'edit' | 'preview'>('preview');
+	const [autoRunSelectedFile, setAutoRunSelectedFile] = useState<string | null>(null);
 
 	// AppOverlays trio — data sources. `null` means "do not render this overlay".
 	// Host-data wiring TODO: surface these from the modal-store / settings-store
@@ -1220,6 +1243,19 @@ export default function MobileApp() {
 					agentErrorGate.show();
 					return;
 				}
+				// Mount-wave 3 debug keybinding -----------------------------------
+				// Cmd+Shift+A → AutoRun (debug). No renderer-canonical shortcut
+				// for "show AutoRun" — the renderer docks AutoRun in the right
+				// side-panel; webFull doesn't yet have side-panel chrome, so
+				// Cmd+Shift+A is the webFull-debug variant that closes the
+				// trigger gap for the ~2285-LOC lifted AutoRun surface. Real
+				// integration (side-panel toggle / Settings-driven open) lands
+				// in subsequent waves once webFull surfaces a docking chrome.
+				if (e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+					e.preventDefault();
+					autoRunGate.show();
+					return;
+				}
 				// Cmd+Alt+F → first run celebration (debug)
 				if (e.altKey && (e.key === 'f' || e.key === 'F' || e.key === 'ƒ')) {
 					e.preventDefault();
@@ -1251,6 +1287,7 @@ export default function MobileApp() {
 		marketplaceGate,
 		settingsGate,
 		agentErrorGate,
+		autoRunGate,
 	]);
 
 	// Derive ContextWarningSash threshold inputs from the active tab's usage
@@ -1633,6 +1670,86 @@ export default function MobileApp() {
 		],
 		[agentErrorGate]
 	);
+
+	// ====================================================================
+	// Audit #10 mount-wave 3 — AutoRun host wiring (debug reachability)
+	// ====================================================================
+	//
+	// AutoRun is the ~2285-LOC L2.5 leaf (50 props) lifted from the renderer
+	// in `ISC-44.lift.autorun_main` (closed on `aee55e1d3`). The component
+	// already runs in pure browser runtime (zero `window.maestro` reads —
+	// verified by grep) and the 13 IPC sites were rewritten to W3 REST
+	// routes (`/api/fs/read-image`, `/api/autorun/write-doc`,
+	// `/api/autorun/{list,save,delete}-image`).
+	//
+	// Strip-and-promote pattern from the NewInstanceModal mount: each
+	// callback prop that the host doesn't have a real wiring source for is
+	// stubbed with a `webLogger.warn(...)` so the trigger is observable in
+	// the obs path. Data props default to safe values (empty document list,
+	// `null` folderPath / selectedFile / batchRunState). The component's
+	// "no folder selected" empty state renders inertly until host wires a
+	// real `folderPath` source.
+	//
+	// Host-data TODOs marked at each stub. Real wiring needs (per the
+	// lifted component's prop surface):
+	//   - useAutoRunContext (renderer-only today) — provides documentList /
+	//     documentTree / documentTaskCounts / batchRunState / sessionState
+	//   - useAutoRunHandlers (renderer-only today) — provides onCreateDocument /
+	//     onSelectDocument / onRefresh / onOpenBatchRunner / onStopBatchRun
+	//   - useSettingsStore bionify selectors — already partially threaded
+	//     via `useDesktopTheme()` for `bionifyReadingMode`; intensity +
+	//     algorithm use the renderer-side defaults until webFull surfaces
+	//     a typed setting (the lift docblock authorized this fallback).
+	//   - Settings folder-path source — `folderPath` lives on the renderer
+	//     in `useSettings().autoRunFolderPath`; webFull's `useSettings()`
+	//     doesn't yet expose that field — wave 4 ports the route.
+	//
+	// Render gating — AutoRun is mounted ONLY when the gate is open
+	// (debug-keybinding triggered). This keeps the surface inert during
+	// normal operation and avoids any side-effects (cache hydration,
+	// imageCache mutations) from happening before the user opts in.
+	const handleAutoRunOpenSetup = useCallback(() => {
+		// host-data TODO: opens the Settings modal scoped to the AutoRun
+		// folder-picker step. Routes through `settingsGate.show()` is the
+		// natural eventual binding; for now we keep a `webLogger.warn` so
+		// the trigger is observable.
+		webLogger.warn('[AutoRun] onOpenSetup stub fired (no Settings wiring yet)', 'Mobile');
+	}, []);
+	const handleAutoRunRefresh = useCallback(() => {
+		webLogger.warn('[AutoRun] onRefresh stub fired (no document refresh wiring yet)', 'Mobile');
+	}, []);
+	const handleAutoRunSelectDocument = useCallback((filename: string) => {
+		webLogger.warn(
+			`[AutoRun] onSelectDocument stub fired (filename=${filename}) — no document load wiring`,
+			'Mobile'
+		);
+		setAutoRunSelectedFile(filename);
+	}, []);
+	const handleAutoRunCreateDocument = useCallback(async (filename: string): Promise<boolean> => {
+		// host-data TODO: wire to `/api/autorun/write-doc` once webFull
+		// surfaces an `autoRunFolderPath`. Today returns `false` (creation
+		// failed) so the modal doesn't think we silently created a file.
+		webLogger.warn(
+			`[AutoRun] onCreateDocument stub fired (filename=${filename}) — no folder yet`,
+			'Mobile'
+		);
+		return false;
+	}, []);
+	const handleAutoRunOpenBatchRunner = useCallback(() => {
+		webLogger.warn('[AutoRun] onOpenBatchRunner stub fired (no batch runner wiring yet)', 'Mobile');
+	}, []);
+	const handleAutoRunStopBatchRun = useCallback((sessionId?: string) => {
+		webLogger.warn(
+			`[AutoRun] onStopBatchRun stub fired (session=${sessionId ?? 'undefined'}) — no batch wiring`,
+			'Mobile'
+		);
+	}, []);
+	const handleAutoRunModeChange = useCallback((mode: 'edit' | 'preview') => {
+		setAutoRunMode(mode);
+	}, []);
+	const handleAutoRunContentChange = useCallback((content: string) => {
+		setAutoRunContent(content);
+	}, []);
 
 	// Determine content based on connection state
 	const renderContent = () => {
@@ -2306,6 +2423,88 @@ export default function MobileApp() {
 						recoveryActions={syntheticRecoveryActions}
 						onDismiss={agentErrorGate.hide}
 					/>
+				)}
+
+				{/* ============================================================ */}
+				{/* Audit #10 mount-wave 3 — AutoRun                              */}
+				{/* ============================================================ */}
+
+				{/* AutoRun — Cmd+Shift+A triggers (debug). The renderer docks    */}
+				{/* this surface in `RightPanel.tsx`; webFull doesn't yet have a  */}
+				{/* side-panel chrome, so this wave mounts it as a full-screen    */}
+				{/* overlay with a close affordance. All host-data callbacks      */}
+				{/* are stubbed per the L2.5 strip-and-promote pattern (see       */}
+				{/* the host-wiring block above this JSX tree for TODOs). The     */}
+				{/* component itself runs in pure browser runtime — verified by  */}
+				{/* `grep window.maestro src/webFull/components/AutoRun.tsx` →    */}
+				{/* zero hits. `folderPath={null}` triggers the component's      */}
+				{/* "no folder selected" empty state (the chrome renders inert   */}
+				{/* and no fetch side-effects fire until host wires a real       */}
+				{/* folder source).                                              */}
+				{autoRunGate.open && (
+					<div
+						style={{
+							position: 'fixed',
+							top: 0,
+							left: 0,
+							right: 0,
+							bottom: 0,
+							backgroundColor: colors.bgMain,
+							zIndex: 1000,
+							display: 'flex',
+							flexDirection: 'column',
+							overflow: 'hidden',
+						}}
+					>
+						<div
+							style={{
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'space-between',
+								padding: '8px 12px',
+								borderBottom: `1px solid ${colors.border}`,
+								backgroundColor: colors.bgSidebar,
+							}}
+						>
+							<span style={{ fontSize: '13px', fontWeight: 500, color: colors.textMain }}>
+								AutoRun (debug)
+							</span>
+							<button
+								onClick={autoRunGate.hide}
+								style={{
+									padding: '4px 10px',
+									borderRadius: '4px',
+									backgroundColor: 'transparent',
+									color: colors.textMain,
+									border: `1px solid ${colors.border}`,
+									cursor: 'pointer',
+									fontSize: '12px',
+								}}
+							>
+								Close
+							</button>
+						</div>
+						<div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+							<AutoRun
+								theme={theme}
+								sessionId={activeSessionId ?? ''}
+								folderPath={null}
+								selectedFile={autoRunSelectedFile}
+								documentList={[]}
+								content={autoRunContent}
+								onContentChange={handleAutoRunContentChange}
+								mode={autoRunMode}
+								onModeChange={handleAutoRunModeChange}
+								onOpenSetup={handleAutoRunOpenSetup}
+								onRefresh={handleAutoRunRefresh}
+								onSelectDocument={handleAutoRunSelectDocument}
+								onCreateDocument={handleAutoRunCreateDocument}
+								onOpenBatchRunner={handleAutoRunOpenBatchRunner}
+								onStopBatchRun={handleAutoRunStopBatchRun}
+								bionifyReadingMode={bionifyReadingMode}
+							/>
+						</div>
+					</div>
 				)}
 			</div>
 		</div>
