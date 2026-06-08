@@ -193,6 +193,8 @@ Every feature ported into `src/webFull/` gets a parity catalog at `src/webFull/<
 - **2026-06-08** — **ISA.md marked `merge=union` in `.gitattributes` to eliminate parallel-branch conflicts.** Architect's 2026-06-08 audit flagged ISA.md as the most collision-prone file in the project: every layer ships a Decisions entry and a Verification entry on its own branch, and the default git 3-way merge driver treats parallel appends to the same file as a conflict requiring manual resolution. The textbook fix is git's built-in `union` merge driver — when two branches both append to ISA.md, the driver takes the union of both sides (keeping every line from both parents) instead of emitting conflict markers. Applied via a new `.gitattributes` at the repo root with a single rule `ISA.md merge=union` plus a comment block explaining the append-only convention that makes the driver semantically safe. **The convention is the load-bearing piece:** ISA.md edits must be append-only — Decisions/Verification/Changelog entries are write-once-by-date, never edited in place. Under that discipline, union merge produces correct results (the union of two append sets equals the intended combined history). If someone violates the convention by editing an existing entry on a branch, union merge will silently keep both versions side-by-side rather than flagging a conflict; that's the accepted trade-off for zero-friction parallel appends. **Files touched in this turn:** NEW `.gitattributes` at repo root (single rule + comment block) + this Decisions entry + a Verification evidence entry below. No source touched.
 - **2026-06-08** — Added `PLAN.md` at the repo root as a single entry-point summary linking to ISA, WEB_PORT_ORDER, and the three assessment docs. Living doc; updates land here when execution state changes materially.
 - **2026-06-08** — **Layer 0e shipped (scaffold-only): `@sentry/node` + `@sentry/browser` wrapper modules.** ISC-33's Layer 0a evidence closed as a partial PASS — `@sentry/electron` is absent from `dist/server/` only because `tsconfig.server.json` happens to omit the paths that pull it. A future import of `src/main/utils/sentry.ts` into the server graph (or any reach into the renderer-side Sentry wrapper from webFull) would silently regress that PASS. This wave lands the explicit-replacement modules so the next time someone needs server-side or webFull-side error reporting, the right SDK is sitting there ready. **NEW `src/server/sentry.ts`:** thin `@sentry/node` wrapper exposing `initSentry({ dsn?, environment? })`, `captureException(err, context?)`, `captureMessage(msg, level?, context?)`. Lazy require on `@sentry/node` only when a DSN is present (`opts.dsn` or `process.env.MAESTRO_SENTRY_DSN`); no-op otherwise. API shape mirrors `src/main/utils/sentry.ts` so call sites are mechanically swappable between desktop-main and headless-server. **NEW `src/webFull/utils/sentry.ts`:** same three-function surface, lazy dynamic-import of `@sentry/browser` (so Vite/Rollup code-splits it into a chunk that DSN-less users never download), DSN read from `import.meta.env.MAESTRO_PUBLIC_SENTRY_DSN` (the `PUBLIC_` prefix is Vite's convention for browser-safe env vars). **`package.json` deps added:** `@sentry/browser@^7.5.0` and `@sentry/node@^7.5.0` — both pinned to the same major as the existing `@sentry/electron@^7.5.0` for cross-process API compat (npm resolved both to 7.120.4, matching the version `@sentry/electron`'s transitive deps already pulled in). `@sentry/electron` itself is intentionally retained — the desktop renderer still uses it, only the server and webFull bundles are explicitly redirected away from it. **Deliberately deferred to follow-on:** the actual `initSentry()` call in `src/server/index.ts` (and in `src/webFull/main.tsx` / `App.tsx`). Decoupling the init wire-up from the scaffold avoids a merge collision with in-flight work on `layer-0c-remaining-writes` which is editing `src/server/index.ts`. **Scope guard verified:** `git diff main..HEAD -- src/web/ | wc -c` → 0; `git diff main..HEAD -- src/main/ | wc -c` → 0; `git diff main..HEAD -- src/server/index.ts | wc -c` → 0. **ISC-33 closure path:** when the init wire-up lands, ISC-33 graduates from "not in dist" (partial PASS) to "explicitly replaced with the right SDK per surface" (full PASS) — the wrapper modules are the keystone for that flip.
+- **2026-06-08** — **Additive upstream-config edits authorized under ISC-40 with explicit Decision entries.** ISC-40 ("bias new files; minimize touches") forbids invasive upstream-file edits but does NOT forbid all upstream touches. Recognized exception: additive config edits (extending a tailwind content glob to include `src/webFull/`, widening a tsconfig `include` array to add a new directory, etc.) where the diff is a single line and rebase-trivial. Each such edit MUST have an accompanying Decision entry naming the file, the line edited, the rationale, and the rebase-risk assessment. Already-landed examples: `tailwind.config.mjs` line 3 content-glob extension (Layer 2.1, sha `edfa532b2`); `tsconfig.server.json` `include` array extension to `src/main/process-manager/**/*.ts` and `src/main/parsers/**/*.ts` (Layer 0b, sha `0cbd4df5c`). Anti-criterion: NO modifications to existing logic in upstream files. Read-only patterns (re-exports, additive includes) are the only authorized shapes.
+- **2026-06-08** — **`getDataDir()` extended to read `customSyncPath` from `maestro-bootstrap.json` in headless mode.** Architect's 2026-06-08 audit (Finding 3) flagged that `src/shared/data-dir.ts` was not equivalent to `electron-store` semantics: Electron's `instances.ts:86` resolves the sync path as `getCustomSyncPath(_bootstrapStore) ?? app.getPath('userData')`, but headless mode only consulted `MAESTRO_DATA_DIR` and silently fell back to `~/.config/maestro` — meaning a desktop user who configured a custom sync path in the Electron Settings UI would have the headless server invisibly read defaults from a completely different directory, presenting an empty/stale state. New resolution order in headless mode: (1) `MAESTRO_DATA_DIR` env var (explicit override, highest precedence); (2) `customSyncPath` field in `<defaultUserData>/maestro-bootstrap.json` where `<defaultUserData>` is `~/.config/maestro`; (3) `~/.config/maestro` fallback. The bootstrap-reading path uses raw `fs.readFileSync` + `JSON.parse` — not `electron-store` or `FileStore` — to keep `src/shared/data-dir.ts` dependency-light. A minimal `isValidCustomSyncPath` validator inlined in the same file mirrors the absolute-path / null-byte / traversal-segment checks from `src/main/stores/utils.ts:isValidSyncPath`; the full Windows-reserved-name + sensitive-system-dir checks from that validator are deliberately NOT duplicated because the Electron-side validator already runs before the value ever lands in `maestro-bootstrap.json` (this is a second-line defense for read-time integrity, not the primary validator). Any error in the read path (missing file, malformed JSON, missing field, validation failure) falls through silently to the default, matching the Electron-side `getCustomSyncPath()` return-undefined-on-failure behavior. Files touched: `src/shared/data-dir.ts` only — additive logic, no upstream files modified (`src/main/` diff is zero bytes). Anti-pattern guard from the brief honored: the bootstrap-reading logic was kept INSIDE `src/shared/data-dir.ts` rather than spawning a new `src/shared/bootstrap-reader.ts` module, because the reader is ~12 LOC and only one caller exists — premature shared-module extraction would just add an import boundary with no second consumer to justify it.
 
 ## Changelog
 
@@ -670,3 +672,58 @@ After this commit, any future change to `MODAL_PRIORITIES` (e.g. a new modal kin
 3. Once both calls land, re-run the L0a/L0e probes and flip ISC-33 from partial PASS ("not in dist") to full PASS ("explicitly replaced with `@sentry/node` for server and `@sentry/browser` for webFull").
 
 This split (scaffold now, init later) was chosen to avoid colliding with the in-flight `layer-0c-remaining-writes` work on `src/server/index.ts`.
+
+### 2026-06-08 — customSyncPath bootstrap check evidence (audit Finding 3)
+
+**Environment:** Node 26.0.0; macOS arm64 (laptop); branch `fix-audit-followup-config-and-syncpath`; base SHA `17226f882` (off Layer 0c). `node_modules` symlinked from the main repo (`/Users/trilliumsmith/code/maestro/node_modules`) for the test session; removed before commit.
+
+#### Build verification — `tsc -p tsconfig.server.json`
+
+- **Probe:** `./node_modules/.bin/tsc -p tsconfig.server.json; echo EXIT=$?`
+- **Result:** `EXIT=0`. Zero TS errors. `dist/shared/data-dir.js` re-emitted with the new bootstrap-reading logic. Status: **PASS**.
+
+#### Smoke — seven cases against the compiled artifact
+
+A small node ESM smoke (`/tmp/maestro-data-dir-smoke.mjs`, deleted before commit) imports `dist/shared/data-dir.js`, writes and removes `~/.config/maestro/maestro-bootstrap.json` between cases, calls `__resetCacheForTesting()` to bust the module-level cache, then asserts the return of `getDataDir()`. The pre-existing bootstrap file (if any) is snapshotted and restored at the end so the smoke is non-destructive.
+
+```
+PASS  env-var-wins: /tmp/maestro-env-wins
+PASS  bootstrap-customSyncPath-wins: /tmp/maestro-bootstrap-target
+PASS  default-fallback: /Users/trilliumsmith/.config/maestro
+PASS  malformed-bootstrap-falls-through: /Users/trilliumsmith/.config/maestro
+PASS  bootstrap-without-customSyncPath-falls-through: /Users/trilliumsmith/.config/maestro
+PASS  bootstrap-non-absolute-rejected: /Users/trilliumsmith/.config/maestro
+PASS  bootstrap-traversal-rejected: /Users/trilliumsmith/.config/maestro
+
+Total: 7 passed, 0 failed.
+```
+
+Case-by-case:
+
+| Case | Setup | Expected | Result |
+| --- | --- | --- | --- |
+| (a) env-var-wins | `MAESTRO_DATA_DIR=/tmp/maestro-env-wins`, bootstrap has `customSyncPath=/tmp/should-be-ignored` | `/tmp/maestro-env-wins` | PASS — env var wins absolutely, bootstrap NOT consulted |
+| (b) bootstrap-customSyncPath-wins | no env, bootstrap has `customSyncPath=/tmp/maestro-bootstrap-target` | `/tmp/maestro-bootstrap-target` | PASS — bootstrap field returned (this is the audit-fixed case) |
+| (c) default-fallback | no env, no bootstrap file | `~/.config/maestro` | PASS — falls through to default cleanly |
+| (d) malformed-bootstrap-falls-through | no env, bootstrap is `{not valid json` | `~/.config/maestro` | PASS — JSON parse error swallowed, falls through to default |
+| (e) bootstrap-without-customSyncPath-falls-through | no env, bootstrap has `{someOtherField: 'x'}` | `~/.config/maestro` | PASS — missing field falls through |
+| (f) bootstrap-non-absolute-rejected | no env, `customSyncPath=relative/path` | `~/.config/maestro` | PASS — validator rejects non-absolute path |
+| (g) bootstrap-traversal-rejected | no env, `customSyncPath=/tmp/../etc` | `~/.config/maestro` | PASS — validator rejects literal `..` segment |
+
+#### Cleanup
+
+- Smoke script (`/tmp/maestro-data-dir-smoke.mjs`) deleted post-run.
+- Pre-existing `~/.config/maestro/maestro-bootstrap.json` (if any) restored to its pre-smoke contents; if none existed, the file was unlinked.
+- `node_modules` symlink (used for the `tsc` build) removed before commit.
+
+#### Scope check
+
+- `git diff main..HEAD -- src/web/ | wc -c` → `0` (zero bytes).
+- `git diff main..HEAD -- src/main/ | wc -c` → `0` (zero bytes — Architect's Finding 3 fix does NOT touch any upstream files, matching the brief's anti-pattern guard).
+- `git diff main..HEAD -- src/renderer/ | wc -c` → `0` (zero bytes).
+- Files modified in this turn: `src/shared/data-dir.ts` (additive logic — bootstrap-reading + validation), `ISA.md` (Decisions appends + this Verification entry).
+
+#### Architect audit Finding 2 — Decisions entry verification
+
+- **Probe:** `grep -c "Additive upstream-config edits authorized" ISA.md`
+- **Result:** 1 — the legalization Decision entry is appended (line in the Decisions section, dated 2026-06-08). This closes Finding 2: the `tailwind.config.mjs` line-3 content-glob edit (Layer 2.1, sha `edfa532b2`) and the `tsconfig.server.json` `include` array extension (Layer 0b, sha `0cbd4df5c`) are now both retroactively legalized under ISC-40's additive-config exception, with the rebase-risk assessment documented in the Decision entry itself. Status: **PASS**.
