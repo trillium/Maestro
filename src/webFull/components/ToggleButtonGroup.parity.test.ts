@@ -115,8 +115,14 @@ export const toggleButtonGroupParityCatalog: ParityStory[] = [
 			// option.label wins over the labels map
 			{ verb: 'hasText', target: 'button:nth-of-type(1)', value: 'Small' },
 			{ verb: 'hasText', target: 'button:nth-of-type(2)', value: 'Medium' },
-			// The fallback string from labels must NOT have leaked through
-			{ verb: 'hasElement', target: 'div:not(:has(button:contains("FALLBACK")))' },
+			// The fallback string from labels must NOT have leaked through.
+			// (`:contains("X")` is a jQuery selector and is not valid CSS — the
+			// Playwright executor parses it with `document.querySelector`-shape
+			// CSS and would throw `SyntaxError`. The catalog vocabulary's
+			// absence form uses `body:not(:has-text("X"))`, which Playwright
+			// supports natively; the `runParityCatalog` executor routes
+			// `:not(:has-text(` to the absence-selector branch.)
+			{ verb: 'hasElement', target: 'body:not(:has-text("FALLBACK"))' },
 		],
 		happyPath: true,
 	},

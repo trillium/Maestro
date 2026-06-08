@@ -24,7 +24,12 @@ interface QRCodeProps {
 	value: string;
 	/** Size in pixels (default: 128) */
 	size?: number;
-	/** Background color (default: transparent) */
+	/** Background color (default: '#0000' — 4-digit hex transparent). The
+	 *  underlying `qrcode` library's `hex2rgba()` synchronously throws
+	 *  `Invalid hex color: transparent` on the string 'transparent', so the
+	 *  default has to be a hex value. `#0000` is the 4-digit hex form with
+	 *  alpha=0, which renders identically to the conceptual default of a
+	 *  fully-transparent background. */
 	bgColor?: string;
 	/** Foreground color (default: white) */
 	fgColor?: string;
@@ -37,7 +42,7 @@ interface QRCodeProps {
 export const QRCode = memo(function QRCode({
 	value,
 	size = 128,
-	bgColor = 'transparent',
+	bgColor = '#0000',
 	fgColor = '#FFFFFF',
 	alt = 'QR Code',
 	className = '',

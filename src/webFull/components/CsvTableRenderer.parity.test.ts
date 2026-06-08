@@ -136,8 +136,13 @@ export const csvTableRendererParityCatalog: ParityStory[] = [
 		then: [
 			// At least one <mark> element is present (matches are highlighted)
 			{ verb: 'hasElement', target: 'mark' },
-			// The matched substring "al" appears inside a <mark>
-			{ verb: 'hasText', target: 'mark', value: 'al' },
+			// The matched substring appears inside a <mark>. The renderer's
+			// `highlightMatches()` builds a case-INSENSITIVE regex (`gi` flag)
+			// but splits the original cell text and preserves the source case
+			// — so the match against "Alice" lands a `<mark>` whose innerText
+			// is `Al` (capital A from "Alice"), NOT `al`. The assertion uses
+			// the actual rendered case so it reflects the observable DOM.
+			{ verb: 'hasText', target: 'mark', value: 'Al' },
 			// Non-matching rows are filtered out — "Bob" should NOT be present in the body
 			{ verb: 'hasElement', target: 'tbody:not(:has-text("Bob"))' },
 		],
