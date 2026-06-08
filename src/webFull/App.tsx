@@ -17,6 +17,7 @@ import {
 	useCallback,
 } from 'react';
 import { ThemeProvider } from './components/ThemeProvider';
+import { LayerStackProvider } from './contexts/LayerStackContext';
 import { registerServiceWorker, isOffline } from './utils/serviceWorker';
 import { getMaestroConfig } from './utils/config';
 import type { MaestroConfig } from './utils/config';
@@ -283,9 +284,17 @@ export function App() {
             Once the desktop app sends a theme (via desktopTheme), it will override the device preference.
           */}
 					<ThemeProvider theme={desktopTheme || undefined} useDevicePreference>
-						<Suspense fallback={<LoadingFallback />}>
-							<WebApp />
-						</Suspense>
+						{/*
+            LayerStackProvider — added in Layer 3.1 (Settings General-tab port).
+            Wraps the lazy WebApp so the lifted Modal primitives (Layer 2.1)
+            have a layer stack to register against for Escape handling and
+            priority-based stacking. See ISA Decisions 2026-06-08 (Layer 2.1).
+          */}
+						<LayerStackProvider>
+							<Suspense fallback={<LoadingFallback />}>
+								<WebApp />
+							</Suspense>
+						</LayerStackProvider>
 					</ThemeProvider>
 				</ThemeUpdateContext.Provider>
 			</OfflineContext.Provider>
