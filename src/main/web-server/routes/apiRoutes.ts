@@ -391,6 +391,190 @@ export function getFsProvider(): FsProvider | null {
 	return fsProvider;
 }
 
+/* ============ Autorun (images) provider registry (W3-autorun-images — closes ISC-44.shim.autorun_images_routes, server-half) ============ */
+//
+// Mirrors the WakaTimeProvider / StatsProvider / FontsProvider / FsProvider /
+// MarketplaceProvider / AgentsProvider patterns above. Headless entrypoints
+// register a provider backed by `src/server/autorun-manager.ts`; the Electron
+// path leaves it unset and the routes 503 cleanly. NO fallback default is
+// constructed here — the headless boot path is the only legitimate
+// registrant. The renderer-side image-handling IPC handlers
+// (`autorun:saveImage`, `autorun:deleteImage`, `autorun:listImages`) at
+// `src/main/ipc/handlers/autorun.ts:501-752` continue to own the image
+// surface inside Electron, and the routes here do NOT touch them. Both stacks
+// can run side-by-side because the on-disk layout
+// (`<folderPath>/images/{docName}-{timestamp}.{ext}`) is the cross-mode
+// contract.
+//
+// Sibling to the `FsProvider.writeDoc` route under the umbrella
+// `ISC-44.shim.big_3_ipc_strategy` Decision. The AutoRun lift's image-handling
+// hook (`src/renderer/hooks/batch/useAutoRunImageHandling.ts`) is the consumer
+// — three call sites paste-image / file-upload / remove-attachment that the
+// AutoRun shell needed working in webFull for the lift to continue.
+//
+// Route surface (3 endpoints):
+//   GET    /api/autorun/list-images?folderPath=…&docFilename=…
+//                                            — `{images: [{filename,
+//                                                          relativePath,
+//                                                          sizeBytes,
+//                                                          modifiedAt}], timestamp}`
+//   POST   /api/autorun/save-image           — body `{folderPath, docFilename,
+//                                                     dataUrl, extension}`
+//                                              reply `{filename, relativePath,
+//                                                      timestamp}`
+//   DELETE /api/autorun/delete-image         — body `{folderPath, relativePath}`
+//                                              reply `{removed: bool, timestamp}`
+//
+// All path-accepting routes validate via `validateFsPath()` for `folderPath`
+// (re-use the W3-fs validator to keep the rule synchronized) and via inline
+// `relativePath` / `docFilename` / `extension` checks BEFORE invoking the
+// provider, so traversal / NUL bytes / non-absolute paths / disallowed
+// extensions / disallowed filename characters fail loud with a 400 — the
+// provider never sees a hostile path. The provider also re-validates as a
+// belt-and-suspenders defense (see `src/server/autorun-manager.ts`).
+//
+// SSH remote support is deliberately out of scope here (matches the W3-fs
+// precedent); the route layer 501s when a `?sshRemoteId=` query param is
+// present so callers don't silently get a local result when a remote was
+// requested. The renderer-side IPC handlers continue to own the SSH path
+// inside Electron.
+//
+// Rate limits: the list route uses the read budget (`rateLimitConfig.max`);
+// save and delete use the stricter mutator-write budget
+// (`rateLimitConfig.maxPost`).
+export interface AutorunProvider {
+	/**
+	 * List images previously saved for a document under
+	 * `<folderPath>/images/`. Returns `{ images: [] }` when the directory
+	 * does not exist (normal "no images yet" case, not an error). Throws on
+	 * permission errors / other non-ENOENT failures so the route layer
+	 * surfaces a 500. The route pre-validates `folderPath` + `docFilename`
+	 * so this method never sees a hostile input.
+	 */
+	listImages: (
+		folderPath: string,
+		docFilename: string
+	) => Promise<{
+		images: Array<{
+			filename: string;
+			relativePath: string;
+			sizeBytes: number;
+			modifiedAt: string;
+		}>;
+	}>;
+	/**
+	 * Save an image to `<folderPath>/images/{docFilename-stem}-{timestamp}.{ext}`.
+	 * Accepts either a bare base64 payload or a full `data:image/<ext>;base64,…`
+	 * data URL — the manager decodes both. Returns the generated filename +
+	 * the markdown-relative path the AutoRun shell needs for the image
+	 * reference. The route pre-validates inputs so this method only sees
+	 * sanitized values; the manager re-validates as defense-in-depth.
+	 */
+	saveImage: (
+		folderPath: string,
+		docFilename: string,
+		dataUrl: string,
+		extension: string
+	) => Promise<{ filename: string; relativePath: string }>;
+	/**
+	 * Delete an image. `relativePath` must start with `images/` and must not
+	 * contain `..` segments. Returns `{ removed: false }` when the file was
+	 * already absent (ENOENT) so the AutoRun shell's optimistic-UI flow
+	 * tolerates double-deletes. Other failures (permission, EISDIR) throw
+	 * so the route layer surfaces a 500.
+	 */
+	deleteImage: (folderPath: string, relativePath: string) => Promise<{ removed: boolean }>;
+}
+
+let autorunProvider: AutorunProvider | null = null;
+
+/**
+ * Register the active Autorun (images) provider. Pass null to clear.
+ *
+ * The headless server boot path calls this once before `WebServer.start()` so
+ * the `/api/autorun/{list,save,delete}-image*` routes are wired by the time the
+ * first client request arrives. Electron-host paths can ignore this — the
+ * routes 503 cleanly when no provider is registered, and the Electron
+ * renderer continues to use the `autorun:{saveImage,deleteImage,listImages}`
+ * IPC channels directly.
+ */
+export function registerAutorunProvider(provider: AutorunProvider | null): void {
+	autorunProvider = provider;
+}
+
+/**
+ * Internal accessor for the route handlers. Returns the registered provider
+ * or `null` if none is registered (the routes translate `null` → HTTP 503).
+ * Exposed for testing.
+ */
+export function getAutorunProvider(): AutorunProvider | null {
+	return autorunProvider;
+}
+
+/**
+ * Validate the relativePath for the autorun image routes. Inlined here
+ * rather than imported from `src/server/autorun-manager.ts` for the same
+ * reason as `validateFsPath()`: the routes module deliberately avoids
+ * depending on the `src/server/` tree. The two validators MUST stay in sync;
+ * any change to one is a change to both.
+ */
+function validateImageRelativePath(p: unknown): string | null {
+	if (typeof p !== 'string' || p.length === 0) {
+		return 'relativePath must be a non-empty string';
+	}
+	if (p.includes('\0')) return 'relativePath must not contain NUL byte';
+	const normalized = path.normalize(p);
+	const posix = normalized.replace(/\\/g, '/');
+	if (normalized.includes('..')) return 'relativePath must not contain `..` segments';
+	if (path.isAbsolute(normalized)) return 'relativePath must be relative';
+	if (!posix.startsWith('images/')) return 'relativePath must start with `images/`';
+	const remainder = posix.slice('images/'.length);
+	if (remainder.length === 0) return 'relativePath must include an image filename after `images/`';
+	if (remainder.includes('/') || remainder.includes('\\')) {
+		return 'relativePath must not include nested directories under `images/`';
+	}
+	return null;
+}
+
+/**
+ * Validate a docFilename for the autorun image routes. Inlined matching
+ * `sanitizeDocName()` in `src/server/autorun-manager.ts`. Returns null on
+ * success; the sanitized stem is computed inside the manager itself —
+ * the route layer just gates obvious-bad inputs.
+ */
+function validateAutorunDocFilename(p: unknown): string | null {
+	if (typeof p !== 'string' || p.length === 0) {
+		return 'docFilename must be a non-empty string';
+	}
+	if (p.includes('\0')) return 'docFilename must not contain NUL byte';
+	const basename = path.basename(p).replace(/\.md$/i, '');
+	if (basename.length === 0) return 'docFilename must not be empty after sanitization';
+	if (basename.includes('..') || basename.includes('/') || basename.includes('\\')) {
+		return 'docFilename must not contain path separators or `..`';
+	}
+	if (!/^[\w.\- ]+$/.test(basename)) {
+		return 'docFilename contains characters outside the allowlist (\\w, ., -, space)';
+	}
+	return null;
+}
+
+/**
+ * Validate an image extension against the fixed allowlist. Mirrors
+ * `sanitizeExtension()` in `src/server/autorun-manager.ts`.
+ */
+function validateImageExtension(p: unknown): string | null {
+	if (typeof p !== 'string') return 'extension must be a string';
+	const cleaned = p
+		.toLowerCase()
+		.replace(/^\./, '')
+		.replace(/[^a-z]/g, '');
+	const allowed = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
+	if (!allowed.includes(cleaned)) {
+		return `extension must be one of ${allowed.join(', ')}`;
+	}
+	return null;
+}
+
 /**
  * Validate an absolute filesystem path for cross-process use.
  *
@@ -1832,6 +2016,286 @@ export class ApiRoutes {
 					return reply.code(500).send({
 						error: 'Internal Server Error',
 						message: `Failed to write doc: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// ============ Autorun image endpoints (W3-autorun-images — closes ISC-44.shim.autorun_images_routes, server-half) ============
+		//
+		// Additive REST routes that mirror the renderer-side
+		// `autorun:{saveImage,deleteImage,listImages}` IPC handlers at
+		// `src/main/ipc/handlers/autorun.ts:501-752`. 503 when no
+		// AutorunProvider is registered (the Electron path leaves it unset).
+		// Per the umbrella `ISC-44.shim.big_3_ipc_strategy` Decision
+		// (2026-06-08), additive `src/main/web-server/routes/` edits are
+		// authorized. NO touch to `src/main/ipc/handlers/autorun.ts` or the
+		// renderer-side preload bridge — both continue to own the image
+		// surface inside Electron.
+		//
+		// Route surface (3 endpoints):
+		//   GET    /api/autorun/list-images?folderPath=…&docFilename=…
+		//                          — `{images: [{filename, relativePath,
+		//                                        sizeBytes, modifiedAt}],
+		//                              timestamp}`
+		//   POST   /api/autorun/save-image  — body `{folderPath, docFilename,
+		//                                            dataUrl, extension}`
+		//                          — reply `{filename, relativePath, timestamp}`
+		//   DELETE /api/autorun/delete-image — body `{folderPath, relativePath}`
+		//                          — reply `{removed: bool, timestamp}`
+		//
+		// All routes pre-validate `folderPath` via `validateFsPath()` (the same
+		// rule the `/api/fs/*` cluster uses), `relativePath` via
+		// `validateImageRelativePath()` (`images/` prefix + no traversal),
+		// `docFilename` via `validateAutorunDocFilename()` (no path
+		// separators + character allowlist), and `extension` via
+		// `validateImageExtension()` (fixed allowlist of 6 image formats).
+		// Hostile inputs fail loud with 400; the provider re-validates
+		// belt-and-suspenders.
+		//
+		// SSH remote support is deliberately out of scope here (matches the
+		// W3-fs precedent); `?sshRemoteId=` returns 501 so callers don't
+		// silently get a local result when a remote was requested.
+
+		// GET /api/autorun/list-images — mirrors `autorun:listImages` reply.
+		server.get(
+			`/${token}/api/autorun/list-images`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getAutorunProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Autorun provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { folderPath, docFilename, sshRemoteId } = request.query as {
+					folderPath?: string;
+					docFilename?: string;
+					sshRemoteId?: string;
+				};
+				if (sshRemoteId) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side autorun routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const folderReason = validateFsPath(folderPath);
+				if (folderReason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: `folderPath: ${folderReason}`,
+						timestamp: Date.now(),
+					});
+				}
+				const docReason = validateAutorunDocFilename(docFilename);
+				if (docReason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: docReason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.listImages(folderPath as string, docFilename as string);
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to list images: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// POST /api/autorun/save-image — mirrors `autorun:saveImage` reply.
+		// The renderer-side handler accepts the bare base64 payload (the
+		// AutoRun shell strips the `data:image/...;base64,` prefix client-side
+		// at `useAutoRunImageHandling.ts:274`). The route accepts either form —
+		// the manager's decodeImageDataUrl() handles both — so a future
+		// caller can post the FileReader result unchanged without manual
+		// stripping.
+		server.post(
+			`/${token}/api/autorun/save-image`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.maxPost,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getAutorunProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Autorun provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const body = request.body as
+					| {
+							folderPath?: unknown;
+							docFilename?: unknown;
+							dataUrl?: unknown;
+							extension?: unknown;
+							sshRemoteId?: unknown;
+					  }
+					| undefined;
+				if (body && typeof body.sshRemoteId === 'string' && body.sshRemoteId.length > 0) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side autorun routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const folderReason = validateFsPath(body?.folderPath);
+				if (folderReason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: `folderPath: ${folderReason}`,
+						timestamp: Date.now(),
+					});
+				}
+				const docReason = validateAutorunDocFilename(body?.docFilename);
+				if (docReason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: docReason,
+						timestamp: Date.now(),
+					});
+				}
+				const extReason = validateImageExtension(body?.extension);
+				if (extReason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: extReason,
+						timestamp: Date.now(),
+					});
+				}
+				if (typeof body?.dataUrl !== 'string' || body.dataUrl.length === 0) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'dataUrl must be a non-empty string',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.saveImage(
+						body.folderPath as string,
+						body.docFilename as string,
+						body.dataUrl,
+						body.extension as string
+					);
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to save image: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// DELETE /api/autorun/delete-image — mirrors `autorun:deleteImage`.
+		// The brief authorized either body or query for the inputs; we accept
+		// BOTH — Fastify's `DELETE` body parsing is enabled by default in this
+		// codebase, but some HTTP clients (curl with default options, fetch
+		// without `body`) don't easily send a DELETE body, so reading the
+		// fields from the query string as a fallback keeps the route usable
+		// from both shapes.
+		server.delete(
+			`/${token}/api/autorun/delete-image`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.maxPost,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getAutorunProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Autorun provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const body =
+					(request.body as
+						| {
+								folderPath?: unknown;
+								relativePath?: unknown;
+								sshRemoteId?: unknown;
+						  }
+						| undefined) ?? {};
+				const query = request.query as {
+					folderPath?: string;
+					relativePath?: string;
+					sshRemoteId?: string;
+				};
+				const folderPath = typeof body.folderPath === 'string' ? body.folderPath : query.folderPath;
+				const relativePath =
+					typeof body.relativePath === 'string' ? body.relativePath : query.relativePath;
+				const sshRemoteId =
+					typeof body.sshRemoteId === 'string' ? body.sshRemoteId : query.sshRemoteId;
+				if (sshRemoteId) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side autorun routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const folderReason = validateFsPath(folderPath);
+				if (folderReason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: `folderPath: ${folderReason}`,
+						timestamp: Date.now(),
+					});
+				}
+				const relReason = validateImageRelativePath(relativePath);
+				if (relReason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: relReason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.deleteImage(folderPath as string, relativePath as string);
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to delete image: ${error.message}`,
 						timestamp: Date.now(),
 					});
 				}
