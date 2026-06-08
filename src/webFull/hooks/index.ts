@@ -191,3 +191,10 @@ export type {
 	UseMobileAutoReconnectDeps,
 	UseMobileAutoReconnectReturn,
 } from './useMobileAutoReconnect';
+
+// ============================================================================
+// Audit #10 pivot — modal-gate primitive for wiring lifted overlay components
+// ============================================================================
+
+export { useModalGate, default as useModalGateDefault } from './useModalGate';
+export type { ModalGate } from './useModalGate';
