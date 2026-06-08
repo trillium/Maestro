@@ -264,6 +264,50 @@ export type { TourStepConfig, TourUIAction, SpotlightInfo } from './Wizard/tour/
 // Wizard services (pure data + parsers, 0 IPC)
 export { wizardPrompts, parseStructuredOutput } from './Wizard/services/wizardPrompts';
 
+// ============================================================================
+// Wizard Phase 3B — phaseGenerator (lifted from
+// `src/renderer/components/Wizard/services/phaseGenerator.ts`, 1,348 LOC).
+//
+// Every `window.maestro.*` reference was rewritten per the IPC mapping in
+// the lift task spec:
+//   - 6 process IPC sites → injected `ProcessLifecycleClient`
+//   - autorun.onFileChanged → SSE via `watchAutorunFolder`
+//   - autorun.unwatchFolder → no-op (cleanup returned by SSE subscriber)
+//   - fs.readFile → `GET /:token/api/fs/read-file`
+//   - autorun.writeDoc → `POST /:token/api/autorun/write-doc`
+//   - autorun.listDocs / readDoc → **stubbed** (server routes missing —
+//     `readDocumentsFromDisk` is inert until the routes land)
+//   - agents.get → `GET /:token/api/agents/detected`
+// `serverToken` + `ProcessLifecycleClient` are threaded through the
+// constructor; the original module's singleton export is replaced with a
+// `createPhaseGenerator(config)` factory so multi-session hosts can hold
+// distinct instances.
+// ============================================================================
+export {
+	PhaseGenerator,
+	createPhaseGenerator,
+	phaseGeneratorUtils,
+	wizardDebugLogger,
+	sanitizeFilename,
+	deriveSshRemoteId,
+	generateDocumentGenerationPrompt,
+	parseGeneratedDocuments,
+	countTasks,
+	validateDocuments,
+	splitIntoPhases,
+	AUTO_RUN_FOLDER_NAME as PHASE_GENERATOR_AUTO_RUN_FOLDER_NAME,
+} from './Wizard/services/phaseGenerator';
+export type {
+	PhaseGeneratorConfig,
+	GenerationConfig as PhaseGenerationConfig,
+	GenerationResult as PhaseGenerationResult,
+	GenerationCallbacks as PhaseGenerationCallbacks,
+	CreatedFileInfo as PhaseGeneratorCreatedFileInfo,
+	WizardDebugLogEntry,
+	WizardMessage as PhaseGeneratorWizardMessage,
+	GeneratedDocument as PhaseGeneratorGeneratedDocument,
+} from './Wizard/services/phaseGenerator';
+
 // InlineWizard tree
 export { WizardPill } from './InlineWizard/WizardPill';
 export { WizardConfidenceGauge } from './InlineWizard/WizardConfidenceGauge';
