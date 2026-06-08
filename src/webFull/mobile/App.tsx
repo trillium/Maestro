@@ -17,7 +17,10 @@ import {
 import { useNotifications } from '../hooks/useNotifications';
 import { useUnreadBadge } from '../hooks/useUnreadBadge';
 import { useOfflineQueue } from '../hooks/useOfflineQueue';
-import { useMobileSessionManagement } from '../hooks/useMobileSessionManagement';
+import {
+	useMobileSessionManagement,
+	AI_LOGS_NO_TAB_BUCKET,
+} from '../hooks/useMobileSessionManagement';
 import { publishSettingsChanged } from '../hooks/useSettings';
 import { useModalGate } from '../hooks/useModalGate';
 import { useOfflineStatus, useMaestroMode, useDesktopTheme } from '../main';
@@ -1300,16 +1303,18 @@ export default function MobileApp() {
 	// `sessionLogs.aiLogs` / `sessionLogs.shellLogs`. Critical fields:
 	//
 	//   - `aiTabs[].logs` — TerminalOutput reads logs via
-	//     `getActiveTab(session)?.logs` for AI mode. webFull stores logs at
-	//     session level (`sessionLogs.aiLogs`), NOT per-tab — the WS protocol
-	//     doesn't yet carry per-tab log payloads. As a fidelity-degrading
-	//     compromise, ALL logs are routed to the active tab's `logs` array.
-	//     This is correct for the single-tab case (the common case today) but
-	//     incorrect for multi-tab sessions where each tab has its own
-	//     conversation. The fidelity gap is documented as a follow-up brief:
-	//     the WS protocol needs to emit per-tab log frames (or the existing
-	//     `session_output` frame needs a `tabId` field that the client uses
-	//     to bucket logs by tab).
+	//     `getActiveTab(session)?.logs` for AI mode. As of the per-tab log
+	//     bucketing wave, webFull's `useMobileSessionManagement` exposes
+	//     `sessionLogs.aiLogsByTab: Record<tabId, LogEntry[]>` — the
+	//     `session_output` WS frame already carries `tabId` (see
+	//     `src/main/process-listeners/data-listener.ts` ≈line 152) and the
+	//     consumer hook buckets each streaming entry into the matching tab's
+	//     array. The adapter below routes `aiLogsByTab[tab.id]` into each
+	//     `aiTab.logs`, restoring per-tab conversation fidelity. The
+	//     `AI_LOGS_NO_TAB_BUCKET` fallback (legacy frames missing `tabId`
+	//     during a rolling deploy + `user_input` frames that don't carry
+	//     `tabId`) is folded into the active tab's view so nothing falls on
+	//     the floor during the back-compat window.
 	//
 	//   - `shellLogs` — pulled straight from `sessionLogs.shellLogs`. Same
 	//     `LogEntry.source` widening: webFull's `'user' | 'stdout' | 'stderr'`
@@ -1401,31 +1406,42 @@ export default function MobileApp() {
 		const aiLogs = widenLogs(sessionLogs.aiLogs);
 		const shellLogs = widenLogs(sessionLogs.shellLogs);
 
-		// Synthesize aiTabs from the webFull session, wiring the active tab's
-		// `logs` to the session-level aiLogs. Multi-tab fidelity gap noted:
-		// the webFull WS protocol does NOT yet bucket logs by tabId, so every
-		// tab gets the same `logs` payload. Single-tab sessions render
-		// correctly; multi-tab sessions show the union on every tab. Follow-up
-		// brief: add a `tabId` field to the `session_output` WS frame and
-		// have `useMobileSessionManagement` bucket logs into per-tab arrays.
-		const synthesizedAiTabs: RendererAITab[] = (activeSession.aiTabs ?? []).map((tab) => ({
-			id: tab.id,
-			agentSessionId: tab.agentSessionId ?? null,
-			name: tab.name ?? null,
-			starred: (tab as any).starred ?? false,
-			// Active tab gets the session's aiLogs; other tabs get empty until
-			// the WS protocol carries per-tab payloads.
-			logs: tab.id === activeSession.activeTabId ? aiLogs : [],
-			inputValue: (tab as any).inputValue ?? '',
-			stagedImages: [],
-			usageStats: tab.usageStats,
-			createdAt: (tab as any).createdAt ?? Date.now(),
-			state: ((tab as any).state ?? 'idle') as 'idle' | 'busy',
-		}));
+		// Synthesize aiTabs from the webFull session. Per-tab log bucketing wave:
+		// `sessionLogs.aiLogsByTab` is a `Record<tabId, LogEntry[]>` populated
+		// by `useMobileSessionManagement.onSessionOutput` using the `tabId`
+		// field on the `session_output` WS frame. Each tab's `logs` array now
+		// pulls FROM its own bucket — multi-tab sessions render the correct
+		// per-tab conversation rather than the union-on-active-tab compromise
+		// the previous wave shipped.
+		//
+		// The active tab additionally folds in `AI_LOGS_NO_TAB_BUCKET` (logs
+		// that arrived without a `tabId`: legacy server frames in-flight during
+		// a rolling deploy, plus `user_input` frames which don't carry tabId).
+		// This keeps the back-compat window non-destructive.
+		const noTabFallback = widenLogs(sessionLogs.aiLogsByTab[AI_LOGS_NO_TAB_BUCKET] ?? []);
+
+		const synthesizedAiTabs: RendererAITab[] = (activeSession.aiTabs ?? []).map((tab) => {
+			const tabBucket = widenLogs(sessionLogs.aiLogsByTab[tab.id] ?? []);
+			const isActive = tab.id === activeSession.activeTabId;
+			return {
+				id: tab.id,
+				agentSessionId: tab.agentSessionId ?? null,
+				name: tab.name ?? null,
+				starred: (tab as any).starred ?? false,
+				// Active tab also surfaces the no-tab fallback bucket so
+				// untagged user-input + legacy frames remain visible somewhere.
+				logs: isActive ? [...tabBucket, ...noTabFallback] : tabBucket,
+				inputValue: (tab as any).inputValue ?? '',
+				stagedImages: [],
+				usageStats: tab.usageStats,
+				createdAt: (tab as any).createdAt ?? Date.now(),
+				state: ((tab as any).state ?? 'idle') as 'idle' | 'busy',
+			};
+		});
 
 		// If the session has no aiTabs, synthesize a single tab so TerminalOutput
-		// can render `activeTab.logs`. This matches the webFull WS protocol
-		// where a session without explicit tab tracking still produces aiLogs.
+		// can render `activeTab.logs`. Pure single-tab legacy case: route the
+		// flat `aiLogs` (which already includes the no-tab fallback) in.
 		const effectiveAiTabs: RendererAITab[] =
 			synthesizedAiTabs.length > 0
 				? synthesizedAiTabs
