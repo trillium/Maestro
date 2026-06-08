@@ -17,7 +17,7 @@ import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import ReactMarkdown from 'react-markdown';
 import { Modal } from './ui/Modal';
 import { useSettings } from '../hooks';
-import { createReleaseNotesMarkdownComponents } from '../utils/markdownConfig';
+import { createReleaseNotesMarkdownComponents } from '../../shared/utils/markdownConfig';
 
 interface Release {
 	tag_name: string;

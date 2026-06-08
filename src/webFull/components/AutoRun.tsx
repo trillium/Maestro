@@ -190,27 +190,30 @@ import {
 	Wand2,
 	Save,
 } from 'lucide-react';
-import { getEncoder, formatTokenCount } from '../../renderer/utils/tokenCounter';
+import { getEncoder, formatTokenCount } from '../../shared/utils/tokenCounter';
 import type { Theme } from '../../shared/theme-types';
-import type { BatchRunState, SessionState, Shortcut } from '../../renderer/types';
-import type { FileNode } from '../../renderer/types/fileTree';
+import type { BatchRunState } from '../../shared/types/batchRunState';
+import type { SessionState } from '../../shared/types/sessionState';
+import type { Shortcut } from '../../shared/types/shortcut';
+import type { FileNode } from '../../shared/types/fileTree';
 import { AutoRunnerHelpModal } from './AutoRunnerHelpModal';
 import { ResetTasksConfirmModal } from './ResetTasksConfirmModal';
 import { MermaidRenderer } from './MermaidRenderer';
 import { AutoRunDocumentSelector, DocumentTaskCount } from './AutoRunDocumentSelector';
 import { AutoRunLightbox } from './AutoRunLightbox';
 import { AutoRunSearchBar } from './AutoRunSearchBar';
-import { useTemplateAutocomplete, useAutoRunUndo } from '../../renderer/hooks';
+import { useTemplateAutocomplete } from '../../shared/hooks/useTemplateAutocomplete';
+import { useAutoRunUndo } from '../../shared/hooks/useAutoRunUndo';
 import { useAutoRunImageHandling, imageCache } from '../hooks/useAutoRunImageHandling';
 import { TemplateAutocompleteDropdown } from './TemplateAutocompleteDropdown';
 import {
 	REMARK_GFM_PLUGINS,
 	generateAutoRunProseStyles,
 	createMarkdownComponents,
-} from '../../renderer/utils/markdownConfig';
+} from '../../shared/utils/markdownConfig';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
-import { remarkFileLinks, buildFileTreeIndices } from '../../renderer/utils/remarkFileLinks';
-import { useBatchStore } from '../../renderer/stores/batchStore';
+import { remarkFileLinks, buildFileTreeIndices } from '../../shared/utils/remarkFileLinks';
+import { useBatchStore } from '../../shared/stores/batchStore';
 import { buildApiUrl } from '../utils/config';
 
 interface AutoRunProps {

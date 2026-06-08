@@ -30,7 +30,7 @@ import type {
 	GroomingProgress,
 	MergeResult,
 } from '../../types/contextMerge';
-import type { FileNode } from '../../types/fileTree';
+import type { FileNode } from '../../../shared/types/fileTree';
 import type { DocumentGenerationCallbacks } from '../../services/inlineWizardDocumentGeneration';
 
 /**

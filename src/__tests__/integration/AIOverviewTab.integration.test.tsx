@@ -55,7 +55,7 @@ vi.mock('../../renderer/components/SaveMarkdownModal', () => ({
 }));
 
 // Mock markdownConfig
-vi.mock('../../renderer/utils/markdownConfig', () => ({
+vi.mock('../../shared/utils/markdownConfig', () => ({
 	generateTerminalProseStyles: () => '.director-notes-content { color: inherit; }',
 }));
 

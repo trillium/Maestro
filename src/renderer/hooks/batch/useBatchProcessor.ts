@@ -19,7 +19,7 @@ import { gitService } from '../../services/git';
 // Extracted batch processing modules
 import { countUnfinishedTasks, uncheckAllTasks } from './batchUtils';
 import { useSessionDebounce } from './useSessionDebounce';
-import { DEFAULT_BATCH_STATE, type BatchAction } from './batchReducer';
+import { DEFAULT_BATCH_STATE, type BatchAction } from '../../../shared/batch/batchReducer';
 import { useBatchStore, selectHasAnyActiveBatch } from '../../stores/batchStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { notifyToast } from '../../stores/notificationStore';

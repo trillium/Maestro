@@ -125,7 +125,7 @@ import {
 } from 'lucide-react';
 import type { Theme } from '../../shared/theme-types';
 import type { HistoryEntry } from '../../renderer/types';
-import type { FileNode } from '../../renderer/types/fileTree';
+import type { FileNode } from '../../shared/types/fileTree';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { formatElapsedTime } from '../../shared/formatters';

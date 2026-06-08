@@ -9,7 +9,7 @@ import {
 	resetBionifyStylesForTests,
 	renderBionifyChildren,
 	renderBionifyText,
-} from '../../renderer/utils/bionifyReadingMode';
+} from '../../shared/utils/bionifyReadingMode';
 
 describe('bionifyReadingMode', () => {
 	beforeEach(() => {

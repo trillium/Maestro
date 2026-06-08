@@ -35,9 +35,9 @@ import {
 	Wand2,
 	Save,
 } from 'lucide-react';
-import { getEncoder, formatTokenCount } from '../utils/tokenCounter';
+import { getEncoder, formatTokenCount } from '../../shared/utils/tokenCounter';
 import type { BatchRunState, SessionState, Theme, Shortcut } from '../types';
-import type { FileNode } from '../types/fileTree';
+import type { FileNode } from '../../shared/types/fileTree';
 import { AutoRunnerHelpModal } from './AutoRunnerHelpModal';
 import { ResetTasksConfirmModal } from './ResetTasksConfirmModal';
 import { MermaidRenderer } from './MermaidRenderer';
@@ -55,9 +55,9 @@ import {
 	REMARK_GFM_PLUGINS,
 	generateAutoRunProseStyles,
 	createMarkdownComponents,
-} from '../utils/markdownConfig';
+} from '../../shared/utils/markdownConfig';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
-import { remarkFileLinks, buildFileTreeIndices } from '../utils/remarkFileLinks';
+import { remarkFileLinks, buildFileTreeIndices } from '../../shared/utils/remarkFileLinks';
 import { useBatchStore } from '../stores/batchStore';
 import { useSettingsStore } from '../stores/settingsStore';
 

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { TEMPLATE_VARIABLES } from '../../utils/templateVariables';
-import { useClickOutside } from '../ui';
+import { TEMPLATE_VARIABLES } from '../templateVariables';
+import { useClickOutside } from './useClickOutside';
 
 export interface AutocompleteState {
 	isOpen: boolean;

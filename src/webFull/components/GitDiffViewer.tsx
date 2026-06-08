@@ -107,7 +107,7 @@ import { parseGitDiff, getFileName, getDiffStats } from '../utils/gitDiffParser'
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { ImageDiffViewer } from '../../renderer/components/ImageDiffViewer';
-import { generateDiffViewStyles } from '../../renderer/utils/markdownConfig';
+import { generateDiffViewStyles } from '../../shared/utils/markdownConfig';
 import 'react-diff-view/style/index.css';
 
 export interface GitDiffViewerProps {

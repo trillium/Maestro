@@ -19,7 +19,7 @@ import type { GroupChatMessage, GroupChatParticipant, GroupChatState, Theme } fr
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { stripMarkdown } from '../utils/textProcessing';
 import { generateParticipantColor, buildParticipantColorMap } from '../utils/participantColors';
-import { generateTerminalProseStyles } from '../utils/markdownConfig';
+import { generateTerminalProseStyles } from '../../shared/utils/markdownConfig';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
 import { safeClipboardWrite } from '../utils/clipboard';
 

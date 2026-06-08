@@ -219,7 +219,7 @@ interface MainPanelProps {
 	// Replay a user message (AI mode)
 	onReplayMessage?: (text: string, images?: string[]) => void;
 	// File tree for linking file references in AI responses
-	fileTree?: import('../types/fileTree').FileNode[];
+	fileTree?: import('../../shared/types/fileTree').FileNode[];
 	// Callback when a file link is clicked in AI response
 	// options.openInNewTab: true = open in new tab adjacent to current, false = replace current tab content
 	onFileClick?: (relativePath: string, options?: { openInNewTab?: boolean }) => void;

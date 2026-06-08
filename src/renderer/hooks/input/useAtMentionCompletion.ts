@@ -1,6 +1,6 @@
 import { useMemo, useCallback, useState, useEffect } from 'react';
 import type { Session } from '../../types';
-import type { FileNode } from '../../types/fileTree';
+import type { FileNode } from '../../../shared/types/fileTree';
 import type { AutoRunTreeNode } from '../batch/useAutoRunHandlers';
 import { fuzzyMatchWithScore } from '../../utils/search';
 

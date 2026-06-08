@@ -8,7 +8,7 @@ import {
 	getBionifyReadingModeStyles,
 	resetBionifyStylesForTests,
 	renderBionifyText,
-} from '../../../renderer/utils/bionifyReadingMode';
+} from '../../../shared/utils/bionifyReadingMode';
 
 describe('bionifyReadingMode', () => {
 	beforeEach(() => {

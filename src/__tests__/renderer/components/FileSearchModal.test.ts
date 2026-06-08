@@ -19,7 +19,7 @@ import {
 } from '../../../renderer/components/FileSearchModal';
 import { LayerStackProvider } from '../../../renderer/contexts/LayerStackContext';
 import type { Theme } from '../../../renderer/types';
-import type { FileNode } from '../../../renderer/types/fileTree';
+import type { FileNode } from '../../../shared/types/fileTree';
 
 // Reusable test tree:
 // src/

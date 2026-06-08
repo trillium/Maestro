@@ -20,7 +20,7 @@ import {
 	REMARK_GFM_PLUGINS,
 	createMarkdownComponents,
 	generateInlineWizardPreviewProseStyles,
-} from '../../utils/markdownConfig';
+} from '../../../shared/utils/markdownConfig';
 import { useSettingsStore } from '../../stores/settingsStore';
 
 /**

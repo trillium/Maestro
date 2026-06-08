@@ -11,7 +11,7 @@
 import type { AITab, LogEntry, Session } from '../types';
 import type { ContextSource, DuplicateDetectionResult, DuplicateInfo } from '../types/contextMerge';
 import type { ToolType } from '../../shared/types';
-import { countTokens, estimateTokens } from './tokenCounter';
+import { countTokens, estimateTokens } from '../../shared/utils/tokenCounter';
 import { calculateContextTokens } from './contextUsage';
 
 /**

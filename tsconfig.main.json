@@ -14,5 +14,13 @@
 		"noFallthroughCasesInSwitch": true
 	},
 	"include": ["src/main/**/*", "src/shared/**/*", "src/types/**/*"],
-	"exclude": ["node_modules", "dist", "release"]
+	"exclude": [
+		"node_modules",
+		"dist",
+		"release",
+		"src/shared/hooks/**/*",
+		"src/shared/stores/**/*",
+		"src/shared/utils/bionifyReadingMode.tsx",
+		"src/shared/utils/markdownConfig.ts"
+	]
 }

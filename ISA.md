@@ -5169,3 +5169,25 @@ The rest (`react`, `lucide-react`, `react-markdown`, `rehype-slug`) resolves ide
 - `grep -c 'window\.maestro' src/webFull/hooks/useAutoRunImageHandling.ts` filtered via the same comment-strip → 0 (all 9 remaining hits are inside the docblock).
 
 **Branch.** `leaf-autorun-main`. Commit pending — not pushed per the brief's "no push" rule.
+
+- 2026-06-08 AutoRun 7-edge cross-fork drawdown: promoted tokenCounter, BatchRunState/SessionState/Shortcut, FileNode, useTemplateAutocomplete/useAutoRunUndo, markdownConfig, remarkFileLinks/buildFileTreeIndices, useBatchStore from src/renderer/{utils,types,hooks,stores}/ to src/shared/. AutoRun.tsx fork lines 7 → 0. Total cross-fork 88 → 71. Pre-clears path for Wizard Phase-1 leaves. ISC: ISC-44.cross_fork.autorun_7edge_drawdown.
+
+  Transitive moves required to preserve fork-hygiene + main-process compile:
+  - `BatchProcessingState` → `src/shared/types/batchProcessingState.ts`; `src/renderer/hooks/batch/batchStateMachine.ts` re-exports it.
+  - `batchReducer` + `batchStateMachine` → `src/shared/batch/` (full files); renderer-side `src/renderer/hooks/batch/batch{Reducer,StateMachine}.ts` become passthrough `export * from '../../../shared/batch/...'` so existing test/code imports keep resolving.
+  - `AutoRunTreeNode` → `src/shared/types/autoRunTreeNode.ts`; `useAutoRunHandlers.ts` re-exports.
+  - `useClickOutside` → `src/shared/hooks/useClickOutside.ts` (needed by `useTemplateAutocomplete`); renderer barrel `src/renderer/hooks/ui/index.ts` re-exports, and two deep-import sites (FilePreview.tsx, FileExplorerPanel.tsx) repointed to the shared path.
+  - `syntaxTheme` + `bionifyReadingMode` → `src/shared/utils/` (needed by `markdownConfig`); renderer leaves a thin `export *` shim at `src/renderer/utils/{syntaxTheme,bionifyReadingMode}.ts` so the read-only `src/web/` mobile snapshot keeps resolving its `../../renderer/utils/bionifyReadingMode` import.
+
+  IPC neutralization in markdownConfig:
+  - Two `window.maestro.shell.openExternal` sites at the default `a` renderers (previously fired only when caller did NOT pass `onExternalLinkClick`) were rerouted through a new module-local `openExternalLinkPortable(href)` helper. The helper probes `globalThis.window?.maestro?.shell?.openExternal` and falls back to `window.open(href, '_blank', 'noopener,noreferrer')` — the same fallback already in use at `Wizard/screens/PreparingPlanScreen.tsx` and `InlineWizard/AustinFactsDisplay.tsx`. AutoRun never reaches the default path (it supplies `onExternalLinkClick`), so the swap is transparent to it; non-AutoRun callers that don't supply a callback get correct behavior in both forks (renderer: same Electron IPC as before; webFull/browser: new `window.open` fallback).
+
+  tsconfig fence (renderer-only files live in `src/shared/` but must not be picked up by main/cli/server compilations whose `lib` excludes DOM/JSX): excluded `src/shared/hooks/**/*`, `src/shared/stores/**/*`, `src/shared/utils/bionifyReadingMode.tsx`, `src/shared/utils/markdownConfig.ts` from `tsconfig.main.json`, `tsconfig.cli.json`, `tsconfig.server.json`. The remaining shared/utils files (`tokenCounter.ts`, `remarkFileLinks.ts`, `syntaxTheme.ts`) are pure (no DOM, no JSX) and stay included.
+
+  Verification:
+  - `grep -cE "from ['\"]\\.\\.\\/\\.\\.\\/renderer" src/webFull/components/AutoRun.tsx`: 7 → 0.
+  - Total cross-fork edges in `src/webFull/`: 88 → 71 (drop of 17 includes transitive cleanup in sibling files that now route through `src/shared/` directly).
+  - `npm run lint` (3 tsconfigs) clean.
+  - Targeted `npm test` for the moved modules + their tests (tokenCounter, remarkFileLinks, markdownConfig, useClickOutside, useTemplateAutocomplete, useAutoRunUndo, batchStore, batchReducer, batchStateMachine): 429/429 passing.
+
+  Branch: `chore/autorun-7edge-drawdown`. Commit pending — not pushed per brief.

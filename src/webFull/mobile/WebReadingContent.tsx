@@ -1,7 +1,7 @@
 import { memo, useCallback, useMemo, useState } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { BionifyTextBlock } from '../../renderer/utils/bionifyReadingMode';
+import { BionifyTextBlock } from '../../shared/utils/bionifyReadingMode';
 import { useTheme, useThemeColors } from '../components/ThemeProvider';
 import { webLogger } from '../utils/logger';
 import { HAPTIC_PATTERNS, triggerHaptic } from './constants';

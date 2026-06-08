@@ -6,7 +6,7 @@ import {
 	type UseAtMentionCompletionReturn,
 } from '../../renderer/hooks';
 import type { Session } from '../../renderer/types';
-import type { FileNode } from '../../renderer/types/fileTree';
+import type { FileNode } from '../../shared/types/fileTree';
 
 // =============================================================================
 // TEST HELPERS

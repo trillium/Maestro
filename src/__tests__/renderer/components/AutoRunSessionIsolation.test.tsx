@@ -99,7 +99,7 @@ vi.mock('../../../renderer/components/AutoRunDocumentSelector', () => ({
 	),
 }));
 
-vi.mock('../../../renderer/hooks/input/useTemplateAutocomplete', () => ({
+vi.mock('../../../shared/hooks/useTemplateAutocomplete', () => ({
 	useTemplateAutocomplete: ({
 		value,
 		onChange,
@@ -129,7 +129,7 @@ vi.mock('../../../renderer/components/TemplateAutocompleteDropdown', () => ({
 	TemplateAutocompleteDropdown: React.forwardRef(() => null),
 }));
 
-vi.mock('../../../renderer/utils/tokenCounter', () => ({
+vi.mock('../../../shared/utils/tokenCounter', () => ({
 	getEncoder: vi.fn(() => new Promise(() => {})),
 }));
 

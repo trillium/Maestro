@@ -22,7 +22,7 @@
  *     directly avoids duplicating a 6-line interface into `src/shared/`
  *     (silent-drift audit risk A).
  *   - `getSyntaxStyle` from `'../utils/syntaxTheme'`
- *     → `'../../renderer/utils/syntaxTheme'` (pure module, 0 IPC).
+ *     → `'../../shared/utils/syntaxTheme'` (pure module, 0 IPC).
  *   - `remarkFileLinks`, `buildFileTreeIndices` from
  *     `'../utils/remarkFileLinks'` → `'../../renderer/utils/remarkFileLinks'`
  *     (pure remark plugin, 0 IPC).
@@ -78,17 +78,14 @@ import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import DOMPurify from 'dompurify';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { getSyntaxStyle } from '../../renderer/utils/syntaxTheme';
+import { getSyntaxStyle } from '../../shared/utils/syntaxTheme';
 import { Clipboard, Loader2, ImageOff } from 'lucide-react';
 import type { Theme } from '../../shared/theme-types';
-import type { FileNode } from '../../renderer/types/fileTree';
-import { remarkFileLinks, buildFileTreeIndices } from '../../renderer/utils/remarkFileLinks';
+import type { FileNode } from '../../shared/types/fileTree';
+import { remarkFileLinks, buildFileTreeIndices } from '../../shared/utils/remarkFileLinks';
 import remarkFrontmatter from 'remark-frontmatter';
 import { remarkFrontmatterTable } from '../../renderer/utils/remarkFrontmatterTable';
-import {
-	REMARK_GFM_PLUGINS,
-	applyReadableTextTransforms,
-} from '../../renderer/utils/markdownConfig';
+import { REMARK_GFM_PLUGINS, applyReadableTextTransforms } from '../../shared/utils/markdownConfig';
 
 // ============================================================================
 // LocalImage - Loads local images via IPC

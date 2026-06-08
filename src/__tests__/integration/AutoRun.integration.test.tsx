@@ -10,7 +10,7 @@ import { AutoRun, AutoRunHandle } from '../../renderer/components/AutoRun';
 import { LayerStackProvider } from '../../renderer/contexts/LayerStackContext';
 import { imageCache } from '../../renderer/hooks/batch/useAutoRunImageHandling';
 import { formatShortcutKeys } from '../../renderer/utils/shortcutFormatter';
-import { getEncoder } from '../../renderer/utils/tokenCounter';
+import { getEncoder } from '../../shared/utils/tokenCounter';
 import type { Theme, BatchRunState, SessionState } from '../../renderer/types';
 import { useBatchStore } from '../../renderer/stores/batchStore';
 import { useSettingsStore } from '../../renderer/stores/settingsStore';
@@ -103,8 +103,8 @@ vi.mock('remark-gfm', () => ({
 	default: {},
 }));
 
-vi.mock('../../renderer/utils/markdownConfig', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('../../renderer/utils/markdownConfig')>();
+vi.mock('../../shared/utils/markdownConfig', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../../shared/utils/markdownConfig')>();
 	return {
 		...actual,
 		createMarkdownComponents: (options: Record<string, unknown>) => {
@@ -125,7 +125,7 @@ vi.mock('react-syntax-highlighter/dist/esm/styles/prism', () => ({
 	vs: {},
 }));
 
-vi.mock('../../renderer/utils/tokenCounter', () => ({
+vi.mock('../../shared/utils/tokenCounter', () => ({
 	getEncoder: vi.fn(() => new Promise(() => {})),
 	formatTokenCount: vi.fn((count: number) => `${count}`),
 }));
@@ -187,7 +187,7 @@ vi.mock('../../renderer/components/AutoRunDocumentSelector', () => ({
 let autocompleteOnChange: ((content: string) => void) | null = null;
 let autocompleteHandlesKeyDown = false;
 
-vi.mock('../../renderer/hooks/input/useTemplateAutocomplete', () => ({
+vi.mock('../../shared/hooks/useTemplateAutocomplete', () => ({
 	useTemplateAutocomplete: ({
 		value,
 		onChange,

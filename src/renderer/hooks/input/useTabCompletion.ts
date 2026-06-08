@@ -1,6 +1,6 @@
 import { useMemo, useCallback } from 'react';
 import type { Session } from '../../types';
-import type { FileNode } from '../../types/fileTree';
+import type { FileNode } from '../../../shared/types/fileTree';
 
 export interface TabCompletionSuggestion {
 	value: string;

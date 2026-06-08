@@ -57,9 +57,9 @@ import { type MindMapLayoutType, LAYOUT_LABELS } from './mindMapLayouts';
 import { NodeContextMenu } from './NodeContextMenu';
 import { GraphLegend } from './GraphLegend';
 import { MarkdownRenderer } from '../MarkdownRenderer';
-import { generateProseStyles } from '../../utils/markdownConfig';
+import { generateProseStyles } from '../../../shared/utils/markdownConfig';
 import { safeClipboardWrite } from '../../utils/clipboard';
-import type { FileNode } from '../../types/fileTree';
+import type { FileNode } from '../../../shared/types/fileTree';
 import { useSettingsStore } from '../../stores/settingsStore';
 
 /** Debounce delay for graph rebuilds when settings change (ms) */

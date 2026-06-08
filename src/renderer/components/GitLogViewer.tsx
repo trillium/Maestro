@@ -6,7 +6,7 @@ import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { Diff, Hunk } from 'react-diff-view';
 import { parseGitDiff } from '../utils/gitDiffParser';
 import { useListNavigation } from '../hooks';
-import { generateDiffViewStyles } from '../utils/markdownConfig';
+import { generateDiffViewStyles } from '../../shared/utils/markdownConfig';
 import 'react-diff-view/style/index.css';
 
 interface GitLogEntry {

@@ -24,7 +24,7 @@ import {
 	Loader2,
 } from 'lucide-react';
 import type { Session, Theme, FocusArea } from '../types';
-import type { FileNode } from '../types/fileTree';
+import type { FileNode } from '../../shared/types/fileTree';
 import type { FileTreeChanges } from '../utils/fileExplorer';
 import {
 	removeNodeFromTree,
@@ -35,7 +35,7 @@ import {
 import { getExplorerFileIcon, getExplorerFolderIcon } from '../utils/theme';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
-import { useClickOutside } from '../hooks/ui/useClickOutside';
+import { useClickOutside } from '../../shared/hooks/useClickOutside';
 import { useContextMenuPosition } from '../hooks/ui/useContextMenuPosition';
 import { getRevealLabel } from '../utils/platformUtils';
 import { safeClipboardWrite } from '../utils/clipboard';

@@ -6,7 +6,7 @@ import {
 	TabCompletionFilter,
 } from '../../../renderer/hooks';
 import type { Session } from '../../../renderer/types';
-import type { FileNode } from '../../../renderer/types/fileTree';
+import type { FileNode } from '../../../shared/types/fileTree';
 
 // Helper to create a minimal session for testing
 const createMockSession = (overrides: Partial<Session> = {}): Session =>

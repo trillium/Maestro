@@ -2,7 +2,7 @@ import React from 'react';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MarkdownRenderer } from '../../renderer/components/MarkdownRenderer';
-import type { FileNode } from '../../renderer/types/fileTree';
+import type { FileNode } from '../../shared/types/fileTree';
 
 // Mock react-syntax-highlighter
 vi.mock('react-syntax-highlighter', () => ({

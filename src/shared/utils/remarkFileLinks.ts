@@ -16,7 +16,7 @@
 import { visit } from 'unist-util-visit';
 import type { Root, Text, Link, Image } from 'mdast';
 import type { FileNode } from '../types/fileTree';
-import { buildFileIndex as buildFileIndexShared, type FilePathEntry } from '../../shared/treeUtils';
+import { buildFileIndex as buildFileIndexShared, type FilePathEntry } from '../treeUtils';
 
 /**
  * Pre-built indices for file tree lookups.

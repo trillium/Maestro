@@ -13,9 +13,11 @@ export type { LayerStackAPI } from './useLayerStack';
 export { useModalLayer } from './useModalLayer';
 export type { UseModalLayerOptions } from './useModalLayer';
 
-// Click outside detection
-export { useClickOutside } from './useClickOutside';
-export type { UseClickOutsideOptions } from './useClickOutside';
+// Click outside detection — promoted to src/shared/hooks/ to neutralize
+// transitive cross-fork edges (via useTemplateAutocomplete). Re-exported
+// here so renderer callers continue to work via '../ui'.
+export { useClickOutside } from '../../../shared/hooks/useClickOutside';
+export type { UseClickOutsideOptions } from '../../../shared/hooks/useClickOutside';
 
 // Expansion state management (for lists, trees, etc.)
 export { useExpandedSet } from './useExpandedSet';

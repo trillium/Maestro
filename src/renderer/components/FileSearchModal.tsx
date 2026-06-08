@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Search, File, FileImage, FileText } from 'lucide-react';
 import type { Theme, Shortcut } from '../types';
-import type { FileNode } from '../types/fileTree';
+import type { FileNode } from '../../shared/types/fileTree';
 import { fuzzyMatchWithScore } from '../utils/search';
 import { useLayerStack } from '../contexts/LayerStackContext';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';

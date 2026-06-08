@@ -21,7 +21,7 @@ import { formatAgentName } from '../Wizard/shared/wizardHelpers';
 import {
 	REMARK_GFM_PLUGINS,
 	createWizardBubbleMarkdownComponents,
-} from '../../utils/markdownConfig';
+} from '../../../shared/utils/markdownConfig';
 
 /**
  * Message structure for wizard conversations

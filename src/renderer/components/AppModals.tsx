@@ -44,7 +44,7 @@ import type {
 	LeaderboardRegistration,
 	ThinkingMode,
 } from '../types';
-import type { FileNode } from '../types/fileTree';
+import type { FileNode } from '../../shared/types/fileTree';
 import type { WizardStep } from './Wizard/WizardContext';
 import type { GroomingProgress, MergeResult } from '../types/contextMerge';
 

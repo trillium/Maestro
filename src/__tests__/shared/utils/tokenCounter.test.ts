@@ -7,7 +7,7 @@ vi.mock('js-tiktoken', () => ({
 }));
 
 async function loadTokenCounter() {
-	return import('../../../renderer/utils/tokenCounter');
+	return import('../../../shared/utils/tokenCounter');
 }
 
 describe('tokenCounter', () => {

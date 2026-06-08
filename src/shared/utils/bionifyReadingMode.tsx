@@ -8,7 +8,7 @@ import {
 	type HTMLAttributes,
 	type ReactNode,
 } from 'react';
-import type { Theme } from '../types';
+import type { Theme } from '../theme-types';
 
 const BIONIFY_WORD_PATTERN = /(\p{L}[\p{L}\p{M}'’-]*)/gu;
 const BIONIFY_SKIPPED_TAGS = new Set([

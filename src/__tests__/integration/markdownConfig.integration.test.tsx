@@ -30,7 +30,7 @@ import {
 	generateInlineWizardPreviewProseStyles,
 	generateProseStyles,
 	generateTerminalProseStyles,
-} from '../../renderer/utils/markdownConfig';
+} from '../../shared/utils/markdownConfig';
 import type { Theme } from '../../renderer/types';
 
 const theme: Theme = {

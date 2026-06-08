@@ -31,9 +31,9 @@ vi.mock('../../../renderer/utils/clipboard', () => ({
 	safeClipboardWrite: mocks.safeClipboardWrite,
 }));
 
-vi.mock('../../../renderer/utils/markdownConfig', async () => {
-	const actual = await vi.importActual<typeof import('../../../renderer/utils/markdownConfig')>(
-		'../../../renderer/utils/markdownConfig'
+vi.mock('../../../shared/utils/markdownConfig', async () => {
+	const actual = await vi.importActual<typeof import('../../../shared/utils/markdownConfig')>(
+		'../../../shared/utils/markdownConfig'
 	);
 	return {
 		...actual,

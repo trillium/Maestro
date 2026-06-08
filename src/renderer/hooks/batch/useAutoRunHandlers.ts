@@ -14,12 +14,10 @@ import { captureException } from '../../utils/sentry';
 /**
  * Tree node structure for Auto Run document tree
  */
-export interface AutoRunTreeNode {
-	name: string;
-	type: 'file' | 'folder';
-	path: string;
-	children?: AutoRunTreeNode[];
-}
+// AutoRunTreeNode — promoted to src/shared/types/ for cross-fork
+// consumption by batchStore. Re-exported here for backwards compatibility.
+export type { AutoRunTreeNode } from '../../../shared/types/autoRunTreeNode';
+import type { AutoRunTreeNode } from '../../../shared/types/autoRunTreeNode';
 
 /**
  * Dependencies required by the useAutoRunHandlers hook
