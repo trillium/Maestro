@@ -190,3 +190,11 @@ export {
 export type { TerminalScrollSnapshot } from './TerminalOutput';
 export { MarketplaceModal } from './MarketplaceModal';
 export type { MarketplaceModalProps } from './MarketplaceModal';
+
+// ============================================================================
+// Leaf-parade — NewInstanceModal + EditAgentModal (the biggest single-modal
+// user-felt unlock, lands on top of all 5 IPC-shim route clusters)
+// ============================================================================
+
+export { NewInstanceModal, EditAgentModal } from './NewInstanceModal';
+export type { RemotePathValidate, RemotePathValidateResult } from './NewInstanceModal';
