@@ -143,3 +143,5 @@ export { SessionItem } from './SessionItem';
 export type { SessionItemProps, SessionItemVariant } from './SessionItem';
 export { CsvTableRenderer } from './CsvTableRenderer';
 export type { CsvTableRendererProps } from './CsvTableRenderer';
+export { GroupChatList } from './GroupChatList';
+export type { GroupChatListProps } from './GroupChatList';
