@@ -1667,11 +1667,11 @@ Plan-reeval-2 flagged the mini2 deploy execution path as the HIGHEST open risk: 
 
 #### Risk closure mapping (plan-reeval-2 → this entry)
 
-| Plan-reeval-2 finding | Closed by |
-|-----------------------|-----------|
-| HIGH — `package.json:45` postinstall would crash first headless boot | Decision 1 (postinstall guard) |
-| HIGH — `probe-pty-survival.sh` not wired into deploy.sh | Decision 2 (`--probe` and `--auto-probe` modes) |
-| HIGH — no first-deploy-focused brief; `DEPLOY_SPIKE.md` is reference, not checklist | Decision 3 (`FIRST_DEPLOY_BRIEF.md`) |
+| Plan-reeval-2 finding                                                               | Closed by                                       |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------- |
+| HIGH — `package.json:45` postinstall would crash first headless boot                | Decision 1 (postinstall guard)                  |
+| HIGH — `probe-pty-survival.sh` not wired into deploy.sh                             | Decision 2 (`--probe` and `--auto-probe` modes) |
+| HIGH — no first-deploy-focused brief; `DEPLOY_SPIKE.md` is reference, not checklist | Decision 3 (`FIRST_DEPLOY_BRIEF.md`)            |
 
 #### Files NOT touched
 
@@ -1685,6 +1685,7 @@ Plan-reeval-2 flagged the mini2 deploy execution path as the HIGHEST open risk: 
 - Removing the `electron-rebuild` postinstall hook entirely (vs guarding it) — defer until after the first headless deploy validates that the guard works as intended. Removal is a follow-up if mini2 confirms `electron-rebuild` is dead weight even for desktop dev (it isn't, but a future split into a separate `prepare:electron` script may be cleaner than the inline guard).
 - Tag-on-success in `deploy.sh` (per `DEPLOY_SPIKE.md` Q4) — still deferred; the first real spike should decide whether tagging is the rollback strategy or `git reflog` suffices.
 - `tailscale serve` proxy mode for stricter interface binding (per `DEPLOY_SPIKE.md` Q6) — defer to second deploy iteration once §3 of the brief confirms the default `0.0.0.0:45678` bind works over the tailnet on mini2 specifically.
+
 ### 2026-06-08 — W2 Stats evidence (server-side port + REST routes — ISC-44.general.stats closure, server-half)
 
 Closes the server-half of `ISC-44.general.stats`. The renderer's `src/main/stats/*.ts` (14 files, ~2500 LOC across `stats-db.ts`, migrations, schema, row-mappers, query-events, auto-run, session-lifecycle, aggregations, data-management, singleton, types, utils) and the IPC handlers at `src/main/ipc/handlers/stats.ts` were left UNTOUCHED — Electron continues using the `stats:*` IPC namespace (17 channels) exactly as before. Server-side parity was achieved through a parallel port at `src/server/stats-manager.ts` plus five additive REST routes (`GET /api/stats/summary`, `POST /api/stats/clear-old-data`, `GET /api/stats/aggregation`, `GET /api/stats/query-events`, `GET /api/stats/session-lifecycle`) wired through a `StatsProvider` registry that mirrors the W2-wakatime `WakaTimeProvider` pattern.

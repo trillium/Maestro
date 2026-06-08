@@ -88,26 +88,23 @@ export function PtyMessageRouterProvider({ children }: PropsWithChildren): JSX.E
 	// the provider (we have thousands of these per second under heavy PTY).
 	const listenersRef = useRef<Map<string, Set<PtySessionListener>>>(new Map());
 
-	const register = useCallback(
-		(sessionId: string, listener: PtySessionListener): (() => void) => {
-			const map = listenersRef.current;
-			let set = map.get(sessionId);
-			if (!set) {
-				set = new Set<PtySessionListener>();
-				map.set(sessionId, set);
+	const register = useCallback((sessionId: string, listener: PtySessionListener): (() => void) => {
+		const map = listenersRef.current;
+		let set = map.get(sessionId);
+		if (!set) {
+			set = new Set<PtySessionListener>();
+			map.set(sessionId, set);
+		}
+		set.add(listener);
+		return (): void => {
+			const current = listenersRef.current.get(sessionId);
+			if (!current) return;
+			current.delete(listener);
+			if (current.size === 0) {
+				listenersRef.current.delete(sessionId);
 			}
-			set.add(listener);
-			return (): void => {
-				const current = listenersRef.current.get(sessionId);
-				if (!current) return;
-				current.delete(listener);
-				if (current.size === 0) {
-					listenersRef.current.delete(sessionId);
-				}
-			};
-		},
-		[]
-	);
+		};
+	}, []);
 
 	const dispatchData = useCallback(
 		(sessionId: string, bytes: string, seq: number, tabId?: string): void => {
@@ -121,13 +118,7 @@ export function PtyMessageRouterProvider({ children }: PropsWithChildren): JSX.E
 	);
 
 	const dispatchBackfill = useCallback(
-		(
-			sessionId: string,
-			bytes: string,
-			fromSeq: number,
-			toSeq: number,
-			isFinal: boolean
-		): void => {
+		(sessionId: string, bytes: string, fromSeq: number, toSeq: number, isFinal: boolean): void => {
 			const set = listenersRef.current.get(sessionId);
 			if (!set) return;
 			for (const l of set) {
@@ -159,9 +150,7 @@ export function PtyMessageRouterProvider({ children }: PropsWithChildren): JSX.E
 	);
 
 	return (
-		<PtyMessageRouterContext.Provider value={value}>
-			{children}
-		</PtyMessageRouterContext.Provider>
+		<PtyMessageRouterContext.Provider value={value}>{children}</PtyMessageRouterContext.Provider>
 	);
 }
 

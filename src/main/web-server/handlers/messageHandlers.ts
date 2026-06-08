@@ -273,7 +273,10 @@ export class WebSocketMessageHandler {
 		const clientInputMode = message.inputMode as 'ai' | 'terminal' | undefined;
 
 		logger.info(
-			`[Web Command] Received: sessionId=${sessionId}, inputMode=${clientInputMode}, command=${command?.substring(0, 50)}`,
+			`[Web Command] Received: sessionId=${sessionId}, inputMode=${clientInputMode}, command=${command?.substring(
+				0,
+				50
+			)}`,
 			LOG_CONTEXT
 		);
 
@@ -314,7 +317,9 @@ export class WebSocketMessageHandler {
 
 		// Log all web interface commands prominently
 		logger.info(
-			`[Web Command] Mode: ${mode} | Session: ${sessionId}${isAiMode ? ` | Claude: ${claudeId}` : ''} | Message: ${command}`,
+			`[Web Command] Mode: ${mode} | Session: ${sessionId}${
+				isAiMode ? ` | Claude: ${claudeId}` : ''
+			} | Message: ${command}`,
 			LOG_CONTEXT
 		);
 
@@ -408,7 +413,9 @@ export class WebSocketMessageHandler {
 
 		// Forward to desktop's session selection logic (include tabId if provided)
 		logger.info(
-			`[Web] Calling selectSessionCallback for session ${sessionId}${tabId ? `, tab ${tabId}` : ''}`,
+			`[Web] Calling selectSessionCallback for session ${sessionId}${
+				tabId ? `, tab ${tabId}` : ''
+			}`,
 			LOG_CONTEXT
 		);
 		this.callbacks
@@ -752,20 +759,14 @@ export class WebSocketMessageHandler {
 		}
 		let decoded: string;
 		try {
-			decoded =
-				encoding === 'utf8'
-					? bytes
-					: Buffer.from(bytes, 'base64').toString('utf-8');
+			decoded = encoding === 'utf8' ? bytes : Buffer.from(bytes, 'base64').toString('utf-8');
 		} catch (err) {
 			this.sendError(client, `Failed to decode pty_input bytes: ${String(err)}`, { sessionId });
 			return;
 		}
 		const ok = this.callbacks.ptyInput(sessionId, decoded);
 		if (!ok) {
-			logger.debug(
-				`[Web] pty_input write failed for session ${sessionId}`,
-				LOG_CONTEXT
-			);
+			logger.debug(`[Web] pty_input write failed for session ${sessionId}`, LOG_CONTEXT);
 		}
 	}
 

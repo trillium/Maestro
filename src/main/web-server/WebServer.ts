@@ -353,7 +353,9 @@ export class WebServer {
 	setRateLimitConfig(config: Partial<RateLimitConfig>): void {
 		this.rateLimitConfig = { ...this.rateLimitConfig, ...config };
 		logger.info(
-			`Rate limiting ${this.rateLimitConfig.enabled ? 'enabled' : 'disabled'} (max: ${this.rateLimitConfig.max}/min, maxPost: ${this.rateLimitConfig.maxPost}/min)`,
+			`Rate limiting ${this.rateLimitConfig.enabled ? 'enabled' : 'disabled'} (max: ${
+				this.rateLimitConfig.max
+			}/min, maxPost: ${this.rateLimitConfig.maxPost}/min)`,
 			LOG_CONTEXT
 		);
 	}
@@ -572,10 +574,7 @@ export class WebServer {
 	 * headless server's PATCH /api/settings route via the
 	 * `setSettingsChangedCallback` setter below.
 	 */
-	broadcastSettingsChanged(
-		changedKeys: string[],
-		newValues: Record<string, unknown>
-	): void {
+	broadcastSettingsChanged(changedKeys: string[], newValues: Record<string, unknown>): void {
 		this.broadcastService.broadcastSettingsChanged(changedKeys, newValues);
 	}
 
@@ -598,9 +597,7 @@ export class WebServer {
 	 * callback. Pass null to clear.
 	 */
 	setSettingsChangedCallback(
-		callback:
-			| ((changedKeys: string[], newValues: Record<string, unknown>) => void)
-			| null
+		callback: ((changedKeys: string[], newValues: Record<string, unknown>) => void) | null
 	): void {
 		this.settingsChangedCallback = callback;
 	}
@@ -618,10 +615,7 @@ export class WebServer {
 			try {
 				this.settingsChangedCallback(changedKeys, newValues);
 			} catch (err) {
-				logger.warn(
-					`settingsChangedCallback threw: ${String(err)}`,
-					LOG_CONTEXT
-				);
+				logger.warn(`settingsChangedCallback threw: ${String(err)}`, LOG_CONTEXT);
 			}
 		}
 	}

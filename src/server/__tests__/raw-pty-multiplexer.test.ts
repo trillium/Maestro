@@ -455,9 +455,9 @@ describe('RawPtyMultiplexer — L6.3 disk-backed scrollback', () => {
 			expect(length).toBe(chunks[i].length);
 			// The byte slice at [offset..offset+length) in the log should be
 			// exactly the published chunk.
-			expect(
-				logBytes.slice(offset, offset + length).toString('utf-8'),
-			).toBe(chunks[i].toString('utf-8'));
+			expect(logBytes.slice(offset, offset + length).toString('utf-8')).toBe(
+				chunks[i].toString('utf-8')
+			);
 			expectedOffset += length;
 		}
 	});
@@ -483,9 +483,10 @@ describe('RawPtyMultiplexer — L6.3 disk-backed scrollback', () => {
 		expect(logSize).toBeLessThanOrEqual(512);
 
 		// Meta file's startSeq must advance to reflect the dropped entries.
-		const meta = JSON.parse(
-			fs.readFileSync(path.join(scrollbackDir, 's1.meta'), 'utf-8'),
-		) as { startSeq: number; startOffset: number };
+		const meta = JSON.parse(fs.readFileSync(path.join(scrollbackDir, 's1.meta'), 'utf-8')) as {
+			startSeq: number;
+			startOffset: number;
+		};
 		expect(meta.startSeq).toBeGreaterThan(1);
 	});
 
@@ -516,9 +517,7 @@ describe('RawPtyMultiplexer — L6.3 disk-backed scrollback', () => {
 
 		// Subscribe with fromSeq=0 — expect to receive the persisted bytes.
 		const slice = mux2.subscribe('s1', 'clientA', 0);
-		expect(slice.bytes.toString('utf-8')).toBe(
-			'persisted-one persisted-two persisted-three',
-		);
+		expect(slice.bytes.toString('utf-8')).toBe('persisted-one persisted-two persisted-three');
 		expect(slice.fromSeq).toBe(1);
 		expect(slice.toSeq).toBe(3);
 		expect(slice.droppedBeforeBackfill).toBe(0);
@@ -535,7 +534,7 @@ describe('RawPtyMultiplexer — L6.3 disk-backed scrollback', () => {
 		mux2.publish('s1', Buffer.from(' postrestart'));
 		const slice2 = mux2.subscribe('s1', 'clientB', 0);
 		expect(slice2.bytes.toString('utf-8')).toBe(
-			'persisted-one persisted-two persisted-three postrestart',
+			'persisted-one persisted-two persisted-three postrestart'
 		);
 	});
 
@@ -611,10 +610,7 @@ describe('RawPtyMultiplexer — L6.3 disk-backed scrollback', () => {
 		seqBuf.writeUInt32BE(payload.length, 8);
 		seqBuf.writeUInt32BE(0, 12);
 		fs.writeFileSync(seqPath, seqBuf);
-		fs.writeFileSync(
-			metaPath,
-			JSON.stringify({ startSeq: 1, startOffset: 0 }),
-		);
+		fs.writeFileSync(metaPath, JSON.stringify({ startSeq: 1, startOffset: 0 }));
 
 		const mux = new RawPtyMultiplexer({ dataDir });
 

@@ -60,8 +60,7 @@ export const playbookNameModalParityCatalog: ParityStory[] = [
 	// ============ Happy path: modal renders with default copy ============
 	{
 		name: 'playbook-name-modal-shows-default-title-and-button',
-		given:
-			'The user invokes Save Playbook from the BatchRunner with no initialName provided.',
+		given: 'The user invokes Save Playbook from the BatchRunner with no initialName provided.',
 		when: ['the PlaybookNameModal mounts with default props'],
 		then: [
 			// Modal chrome present
@@ -76,7 +75,11 @@ export const playbookNameModalParityCatalog: ParityStory[] = [
 				target: '[role="dialog"] input[placeholder="Enter playbook name..."]',
 			},
 			// Helper text is shown
-			{ verb: 'hasText', target: '[role="dialog"]', value: 'Give your playbook a descriptive name' },
+			{
+				verb: 'hasText',
+				target: '[role="dialog"]',
+				value: 'Give your playbook a descriptive name',
+			},
 		],
 		happyPath: true,
 	},
@@ -100,8 +103,7 @@ export const playbookNameModalParityCatalog: ParityStory[] = [
 	},
 	{
 		name: 'playbook-name-modal-save-with-valid-name-closes-modal',
-		given:
-			'The PlaybookNameModal is open and the user has typed "New Playbook" in the input.',
+		given: 'The PlaybookNameModal is open and the user has typed "New Playbook" in the input.',
 		when: [
 			'the user types "New Playbook" into the input',
 			'the user clicks the Save button (or presses Enter)',
@@ -116,8 +118,7 @@ export const playbookNameModalParityCatalog: ParityStory[] = [
 	// ============ Negative paths ============
 	{
 		name: 'playbook-name-modal-cancel-closes-without-saving',
-		given:
-			'The PlaybookNameModal is open with the user partway through typing a name.',
+		given: 'The PlaybookNameModal is open with the user partway through typing a name.',
 		when: ['the user clicks the Cancel button'],
 		then: [
 			// Modal closes

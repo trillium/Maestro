@@ -82,10 +82,7 @@ export function publishSettingsChanged(
 		try {
 			listener(changedKeys, newValues, timestamp);
 		} catch (err) {
-			webLogger.error(
-				`publishSettingsChanged listener threw: ${String(err)}`,
-				'useSettings'
-			);
+			webLogger.error(`publishSettingsChanged listener threw: ${String(err)}`, 'useSettings');
 		}
 	}
 }
@@ -196,38 +193,35 @@ export function useSettings(): UseSettingsReturn {
 		return unsubscribe;
 	}, []);
 
-	const setSetting = useCallback(
-		async <T = unknown>(key: string, value: T): Promise<void> => {
-			// Snapshot for rollback
-			let previous: unknown;
-			setSettings((prev) => {
-				previous = prev[key];
-				return { ...prev, [key]: value };
-			});
+	const setSetting = useCallback(async <T = unknown>(key: string, value: T): Promise<void> => {
+		// Snapshot for rollback
+		let previous: unknown;
+		setSettings((prev) => {
+			previous = prev[key];
+			return { ...prev, [key]: value };
+		});
 
-			try {
-				const res = await fetch(`${apiBaseRef.current}/settings`, {
-					method: 'PATCH',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ patch: { [key]: value } }),
-				});
-				if (!res.ok) {
-					throw new Error(`PATCH /api/settings → ${res.status}`);
-				}
-				const json = (await res.json()) as { settings: Settings };
-				// Server returns the full settings — adopt as source of truth
-				setSettings(json.settings ?? {});
-				setError(null);
-			} catch (e: any) {
-				const msg = e?.message || 'Failed to save setting';
-				webLogger.error(`useSettings.setSetting(${key}): ${msg}`, 'useSettings');
-				setError(msg);
-				// Roll back
-				setSettings((prev) => ({ ...prev, [key]: previous }));
+		try {
+			const res = await fetch(`${apiBaseRef.current}/settings`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ patch: { [key]: value } }),
+			});
+			if (!res.ok) {
+				throw new Error(`PATCH /api/settings → ${res.status}`);
 			}
-		},
-		[]
-	);
+			const json = (await res.json()) as { settings: Settings };
+			// Server returns the full settings — adopt as source of truth
+			setSettings(json.settings ?? {});
+			setError(null);
+		} catch (e: any) {
+			const msg = e?.message || 'Failed to save setting';
+			webLogger.error(`useSettings.setSetting(${key}): ${msg}`, 'useSettings');
+			setError(msg);
+			// Roll back
+			setSettings((prev) => ({ ...prev, [key]: previous }));
+		}
+	}, []);
 
 	return {
 		settings,

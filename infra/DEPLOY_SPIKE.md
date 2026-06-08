@@ -69,12 +69,12 @@ Run all of these as Trillium's normal user (do not deploy this under `root`).
 
 ### Filesystem layout
 
-| Path                                | Purpose                                            |
-|-------------------------------------|----------------------------------------------------|
-| `~/code/maestro`                    | Repo clone (working tree).                         |
-| `~/.config/maestro/`                | Headless data dir (per `src/shared/data-dir.ts`).  |
-| `~/Library/Logs/maestro/`           | launchd stdout/stderr logs.                        |
-| `~/Library/LaunchAgents/`           | Symlink to `infra/com.maestro.server.plist`.       |
+| Path                      | Purpose                                           |
+| ------------------------- | ------------------------------------------------- |
+| `~/code/maestro`          | Repo clone (working tree).                        |
+| `~/.config/maestro/`      | Headless data dir (per `src/shared/data-dir.ts`). |
+| `~/Library/Logs/maestro/` | launchd stdout/stderr logs.                       |
+| `~/Library/LaunchAgents/` | Symlink to `infra/com.maestro.server.plist`.      |
 
 Create the log directory before the first bootstrap:
 
@@ -230,11 +230,11 @@ layers (see `WEB_PORT_ORDER.md`).
 Default: `~/.config/maestro/` per `src/shared/data-dir.ts`. The directory
 contains:
 
-| File                          | Source                            |
-|-------------------------------|-----------------------------------|
-| `maestro-settings.json`       | electron-store-shape JSON; holds `webAuthToken`, `activeThemeId`, etc. |
-| `maestro-sessions.json`       | persisted session list.           |
-| `maestro-groups.json`         | session groups.                   |
+| File                    | Source                                                                 |
+| ----------------------- | ---------------------------------------------------------------------- |
+| `maestro-settings.json` | electron-store-shape JSON; holds `webAuthToken`, `activeThemeId`, etc. |
+| `maestro-sessions.json` | persisted session list.                                                |
+| `maestro-groups.json`   | session groups.                                                        |
 
 **Backup before any risky deploy:**
 
@@ -253,10 +253,10 @@ launchctl kickstart -k "gui/$(id -u)/com.maestro.server"
 
 ## Log location
 
-| Stream | Path                                        |
-|--------|---------------------------------------------|
-| stdout | `~/Library/Logs/maestro/server.out.log`     |
-| stderr | `~/Library/Logs/maestro/server.err.log`     |
+| Stream | Path                                    |
+| ------ | --------------------------------------- |
+| stdout | `~/Library/Logs/maestro/server.out.log` |
+| stderr | `~/Library/Logs/maestro/server.err.log` |
 
 ```bash
 tail -f ~/Library/Logs/maestro/server.err.log

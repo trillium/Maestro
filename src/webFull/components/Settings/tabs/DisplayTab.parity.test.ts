@@ -91,8 +91,7 @@ export const displayTabParityCatalog: ParityStory[] = [
 	},
 	{
 		name: 'toggle-context-warnings-persists-nested-object',
-		given:
-			'The Display tab is open and contextManagementSettings.contextWarningsEnabled is false.',
+		given: 'The Display tab is open and contextManagementSettings.contextWarningsEnabled is false.',
 		when: ['the user clicks the "Show context consumption warnings" switch'],
 		then: [
 			// The nested object is written as a whole, so the key is the parent object
@@ -135,14 +134,17 @@ export const displayTabParityCatalog: ParityStory[] = [
 			// warning text appearing for invalid input
 			{ verb: 'hasElement', target: '[data-testid="webfull-display-bionify-algorithm"]' },
 			// FileStore did NOT receive the invalid value
-			{ verb: 'fsHas', target: 'maestro-settings.json', value: '"bionifyAlgorithm": "- 0 1 1 2 0.4"' },
+			{
+				verb: 'fsHas',
+				target: 'maestro-settings.json',
+				value: '"bionifyAlgorithm": "- 0 1 1 2 0.4"',
+			},
 		],
 		happyPath: false,
 	},
 	{
 		name: 'server-error-on-fetch-shows-error-banner',
-		given:
-			'The settings provider is unavailable or returns 500 (e.g. disk full on initial GET).',
+		given: 'The settings provider is unavailable or returns 500 (e.g. disk full on initial GET).',
 		when: ['the Display tab attempts its initial GET /api/settings call'],
 		then: [
 			{ verb: 'hasElement', target: '[data-testid="webfull-display-error"]' },

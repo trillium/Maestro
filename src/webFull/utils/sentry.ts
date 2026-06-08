@@ -43,10 +43,7 @@ export interface InitSentryOptions {
 
 /** Minimal shape of `@sentry/browser` we depend on. */
 interface SentryBrowserModule {
-	init: (options: {
-		dsn: string;
-		environment?: string;
-	}) => void;
+	init: (options: { dsn: string; environment?: string }) => void;
 	captureException: (
 		exception: unknown,
 		captureContext?: { level?: SentrySeverityLevel; extra?: Record<string, unknown> }
@@ -74,7 +71,7 @@ interface ViteImportMetaEnv {
 }
 const viteEnv: ViteImportMetaEnv =
 	typeof import.meta !== 'undefined' && (import.meta as { env?: ViteImportMetaEnv }).env
-		? ((import.meta as { env: ViteImportMetaEnv }).env)
+		? (import.meta as { env: ViteImportMetaEnv }).env
 		: {};
 
 /**

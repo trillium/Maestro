@@ -61,8 +61,7 @@ export const renameTabModalParityCatalog: ParityStory[] = [
 	// ============ Happy path: modal opens, user types new name, Rename commits ============
 	{
 		name: 'rename-tab-shows-input-prefilled-with-current-name',
-		given:
-			'The active tab has the name "Untitled" and the user opens the Rename Tab modal.',
+		given: 'The active tab has the name "Untitled" and the user opens the Rename Tab modal.',
 		when: ['the RenameTabModal mounts with initialName="Untitled"'],
 		then: [
 			// Modal chrome is present (uses the lifted Modal primitive)
@@ -119,8 +118,7 @@ export const renameTabModalParityCatalog: ParityStory[] = [
 	},
 	{
 		name: 'rename-tab-escape-key-closes-modal',
-		given:
-			'The RenameTabModal is the topmost layer and the input has focus.',
+		given: 'The RenameTabModal is the topmost layer and the input has focus.',
 		when: ['the user presses Escape'],
 		then: [
 			// Modal is closed

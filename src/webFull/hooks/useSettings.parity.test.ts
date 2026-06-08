@@ -135,7 +135,7 @@ export const settingsBroadcastParityCatalog: ParityStory[] = [
 			'Browser A and browser B are connected. The SettingsProvider is configured to throw on next setSettings() call (simulated disk failure).',
 		when: [
 			'browser A issues PATCH /api/settings with body { patch: { conductorProfile: "would-have-changed" } }',
-			'the server\'s setSettings throws, the route returns 500',
+			"the server's setSettings throws, the route returns 500",
 		],
 		then: [
 			// The broadcast must NOT fire — onSettingsChanged is only called
@@ -257,7 +257,7 @@ describe('useSettings — receives broadcast and merges into local state', () =>
 		// hook reads `window.location.origin` + securityToken to build its
 		// API base — a no-op token is fine for these tests since fetch is
 		// mocked.
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		 
 		(window as any).__MAESTRO_CONFIG__ = {
 			securityToken: 'test-token',
 			sessionId: null,
@@ -277,10 +277,10 @@ describe('useSettings — receives broadcast and merges into local state', () =>
 
 		// Publish a broadcast — emulates the WS frame arriving from the server
 		act(() => {
-			publishSettingsChanged(
-				['conductorProfile', 'defaultShowThinking'],
-				{ conductorProfile: 'concise', defaultShowThinking: 'sticky' }
-			);
+			publishSettingsChanged(['conductorProfile', 'defaultShowThinking'], {
+				conductorProfile: 'concise',
+				defaultShowThinking: 'sticky',
+			});
 		});
 
 		// The hook's local state must reflect the broadcast values without a

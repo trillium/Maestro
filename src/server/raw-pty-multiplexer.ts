@@ -271,9 +271,7 @@ export class RawPtyMultiplexer {
 		this.flushIntervalMs = opts.flushIntervalMs ?? RAW_PTY_FLUSH_INTERVAL_MS;
 		this.flushThresholdBytes = opts.flushThresholdBytes ?? RAW_PTY_FLUSH_THRESHOLD_BYTES;
 		this.dataDir = opts.dataDir ?? null;
-		this.scrollbackDir = this.dataDir
-			? path.join(this.dataDir, SCROLLBACK_SUBDIR)
-			: null;
+		this.scrollbackDir = this.dataDir ? path.join(this.dataDir, SCROLLBACK_SUBDIR) : null;
 		this.diskHardCapBytes = opts.diskHardCapBytes ?? RAW_PTY_DISK_HARD_CAP_BYTES;
 		if (this.scrollbackDir) {
 			this.scanScrollbackDirOnBoot();
@@ -398,7 +396,10 @@ export class RawPtyMultiplexer {
 			if (firstNewIdx >= pending.length) continue;
 			const slice = pending.slice(firstNewIdx);
 			const totalBytes = slice.reduce((acc, e) => acc + e.bytes.length, 0);
-			const coalesced = Buffer.concat(slice.map((e) => e.bytes), totalBytes);
+			const coalesced = Buffer.concat(
+				slice.map((e) => e.bytes),
+				totalBytes
+			);
 			this.broadcaster.sendData(clientId, sessionId, coalesced, tailSeq);
 			state.subscribers.set(clientId, tailSeq);
 		}
@@ -439,10 +440,7 @@ export class RawPtyMultiplexer {
 		let diskBytes: Buffer = Buffer.alloc(0);
 		let diskFromSeq: number | null = null;
 		let diskToSeq: number | null = null;
-		if (
-			this.scrollbackDir &&
-			effectiveLastSeq + 1 < inMemoryOldestSeq
-		) {
+		if (this.scrollbackDir && effectiveLastSeq + 1 < inMemoryOldestSeq) {
 			const upperBoundSeq = inMemoryOldestSeq - 1;
 			const disk = this.readDiskScrollback(sessionId, state, effectiveLastSeq);
 			if (disk.bytes.length > 0 && disk.fromSeq !== null && disk.toSeq !== null) {
@@ -461,7 +459,7 @@ export class RawPtyMultiplexer {
 					const trimmed = this.readDiskScrollbackBounded(
 						sessionId,
 						effectiveLastSeq,
-						upperBoundSeq,
+						upperBoundSeq
 					);
 					diskBytes = trimmed.bytes;
 					diskFromSeq = trimmed.fromSeq;
@@ -473,11 +471,7 @@ export class RawPtyMultiplexer {
 		// report a drop marker. effectiveLastSeq must be > 0 for a drop to
 		// mean anything (lastSeq=0 means "fresh client, no prior progress").
 		const earliestRecoveredSeq =
-			diskFromSeq !== null
-				? diskFromSeq
-				: slice.length > 0
-					? slice[0].seq
-					: null;
+			diskFromSeq !== null ? diskFromSeq : slice.length > 0 ? slice[0].seq : null;
 		if (effectiveLastSeq > 0) {
 			if (earliestRecoveredSeq === null) {
 				// No bytes recovered at all — but the client claims progress.
@@ -490,22 +484,24 @@ export class RawPtyMultiplexer {
 		// Register subscriber AFTER computing backfill so it doesn't race with
 		// a concurrent publish().
 		const tailSeqInMemory = slice.length > 0 ? slice[slice.length - 1].seq : null;
-		const tailSeq =
-			tailSeqInMemory ??
-			diskToSeq ??
-			effectiveLastSeq;
+		const tailSeq = tailSeqInMemory ?? diskToSeq ?? effectiveLastSeq;
 		state.subscribers.set(clientId, tailSeq);
 		if (slice.length === 0 && diskBytes.length === 0) {
 			return { bytes: Buffer.alloc(0), fromSeq: null, toSeq: null, droppedBeforeBackfill };
 		}
-		const memBytes = slice.length > 0
-			? Buffer.concat(slice.map((e) => e.bytes), slice.reduce((acc, e) => acc + e.bytes.length, 0))
-			: Buffer.alloc(0);
-		const combined = diskBytes.length > 0 && memBytes.length > 0
-			? Buffer.concat([diskBytes, memBytes], diskBytes.length + memBytes.length)
-			: diskBytes.length > 0
-				? diskBytes
-				: memBytes;
+		const memBytes =
+			slice.length > 0
+				? Buffer.concat(
+						slice.map((e) => e.bytes),
+						slice.reduce((acc, e) => acc + e.bytes.length, 0)
+					)
+				: Buffer.alloc(0);
+		const combined =
+			diskBytes.length > 0 && memBytes.length > 0
+				? Buffer.concat([diskBytes, memBytes], diskBytes.length + memBytes.length)
+				: diskBytes.length > 0
+					? diskBytes
+					: memBytes;
 		const fromSeq = diskFromSeq ?? (slice.length > 0 ? slice[0].seq : null);
 		const toSeq = tailSeqInMemory ?? diskToSeq;
 		return {
@@ -525,10 +521,9 @@ export class RawPtyMultiplexer {
 	private readDiskScrollbackBounded(
 		sessionId: string,
 		lastSeq: number,
-		upperBoundSeq: number,
+		upperBoundSeq: number
 	): { bytes: Buffer; fromSeq: number | null; toSeq: number | null } {
-		if (!this.scrollbackDir)
-			return { bytes: Buffer.alloc(0), fromSeq: null, toSeq: null };
+		if (!this.scrollbackDir) return { bytes: Buffer.alloc(0), fromSeq: null, toSeq: null };
 		const logPath = path.join(this.scrollbackDir, `${sessionId}.log`);
 		const seqPath = path.join(this.scrollbackDir, `${sessionId}.seq`);
 		if (!fs.existsSync(logPath) || !fs.existsSync(seqPath))
@@ -559,8 +554,7 @@ export class RawPtyMultiplexer {
 			lastOffsetEnd = offset + length;
 			toSeq = seq;
 		}
-		if (firstOffset === -1)
-			return { bytes: Buffer.alloc(0), fromSeq: null, toSeq: null };
+		if (firstOffset === -1) return { bytes: Buffer.alloc(0), fromSeq: null, toSeq: null };
 		return {
 			bytes: logBytes.slice(firstOffset, lastOffsetEnd),
 			fromSeq,
@@ -677,7 +671,9 @@ export class RawPtyMultiplexer {
 			fs.mkdirSync(this.scrollbackDir, { recursive: true });
 		} catch (err) {
 			console.warn(
-				`[RawPtyMultiplexer] failed to create scrollback dir ${this.scrollbackDir}: ${(err as Error).message}`,
+				`[RawPtyMultiplexer] failed to create scrollback dir ${this.scrollbackDir}: ${
+					(err as Error).message
+				}`
 			);
 			return;
 		}
@@ -686,7 +682,9 @@ export class RawPtyMultiplexer {
 			entries = fs.readdirSync(this.scrollbackDir);
 		} catch (err) {
 			console.warn(
-				`[RawPtyMultiplexer] failed to scan scrollback dir ${this.scrollbackDir}: ${(err as Error).message}`,
+				`[RawPtyMultiplexer] failed to scan scrollback dir ${this.scrollbackDir}: ${
+					(err as Error).message
+				}`
 			);
 			return;
 		}
@@ -699,7 +697,9 @@ export class RawPtyMultiplexer {
 				this.recoverDiskOnlySession(sessionId);
 			} catch (err) {
 				console.warn(
-					`[RawPtyMultiplexer] failed to recover session ${sessionId} from disk: ${(err as Error).message}`,
+					`[RawPtyMultiplexer] failed to recover session ${sessionId} from disk: ${
+						(err as Error).message
+					}`
 				);
 			}
 		}
@@ -723,7 +723,7 @@ export class RawPtyMultiplexer {
 		const lastRecordOffset = seqStat.size - SEQ_RECORD_BYTES;
 		if (lastRecordOffset < 0 || lastRecordOffset % SEQ_RECORD_BYTES !== 0) {
 			console.warn(
-				`[RawPtyMultiplexer] ${sessionId}.seq has malformed size ${seqStat.size}; skipping`,
+				`[RawPtyMultiplexer] ${sessionId}.seq has malformed size ${seqStat.size}; skipping`
 			);
 			return;
 		}
@@ -743,10 +743,18 @@ export class RawPtyMultiplexer {
 		try {
 			const metaRaw = fs.readFileSync(metaPath, 'utf-8');
 			const meta = JSON.parse(metaRaw) as { startSeq?: number; startOffset?: number };
-			if (typeof meta.startSeq === 'number' && Number.isInteger(meta.startSeq) && meta.startSeq >= 1) {
+			if (
+				typeof meta.startSeq === 'number' &&
+				Number.isInteger(meta.startSeq) &&
+				meta.startSeq >= 1
+			) {
 				startSeq = meta.startSeq;
 			}
-			if (typeof meta.startOffset === 'number' && Number.isInteger(meta.startOffset) && meta.startOffset >= 0) {
+			if (
+				typeof meta.startOffset === 'number' &&
+				Number.isInteger(meta.startOffset) &&
+				meta.startOffset >= 0
+			) {
 				startOffset = meta.startOffset;
 			}
 		} catch {
@@ -811,7 +819,7 @@ export class RawPtyMultiplexer {
 			fs.writeFileSync(metaPath, payload);
 		} catch (err) {
 			console.warn(
-				`[RawPtyMultiplexer] failed to write meta for ${sessionId}: ${(err as Error).message}`,
+				`[RawPtyMultiplexer] failed to write meta for ${sessionId}: ${(err as Error).message}`
 			);
 		}
 	}
@@ -833,7 +841,7 @@ export class RawPtyMultiplexer {
 			fs.writeSync(state.logFd, bytes);
 		} catch (err) {
 			console.warn(
-				`[RawPtyMultiplexer] failed to append log for ${sessionId}: ${(err as Error).message}`,
+				`[RawPtyMultiplexer] failed to append log for ${sessionId}: ${(err as Error).message}`
 			);
 			return;
 		}
@@ -847,7 +855,7 @@ export class RawPtyMultiplexer {
 			fs.writeSync(state.seqFd, record);
 		} catch (err) {
 			console.warn(
-				`[RawPtyMultiplexer] failed to append seq for ${sessionId}: ${(err as Error).message}`,
+				`[RawPtyMultiplexer] failed to append seq for ${sessionId}: ${(err as Error).message}`
 			);
 			return;
 		}
@@ -917,12 +925,8 @@ export class RawPtyMultiplexer {
 				surviveFromIdx = recordCount - 1;
 			}
 			// First surviving record gives us the new generation's anchor.
-			const firstSurviveOffset = seqBytes.readUInt32BE(
-				surviveFromIdx * SEQ_RECORD_BYTES + 4,
-			);
-			const firstSurviveSeq = seqBytes.readUInt32BE(
-				surviveFromIdx * SEQ_RECORD_BYTES,
-			);
+			const firstSurviveOffset = seqBytes.readUInt32BE(surviveFromIdx * SEQ_RECORD_BYTES + 4);
+			const firstSurviveSeq = seqBytes.readUInt32BE(surviveFromIdx * SEQ_RECORD_BYTES);
 			const newLogBytes = logBytes.slice(firstSurviveOffset);
 			// Rebuild the seq index relative to the new generation's
 			// `firstSurviveOffset`.
@@ -947,7 +951,7 @@ export class RawPtyMultiplexer {
 			this.writeMeta(sessionId, state);
 		} catch (err) {
 			console.warn(
-				`[RawPtyMultiplexer] failed to rotate disk log for ${sessionId}: ${(err as Error).message}`,
+				`[RawPtyMultiplexer] failed to rotate disk log for ${sessionId}: ${(err as Error).message}`
 			);
 		}
 	}
@@ -965,7 +969,7 @@ export class RawPtyMultiplexer {
 	private readDiskScrollback(
 		sessionId: string,
 		state: SessionState,
-		lastSeq: number,
+		lastSeq: number
 	): { bytes: Buffer; fromSeq: number | null; toSeq: number | null } {
 		if (!this.scrollbackDir) return { bytes: Buffer.alloc(0), fromSeq: null, toSeq: null };
 		const logPath = path.join(this.scrollbackDir, `${sessionId}.log`);
@@ -984,7 +988,9 @@ export class RawPtyMultiplexer {
 			logBytes = fs.readFileSync(logPath);
 		} catch (err) {
 			console.warn(
-				`[RawPtyMultiplexer] failed to read disk scrollback for ${sessionId}: ${(err as Error).message}`,
+				`[RawPtyMultiplexer] failed to read disk scrollback for ${sessionId}: ${
+					(err as Error).message
+				}`
 			);
 			return { bytes: Buffer.alloc(0), fromSeq: null, toSeq: null };
 		}

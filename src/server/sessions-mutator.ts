@@ -47,7 +47,11 @@ function locate<T extends MutableSession>(
 	return { index, copy: { ...sessions[index] } };
 }
 
-function commit<T extends MutableSession>(sessions: T[], index: number, next: T): MutationResult<T> {
+function commit<T extends MutableSession>(
+	sessions: T[],
+	index: number,
+	next: T
+): MutationResult<T> {
 	const out = sessions.slice();
 	out[index] = next;
 	return { sessions: out, session: next };
@@ -92,7 +96,8 @@ export function closeTab<T extends MutableSession>(
 	found.copy.aiTabs = remaining;
 	// If the closed tab was active, fall back to the first remaining tab (or undefined).
 	if (found.copy.activeTabId === tabId) {
-		found.copy.activeTabId = remaining.length > 0 ? (remaining[0] as { id?: string }).id : undefined;
+		found.copy.activeTabId =
+			remaining.length > 0 ? (remaining[0] as { id?: string }).id : undefined;
 	}
 	return commit(sessions, found.index, found.copy);
 }
