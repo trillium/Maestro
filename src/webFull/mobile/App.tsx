@@ -42,6 +42,13 @@ import { Terminal, usePtyMessageRouter } from '../components/Terminal';
 import { AutoRunIndicator } from './AutoRunIndicator';
 import { TabBar } from '../components/TabBar';
 import { TabSearchModal } from './TabSearchModal';
+import { TerminalOutput } from '../components';
+import type {
+	Session as RendererSession,
+	AITab as RendererAITab,
+	LogEntry as RendererLogEntry,
+	FocusArea,
+} from '../../renderer/types';
 
 // ============================================================================
 // Audit #10 pivot — orphan-to-mounted wiring of lifted overlay components
@@ -1191,6 +1198,214 @@ export default function MobileApp() {
 		webLogger.info('[ContextWarningSash] Summarize requested (TODO: wire to WS)', 'Mobile');
 	}, []);
 
+	// ====================================================================
+	// Audit #10 pivot — TerminalOutput mount wiring
+	// ====================================================================
+	//
+	// TerminalOutput is the AI Terminal conversation surface — log scrollback,
+	// per-entry chrome (copy, delete, save, local filter), markdown rendering,
+	// ANSI → HTML for terminal mode, debounced search, queued-items list,
+	// and an inline SaveMarkdownModal child.
+	//
+	// Pre-mount, webFull had ZERO consumer of `TerminalOutput` even though it
+	// landed as the largest L2.5 leaf lift (2079 LOC). The mobile shell rendered
+	// `MessageHistory` (much smaller parsed-log surface) instead. This wave
+	// closes the trigger gap so the actual AI agent conversation surface
+	// renders on desktop widths.
+	//
+	// Gating choice — render TerminalOutput ONLY on desktop widths
+	// (`!isSmallScreen`). Mobile small screens keep the existing MessageHistory
+	// path because: (a) zero regression risk on the working mobile chrome,
+	// (b) TerminalOutput's per-entry chrome (copy/delete/save/filter buttons,
+	// search affordance, queued-items list) is desktop-shaped, (c) the brief
+	// explicitly authorized this gate: "isSmallScreen || isMobile ? (existing
+	// mobile chrome) : (TerminalOutput on desktop)". Mobile parity is a
+	// separate concern.
+	//
+	// Session shape adapter — webFull's `Session` is a thin SessionData wrapper
+	// (~13 fields). TerminalOutput's `session: RendererSession` is the full
+	// renderer shape (~50+ fields). The adapter below synthesizes a
+	// renderer-shaped Session from the webFull session + session-level
+	// `sessionLogs.aiLogs` / `sessionLogs.shellLogs`. Critical fields:
+	//
+	//   - `aiTabs[].logs` — TerminalOutput reads logs via
+	//     `getActiveTab(session)?.logs` for AI mode. webFull stores logs at
+	//     session level (`sessionLogs.aiLogs`), NOT per-tab — the WS protocol
+	//     doesn't yet carry per-tab log payloads. As a fidelity-degrading
+	//     compromise, ALL logs are routed to the active tab's `logs` array.
+	//     This is correct for the single-tab case (the common case today) but
+	//     incorrect for multi-tab sessions where each tab has its own
+	//     conversation. The fidelity gap is documented as a follow-up brief:
+	//     the WS protocol needs to emit per-tab log frames (or the existing
+	//     `session_output` frame needs a `tabId` field that the client uses
+	//     to bucket logs by tab).
+	//
+	//   - `shellLogs` — pulled straight from `sessionLogs.shellLogs`. Same
+	//     `LogEntry.source` widening: webFull's `'user' | 'stdout' | 'stderr'`
+	//     is a strict subset of renderer's
+	//     `'stdout' | 'stderr' | 'system' | 'user' | 'ai' | 'error' | 'thinking' | 'tool'`,
+	//     so the cast is safe.
+	//
+	//   - Missing fields — `workLog: []`, `fileTree: []`, `changedFiles: []`,
+	//     `fileExplorerExpanded: []`, etc. are filled with safe empty
+	//     defaults. TerminalOutput doesn't read most of these; the ones it
+	//     does (`fullPath`, `projectRoot`, `cwd`, `isGitRepo`) are derived
+	//     from the webFull session's `cwd` field.
+	//
+	// Bionify wiring — `bionifyReadingMode` already on webFull (from
+	// `useDesktopTheme`). Intensity + algorithm use the prop defaults
+	// (`1` / `'- 0 1 1 2 0.4'`) — webFull doesn't yet have a typed surface
+	// for these and they're cosmetic.
+	//
+	// Write callback — wired to `POST /api/autorun/write-doc` (the closest
+	// analog the brief explicitly authorized). `/api/fs/write-file` does NOT
+	// exist on this branch; `write-doc` is the W3-fs route that backs
+	// `autorun:writeDoc` in the Electron path, and it accepts the same
+	// `{path, content}` body shape that SaveMarkdownModal sends.
+	const ptyRouterIsRouter = ptyRouter; // alias for clarity
+	void ptyRouterIsRouter; // suppress "unused" — referenced for context only
+
+	// Refs that TerminalOutput requires (forwarded but unused at this host).
+	const terminalOutputInputRef = useRef<HTMLTextAreaElement>(null);
+	const terminalOutputLogsEndRef = useRef<HTMLDivElement>(null);
+
+	// TerminalOutput local UI state (search + markdown-edit mode). Pulled out
+	// of the renderer's `useUIStore` / `useSettingsStore` — webFull doesn't
+	// thread those yet, so we hold them locally.
+	const [terminalOutputSearchOpen, setTerminalOutputSearchOpen] = useState(false);
+	const [terminalOutputSearchQuery, setTerminalOutputSearchQuery] = useState('');
+	const [terminalMarkdownEditMode, setTerminalMarkdownEditMode] = useState(false);
+
+	// Write-doc bridge — POSTs to `/api/autorun/write-doc` (the closest analog
+	// the brief authorized). Returns the SaveMarkdownModal contract shape
+	// `{success: boolean; error?: string}`.
+	const handleWriteMarkdownFile = useCallback(
+		async (
+			path: string,
+			content: string,
+			_sshRemoteId?: string
+		): Promise<{ success: boolean; error?: string }> => {
+			try {
+				const apiUrl = buildApiUrl('/autorun/write-doc');
+				const res = await fetch(apiUrl, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ path, content }),
+				});
+				if (!res.ok) {
+					const errText = await res.text().catch(() => '');
+					return { success: false, error: `HTTP ${res.status}: ${errText || res.statusText}` };
+				}
+				return { success: true };
+			} catch (err: any) {
+				webLogger.error('[TerminalOutput] write-doc failed', 'Mobile', err);
+				return { success: false, error: err?.message ?? 'Unknown error' };
+			}
+		},
+		[]
+	);
+
+	// Build a renderer-shaped Session from the webFull session. Synthesizes
+	// the fields TerminalOutput reads (`aiTabs[].logs`, `shellLogs`, `cwd`,
+	// `inputMode`, `state`, etc.) and fills missing renderer fields with safe
+	// empty defaults. Returns `null` when there's no active session — the
+	// render branch gates on this.
+	const rendererShapedSession = useMemo((): RendererSession | null => {
+		if (!activeSession) return null;
+
+		// Widen webFull LogEntry.source → renderer LogEntry.source. The webFull
+		// `'user' | 'stdout' | 'stderr'` set is a strict subset of the renderer
+		// `'stdout' | 'stderr' | 'system' | 'user' | 'ai' | 'error' | 'thinking' | 'tool'`
+		// — the cast is safe at the type level. The host-data TODO is to
+		// surface richer log sources (system / thinking / tool / error) via
+		// new WS frames in a follow-up wave.
+		const widenLogs = (logs: typeof sessionLogs.aiLogs): RendererLogEntry[] =>
+			logs.map((l) => ({
+				id: l.id,
+				timestamp: l.timestamp,
+				source: l.source as RendererLogEntry['source'],
+				text: l.text,
+			}));
+
+		const aiLogs = widenLogs(sessionLogs.aiLogs);
+		const shellLogs = widenLogs(sessionLogs.shellLogs);
+
+		// Synthesize aiTabs from the webFull session, wiring the active tab's
+		// `logs` to the session-level aiLogs. Multi-tab fidelity gap noted:
+		// the webFull WS protocol does NOT yet bucket logs by tabId, so every
+		// tab gets the same `logs` payload. Single-tab sessions render
+		// correctly; multi-tab sessions show the union on every tab. Follow-up
+		// brief: add a `tabId` field to the `session_output` WS frame and
+		// have `useMobileSessionManagement` bucket logs into per-tab arrays.
+		const synthesizedAiTabs: RendererAITab[] = (activeSession.aiTabs ?? []).map((tab) => ({
+			id: tab.id,
+			agentSessionId: tab.agentSessionId ?? null,
+			name: tab.name ?? null,
+			starred: (tab as any).starred ?? false,
+			// Active tab gets the session's aiLogs; other tabs get empty until
+			// the WS protocol carries per-tab payloads.
+			logs: tab.id === activeSession.activeTabId ? aiLogs : [],
+			inputValue: (tab as any).inputValue ?? '',
+			stagedImages: [],
+			usageStats: tab.usageStats,
+			createdAt: (tab as any).createdAt ?? Date.now(),
+			state: ((tab as any).state ?? 'idle') as 'idle' | 'busy',
+		}));
+
+		// If the session has no aiTabs, synthesize a single tab so TerminalOutput
+		// can render `activeTab.logs`. This matches the webFull WS protocol
+		// where a session without explicit tab tracking still produces aiLogs.
+		const effectiveAiTabs: RendererAITab[] =
+			synthesizedAiTabs.length > 0
+				? synthesizedAiTabs
+				: [
+						{
+							id: 'default',
+							agentSessionId: null,
+							name: null,
+							starred: false,
+							logs: aiLogs,
+							inputValue: '',
+							stagedImages: [],
+							createdAt: Date.now(),
+							state: 'idle' as const,
+						},
+					];
+
+		const effectiveActiveTabId = activeSession.activeTabId ?? effectiveAiTabs[0]?.id ?? 'default';
+
+		return {
+			id: activeSession.id,
+			groupId: activeSession.groupId ?? undefined,
+			name: activeSession.name,
+			toolType: activeSession.toolType as any,
+			state: activeSession.state as any,
+			cwd: activeSession.cwd ?? '',
+			fullPath: activeSession.cwd ?? '',
+			projectRoot: activeSession.cwd ?? '',
+			createdAt: Date.now(),
+			aiLogs,
+			shellLogs,
+			workLog: [],
+			contextUsage: 0,
+			usageStats: activeSession.usageStats ?? undefined,
+			inputMode: (activeSession.inputMode as 'ai' | 'terminal') ?? 'ai',
+			aiPid: 0,
+			terminalPid: 0,
+			port: 0,
+			isLive: false,
+			changedFiles: [],
+			isGitRepo: false,
+			fileTree: [],
+			fileExplorerExpanded: [],
+			fileExplorerScrollPos: 0,
+			aiTabs: effectiveAiTabs,
+			activeTabId: effectiveActiveTabId,
+			agentSessionId: activeSession.agentSessionId ?? undefined,
+			thinkingStartTime: activeSession.thinkingStartTime ?? undefined,
+		} as RendererSession;
+	}, [activeSession, sessionLogs]);
+
 	// Determine content based on connection state
 	const renderContent = () => {
 		// Show offline state when device has no network connectivity
@@ -1332,7 +1547,71 @@ export default function MobileApp() {
 		const currentLogs =
 			activeSession.inputMode === 'ai' ? sessionLogs.aiLogs : sessionLogs.shellLogs;
 
-		// Show message history
+		// Audit #10 pivot — desktop widths render TerminalOutput (the full
+		// AI Terminal conversation surface), mobile small screens keep the
+		// existing MessageHistory chrome. Gate per the brief's explicit
+		// "isSmallScreen || isMobile ? mobile chrome : TerminalOutput on
+		// desktop" guidance. The renderer-shaped session adapter
+		// (`rendererShapedSession`) handles the shape impedance — see the
+		// extended doc-block above the adapter.
+		if (!isSmallScreen && rendererShapedSession) {
+			return (
+				<div
+					style={{
+						width: '100%',
+						maxWidth: '100%',
+						display: 'flex',
+						flexDirection: 'column',
+						flex: 1,
+						minHeight: 0,
+						overflow: 'hidden',
+					}}
+				>
+					<TerminalOutput
+						key={`${activeSession.id}-${activeSession.activeTabId ?? 'default'}`}
+						session={rendererShapedSession}
+						theme={theme}
+						// Monospace stack — webFull doesn't yet thread a typed
+						// fontFamily setting; default matches common terminal
+						// surfaces. Host-data TODO: surface via useSettings()
+						// once a typed font-family setting lands on webFull.
+						fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+						activeFocus={'main' as FocusArea}
+						outputSearchOpen={terminalOutputSearchOpen}
+						outputSearchQuery={terminalOutputSearchQuery}
+						setOutputSearchOpen={setTerminalOutputSearchOpen}
+						setOutputSearchQuery={setTerminalOutputSearchQuery}
+						setActiveFocus={() => {
+							/* host-data TODO: thread a real focus-area store; webFull
+							   doesn't yet have one. Inert stub keeps the contract. */
+						}}
+						setLightboxImage={() => {
+							/* host-data TODO: wire to a lightbox modal. The renderer
+							   uses a setter from useUIStore; webFull doesn't yet
+							   surface a lightbox. Inert stub. */
+						}}
+						inputRef={terminalOutputInputRef}
+						logsEndRef={terminalOutputLogsEndRef}
+						maxOutputLines={10000}
+						markdownEditMode={terminalMarkdownEditMode}
+						setMarkdownEditMode={setTerminalMarkdownEditMode}
+						bionifyReadingMode={bionifyReadingMode}
+						onWriteMarkdownFile={handleWriteMarkdownFile}
+						// onBrowseMarkdownFolder intentionally omitted — webFull
+						// doesn't yet surface a folder picker, so the folder-browse
+						// button stays hidden (matches the renderer's
+						// !isRemoteSession gating).
+						// onInterrupt — wired to the existing session-interrupt
+						// REST endpoint. The same handler the CommandInputBar uses.
+						onInterrupt={activeSessionId ? () => handleInterrupt(activeSessionId) : undefined}
+						cwd={activeSession.cwd}
+						projectRoot={activeSession.cwd}
+					/>
+				</div>
+			);
+		}
+
+		// Show message history (mobile small screens, or when adapter returned null)
 		return (
 			<div
 				style={{
