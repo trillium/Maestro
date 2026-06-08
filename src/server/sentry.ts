@@ -40,10 +40,7 @@ export interface InitSentryOptions {
 
 /** Minimal shape of `@sentry/node` we depend on. Avoids a hard import-time dep. */
 interface SentryNodeModule {
-	init: (options: {
-		dsn: string;
-		environment?: string;
-	}) => void;
+	init: (options: { dsn: string; environment?: string }) => void;
 	captureException: (
 		exception: unknown,
 		captureContext?: { level?: SentrySeverityLevel; extra?: Record<string, unknown> }
@@ -84,7 +81,7 @@ export function initSentry(opts?: InitSentryOptions): void {
 		// DSN is actually configured. Use require() rather than dynamic import
 		// to keep `initSentry` synchronous (the caller is typically a top-of-
 		// boot init line and doesn't want to await).
-		// eslint-disable-next-line @typescript-eslint/no-require-imports
+		 
 		const sentry = require('@sentry/node') as SentryNodeModule;
 		sentry.init({
 			dsn,

@@ -32,18 +32,18 @@ The existing Electron app already runs a Fastify HTTP + WebSocket server on port
 
 The layered, dependency-ordered roadmap lives in [WEB_PORT_ORDER.md](WEB_PORT_ORDER.md). Summary table — see the file for per-item detail and the lift-vs-rewrite decision rule:
 
-| Layer | Purpose | Status |
-|---|---|---|
-| 0 | Decouple Fastify server from Electron (vanilla-Node entrypoint) | L0a + L0b merged; L0c in flight on branch `layer-0c-remaining-writes` |
-| 1 | Webfull build target (`vite.config.webfull.mts`, dev/build scripts, Tailwind glob) | L1.1 merged; L1.2 (Tailwind glob) pending — blocks Layer 2 |
-| 2 | Lift UI primitives once (`Modal`, `FormInput`, `ConfirmModal`, `GitStatusWidget`) | In flight on branch `layer-2.1-primitives-lift` |
-| 3 | Identity + Settings (settings read/write, theme picker, General tab) | Pending |
-| 4 | Create + Navigate (session list, tab ops, new session, URL routing) | Pending |
-| 5 | Terminal output + git status (parsed MessageHistory render, GitStatusContext) | Pending |
-| 6 | xterm.js + raw-byte WS multiplex — **principal-decision-gated (ISC-42)** | Pending decision |
-| 7 | History + AutoRun + Agents | Pending |
-| 8 | Markdown + Files + Diffs | Pending |
-| 9 | Polish, observability, leftovers (ErrorBoundary, LogViewer, About, ProcessMonitor) | Pending |
+| Layer | Purpose                                                                            | Status                                                                |
+| ----- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| 0     | Decouple Fastify server from Electron (vanilla-Node entrypoint)                    | L0a + L0b merged; L0c in flight on branch `layer-0c-remaining-writes` |
+| 1     | Webfull build target (`vite.config.webfull.mts`, dev/build scripts, Tailwind glob) | L1.1 merged; L1.2 (Tailwind glob) pending — blocks Layer 2            |
+| 2     | Lift UI primitives once (`Modal`, `FormInput`, `ConfirmModal`, `GitStatusWidget`)  | In flight on branch `layer-2.1-primitives-lift`                       |
+| 3     | Identity + Settings (settings read/write, theme picker, General tab)               | Pending                                                               |
+| 4     | Create + Navigate (session list, tab ops, new session, URL routing)                | Pending                                                               |
+| 5     | Terminal output + git status (parsed MessageHistory render, GitStatusContext)      | Pending                                                               |
+| 6     | xterm.js + raw-byte WS multiplex — **principal-decision-gated (ISC-42)**           | Pending decision                                                      |
+| 7     | History + AutoRun + Agents                                                         | Pending                                                               |
+| 8     | Markdown + Files + Diffs                                                           | Pending                                                               |
+| 9     | Polish, observability, leftovers (ErrorBoundary, LogViewer, About, ProcessMonitor) | Pending                                                               |
 
 Skip-list (dropped per ISA Decision 2026-06-07): Wizard, GroupChat, Symphony, DocumentGraph. Each can be reinstated as a separate scope-decision entry.
 

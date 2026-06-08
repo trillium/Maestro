@@ -120,7 +120,6 @@ function getDefaultProvider(): SettingsProvider {
 		getSettings: () => ({ ...(store.store as Record<string, unknown>) }),
 		setSettings: (patch: Record<string, unknown>) => {
 			for (const [k, v] of Object.entries(patch)) {
-				 
 				(store as any).set(k, v);
 			}
 			return { ...(store.store as Record<string, unknown>) };

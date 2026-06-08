@@ -132,9 +132,7 @@ export const generalTabParityCatalog: ParityStory[] = [
 	{
 		name: 'patch-with-empty-body-returns-400-no-state-change',
 		given: 'The General tab is open and a stable settings cache is loaded.',
-		when: [
-			'a synthetic invalid PATCH /api/settings is issued with body { patch: null }',
-		],
+		when: ['a synthetic invalid PATCH /api/settings is issued with body { patch: null }'],
 		then: [
 			// FileStore was not mutated (no new key appears)
 			{ verb: 'fsHas', target: 'maestro-settings.json', value: '' },

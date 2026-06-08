@@ -245,10 +245,7 @@ export class BroadcastService {
 	 * client including the originator. The originator's hook treats its own
 	 * echo as a no-op merge since the local state already reflects the patch.
 	 */
-	broadcastSettingsChanged(
-		changedKeys: string[],
-		newValues: Record<string, unknown>
-	): void {
+	broadcastSettingsChanged(changedKeys: string[], newValues: Record<string, unknown>): void {
 		this.broadcastToAll({
 			type: 'settings_changed',
 			changedKeys,

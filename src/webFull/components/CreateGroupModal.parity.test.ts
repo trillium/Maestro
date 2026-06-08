@@ -92,8 +92,7 @@ export const createGroupModalParityCatalog: ParityStory[] = [
 	},
 	{
 		name: 'create-group-modal-create-with-valid-name-closes-modal',
-		given:
-			'The CreateGroupModal is open with an empty groups array and the user types "Backend".',
+		given: 'The CreateGroupModal is open with an empty groups array and the user types "Backend".',
 		when: [
 			'the user types "Backend" into the Group Name input',
 			'the user clicks the Create button',
@@ -108,8 +107,7 @@ export const createGroupModalParityCatalog: ParityStory[] = [
 	// ============ Negative paths ============
 	{
 		name: 'create-group-modal-cancel-closes-without-creating',
-		given:
-			'The CreateGroupModal is open with the user partway through typing a name.',
+		given: 'The CreateGroupModal is open with the user partway through typing a name.',
 		when: ['the user clicks the Cancel button'],
 		then: [
 			// Modal closes
@@ -119,8 +117,7 @@ export const createGroupModalParityCatalog: ParityStory[] = [
 	},
 	{
 		name: 'create-group-modal-escape-key-closes-modal',
-		given:
-			'The CreateGroupModal is the topmost layer and the Group Name input has focus.',
+		given: 'The CreateGroupModal is the topmost layer and the Group Name input has focus.',
 		when: ['the user presses Escape'],
 		then: [
 			// Modal closes

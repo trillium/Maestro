@@ -239,10 +239,8 @@ export function ShortcutsTab({ theme, isOpen: _isOpen, hasNoAgents }: ShortcutsT
 					recordingId === sc.id ? 'ring-2' : ''
 				}`}
 				style={{
-					borderColor:
-						recordingId === sc.id ? theme.colors.accent : theme.colors.border,
-					backgroundColor:
-						recordingId === sc.id ? theme.colors.accentDim : theme.colors.bgActivity,
+					borderColor: recordingId === sc.id ? theme.colors.accent : theme.colors.border,
+					backgroundColor: recordingId === sc.id ? theme.colors.accentDim : theme.colors.bgActivity,
 					color: recordingId === sc.id ? theme.colors.accent : theme.colors.textDim,
 				}}
 				data-testid={`webfull-shortcuts-record-${sc.id}`}

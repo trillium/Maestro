@@ -517,10 +517,7 @@ export default function MobileApp() {
 				newValues: Record<string, unknown>,
 				timestamp: number
 			) => {
-				webLogger.debug(
-					`[App] Settings changed: keys=[${changedKeys.join(',')}]`,
-					'Mobile'
-				);
+				webLogger.debug(`[App] Settings changed: keys=[${changedKeys.join(',')}]`, 'Mobile');
 				publishSettingsChanged(changedKeys, newValues, timestamp);
 			},
 		}),
@@ -854,7 +851,10 @@ export default function MobileApp() {
 					inputMode: currentMode,
 				});
 				webLogger.info(
-					`[Web->Server] Command send result: ${sendResult}, command="${command.substring(0, 50)}" mode=${currentMode} session=${activeSessionId}`,
+					`[Web->Server] Command send result: ${sendResult}, command="${command.substring(
+						0,
+						50
+					)}" mode=${currentMode} session=${activeSessionId}`,
 					'Mobile'
 				);
 			}
@@ -1343,7 +1343,11 @@ export default function MobileApp() {
 						: activeSession?.inputMode === 'ai'
 							? isSmallScreen
 								? 'Ask AI...'
-								: `Ask ${activeSession?.toolType === 'claude-code' ? 'Claude' : activeSession?.toolType || 'AI'} about ${activeSession?.name || 'this session'}...`
+								: `Ask ${
+										activeSession?.toolType === 'claude-code'
+											? 'Claude'
+											: activeSession?.toolType || 'AI'
+									} about ${activeSession?.name || 'this session'}...`
 							: 'Run shell command...'
 				}
 				disabled={!activeSessionId}

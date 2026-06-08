@@ -165,8 +165,7 @@ export function GeneralTab({ theme, isOpen: _isOpen }: GeneralTabProps) {
 					<div
 						className="absolute bottom-2 right-2 text-xs"
 						style={{
-							color:
-								conductorProfile.length > 900 ? theme.colors.warning : theme.colors.textDim,
+							color: conductorProfile.length > 900 ? theme.colors.warning : theme.colors.textDim,
 						}}
 					>
 						{conductorProfile.length}/1000
@@ -192,9 +191,7 @@ export function GeneralTab({ theme, isOpen: _isOpen }: GeneralTabProps) {
 					<option value="warn">Warn</option>
 					<option value="error">Error</option>
 				</select>
-				<p className="text-xs opacity-50 mt-1">
-					Controls verbosity of server-side logs.
-				</p>
+				<p className="text-xs opacity-50 mt-1">Controls verbosity of server-side logs.</p>
 			</div>
 
 			{/* Input Behavior — Enter to Send */}
@@ -259,9 +256,7 @@ export function GeneralTab({ theme, isOpen: _isOpen }: GeneralTabProps) {
 								className="px-3 py-1.5 rounded text-sm capitalize transition-colors"
 								style={{
 									backgroundColor:
-										defaultShowThinking === mode
-											? theme.colors.accent
-											: 'transparent',
+										defaultShowThinking === mode ? theme.colors.accent : 'transparent',
 									color:
 										defaultShowThinking === mode
 											? theme.colors.accentForeground

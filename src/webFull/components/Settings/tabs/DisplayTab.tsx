@@ -130,7 +130,11 @@ export function DisplayTab({ theme, isOpen: _isOpen }: DisplayTabProps) {
 	const bionifyIntensity = readNumber(settings, 'bionifyIntensity', 1);
 	const bionifyAlgorithm = readString(settings, 'bionifyAlgorithm', DEFAULT_BIONIFY_ALGORITHM);
 	const fileExplorerIconTheme = readIconTheme(settings);
-	const documentGraphShowExternalLinks = readBool(settings, 'documentGraphShowExternalLinks', false);
+	const documentGraphShowExternalLinks = readBool(
+		settings,
+		'documentGraphShowExternalLinks',
+		false
+	);
 	const documentGraphMaxNodes = readNumber(settings, 'documentGraphMaxNodes', 250);
 	const ctx = readContextManagement(settings);
 	const localIgnorePatterns = readStringArray(
@@ -459,18 +463,14 @@ export function DisplayTab({ theme, isOpen: _isOpen }: DisplayTabProps) {
 								max={1000}
 								step={50}
 								value={documentGraphMaxNodes}
-								onChange={(e) =>
-									void setSetting('documentGraphMaxNodes', Number(e.target.value))
-								}
+								onChange={(e) => void setSetting('documentGraphMaxNodes', Number(e.target.value))}
 								className="flex-1 h-2 rounded-lg appearance-none cursor-pointer"
 								style={{
 									background: `linear-gradient(to right, ${theme.colors.accent} 0%, ${
 										theme.colors.accent
-									} ${((documentGraphMaxNodes - 50) / 950) * 100}%, ${
-										theme.colors.bgActivity
-									} ${((documentGraphMaxNodes - 50) / 950) * 100}%, ${
-										theme.colors.bgActivity
-									} 100%)`,
+									} ${((documentGraphMaxNodes - 50) / 950) * 100}%, ${theme.colors.bgActivity} ${
+										((documentGraphMaxNodes - 50) / 950) * 100
+									}%, ${theme.colors.bgActivity} 100%)`,
 								}}
 								data-testid="webfull-display-graph-max-nodes"
 							/>
@@ -550,11 +550,7 @@ export function DisplayTab({ theme, isOpen: _isOpen }: DisplayTabProps) {
 								}}
 								className="w-full h-2 rounded-lg appearance-none cursor-pointer"
 								style={{
-									background: `linear-gradient(to right, #eab308 0%, #eab308 ${
-										ctx.contextWarningYellowThreshold
-									}%, ${theme.colors.bgActivity} ${
-										ctx.contextWarningYellowThreshold
-									}%, ${theme.colors.bgActivity} 100%)`,
+									background: `linear-gradient(to right, #eab308 0%, #eab308 ${ctx.contextWarningYellowThreshold}%, ${theme.colors.bgActivity} ${ctx.contextWarningYellowThreshold}%, ${theme.colors.bgActivity} 100%)`,
 								}}
 								data-testid="webfull-display-ctx-yellow"
 							/>
@@ -598,11 +594,7 @@ export function DisplayTab({ theme, isOpen: _isOpen }: DisplayTabProps) {
 								}}
 								className="w-full h-2 rounded-lg appearance-none cursor-pointer"
 								style={{
-									background: `linear-gradient(to right, #ef4444 0%, #ef4444 ${
-										ctx.contextWarningRedThreshold
-									}%, ${theme.colors.bgActivity} ${
-										ctx.contextWarningRedThreshold
-									}%, ${theme.colors.bgActivity} 100%)`,
+									background: `linear-gradient(to right, #ef4444 0%, #ef4444 ${ctx.contextWarningRedThreshold}%, ${theme.colors.bgActivity} ${ctx.contextWarningRedThreshold}%, ${theme.colors.bgActivity} 100%)`,
 								}}
 								data-testid="webfull-display-ctx-red"
 							/>

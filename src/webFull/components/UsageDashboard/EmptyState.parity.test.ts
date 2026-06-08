@@ -107,8 +107,7 @@ export const emptyStateParityCatalog: ParityStory[] = [
 	// ============ Negative paths ============
 	{
 		name: 'empty-state-does-not-render-stats-chart-elements',
-		given:
-			'EmptyState is mounted because the parent Usage Dashboard has zero rows.',
+		given: 'EmptyState is mounted because the parent Usage Dashboard has zero rows.',
 		when: ['the EmptyState is the only thing visible in the dashboard body'],
 		then: [
 			// EmptyState owns the empty-state surface — and ONLY the empty-state
@@ -126,8 +125,7 @@ export const emptyStateParityCatalog: ParityStory[] = [
 	},
 	{
 		name: 'empty-state-empty-overrides-fall-back-to-defaults',
-		given:
-			'A caller passes title="" and message="" (degenerate override case).',
+		given: 'A caller passes title="" and message="" (degenerate override case).',
 		when: ['the EmptyState mounts with both overrides as empty strings'],
 		then: [
 			// The component still renders the container; behavior with degenerate
