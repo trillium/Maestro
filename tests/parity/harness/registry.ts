@@ -75,4 +75,19 @@ export const registry: Record<string, ComponentAdapter> = {
 	CsvTableRenderer: {
 		load: () => import('./adapters/CsvTableRenderer.adapter').then((m) => m.default),
 	},
+	MarkdownRenderer: {
+		load: () => import('./adapters/MarkdownRenderer.adapter').then((m) => m.default),
+	},
+	GroupChatHeader: {
+		load: () => import('./adapters/GroupChatHeader.adapter').then((m) => m.default),
+	},
+	AgentErrorModal: {
+		load: () => import('./adapters/AgentErrorModal.adapter').then((m) => m.default),
+	},
+	SessionList: {
+		load: () => import('./adapters/SessionList.adapter').then((m) => m.default),
+	},
+	TabBar: {
+		load: () => import('./adapters/TabBar.adapter').then((m) => m.default),
+	},
 };
