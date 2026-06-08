@@ -855,3 +855,79 @@ Verbatim copy (not re-export). Rationale: `EmojiPickerField.tsx` contains real c
 - `git diff main..HEAD -- src/renderer/ | wc -c` → `0` (zero bytes — `src/renderer/` untouched; the source `EmojiPickerField.tsx` lives at `src/renderer/components/ui/EmojiPickerField.tsx` and was read-only — only the destination `src/webFull/components/ui/EmojiPickerField.tsx` was written).
 - Working-tree changes for this layer (before commit): `M src/webFull/components/index.ts`, `?? src/webFull/components/ui/EmojiPickerField.tsx`, plus this `M ISA.md` append. Exactly the authorized set.
 - `node_modules` symlink (created for the build) removed before commit; not tracked.
+- **2026-06-08** — **Layer 0f shipped: `newTab` callback wired (store-only, pattern B) + Sentry init wired into `main()`.** Two outstanding `src/server/index.ts` edits were bundled into one branch because they touch the same file and parallel agents would conflict. **Decision A — newTab strategy: pattern (B) "store-only mutation + lazy spawn on first command", not pattern (A) "real spawn at newTab time".** The renderer-side `setNewTabCallback` (`src/main/web-server/web-server-factory.ts:394-432`) returns a `Promise<{tabId} | null>` after spawning the underlying pty via the renderer's session-creation pipeline. In headless mode the equivalent real-spawn path would require lifting that pipeline's spawn-config-building logic into the server — out of scope for L0. Pattern (B) appends a tab record to the session's `aiTabs` array, generates a UUID, broadcasts `tabs_changed`, returns `{tabId}`. The underlying pty is spawned lazily on the first command-send into the new tab via the existing L0b `writeToSession` / `executeCommand` callback chain (ProcessManager already has on-demand spawn). Trade-off accepted: tabs created via web do NOT immediately have a backing process — they get one on first input. This matches what most web-driven flows expect anyway (a fresh tab sits idle until the user types). New mutator `addTab(sessions, sessionId): AddTabResult | null` added to `src/server/sessions-mutator.ts`; uses `randomUUID()` for tab id, sets `activeTabId = newTabId` (matches renderer focus-new-tab behavior), shape mirrors `tabsForBroadcast`'s `AITabData` contract (id, agentSessionId=null, name=null, starred=false, inputValue='', usageStats=null, createdAt=Date.now(), state='idle', thinkingStartTime=null, logs=[]). Returns `null` when the session id is unknown. **Decision B — Sentry init landing: ISC-33 graduates from partial PASS to full PASS.** L0e scaffolded `src/server/sentry.ts` but deliberately deferred the `initSentry()` call to avoid colliding with the in-flight L0c work on `index.ts`. L0c is now merged; L0f wires `initSentry()` as the very first line of `main()` (synchronous no-op when `MAESTRO_SENTRY_DSN` is unset, lazy-requires `@sentry/node` on the first capture call when set) and wraps the existing `main().catch(...)` block to call `captureException(err, { context: 'main_startup' })` before `process.exit(1)`. This closes the keystone gap identified at the bottom of the L0e Decisions entry: server-side error reporting is now explicit-replacement (`@sentry/node`), not "happens to be absent from dist because tsconfig include omits the path that pulls `@sentry/electron`". Renderer-side full closure for `@sentry/browser` still awaits the webFull `main.tsx` init wire-up — separate change, no `src/server/` conflict. **Decision C — boot-log line updated** from "Layer 0c: 9/10 WRITE callbacks active …newTab deferred to L0d" to "Layer 0f: 10/10 WRITE callbacks active … L0d: newTab via sessions store + broadcast, lazy process spawn on first command. L0f also wires Sentry init for error capture (no-op without MAESTRO_SENTRY_DSN)." File-header doc comment in `src/server/index.ts` updated to add the L0d / L0e / L0f layer descriptions alongside L0a-c. **Files touched in this turn:** `src/server/sessions-mutator.ts` (added `randomUUID` import + `AddTabResult` interface + `addTab` function), `src/server/index.ts` (added `initSentry` / `captureException` imports, replaced `newTab` stub with real handler, added `initSentry()` call at top of `main()`, wrapped `main().catch(...)` with `captureException(...)`, updated boot log line + file-header doc), and `ISA.md` (this Decisions entry + the Verification entry below). **Scope guard verified:** `git diff main..HEAD -- src/web/ | wc -c` → 0; `git diff main..HEAD -- src/main/ | wc -c` → 0; `git diff main..HEAD -- src/renderer/ | wc -c` → 0.
+
+### 2026-06-08 — Layer 0f evidence (newTab pattern B + Sentry init)
+
+**Environment:** Node 22.22.1 via fnm; macOS arm64 (laptop); branch `layer-0f-newtab-sentry-init`; worktree `/Users/trilliumsmith/code/maestro-l0f`; base SHA `6d683b39b` (off `main` via the L0e merge). `node_modules` symlinked from the main repo (`/Users/trilliumsmith/code/maestro/node_modules`) for the test session; removed before commit so the worktree tree stays clean.
+
+#### File layout
+
+- New mutator (additive only, no edits to existing functions): `src/server/sessions-mutator.ts` gains `import { randomUUID } from 'crypto';` at module top, `AddTabResult<T>` interface declaration, and the `addTab<T extends MutableSession>(sessions, sessionId): AddTabResult<T> | null` function. All other mutators (`switchMode`, `toggleBookmark`, `closeTab`, `renameTab`, `starTab`, `reorderTab`) untouched.
+- Edited entrypoint: `src/server/index.ts` — file-header doc comment extended with L0d/L0e/L0f layer descriptions; one new `import { initSentry, captureException } from './sentry';`; the L0c `setNewTabCallback` stub block replaced with the real handler; `initSentry()` called as first line of `main()`; `main().catch(...)` wrapped with `captureException(err, { context: 'main_startup' });` before `process.exit(1)`; boot log line updated.
+- ISA append (this Verification entry + the Decisions entry above).
+- No edits to `src/main/`, `src/web/`, `src/renderer/`, `src/server/process-manager-adapter.ts`, `src/server/sentry.ts`, or any web-side file.
+
+#### Build verification — `npx tsc -p tsconfig.server.json`
+
+- **Probe:** `ln -s /Users/trilliumsmith/code/maestro/node_modules node_modules && eval "$(/opt/homebrew/bin/fnm env --shell bash)" && fnm use 22.22.1 && npx tsc -p tsconfig.server.json; echo "EXIT=$?"`
+- **Result:** `EXIT=0`. Zero TS errors. The new `addTab` mutator returns the right shape (`AddTabResult<StoredSession>`) for the L0f `setNewTabCallback` consumer; the wrapped `main().catch(...)` block typechecks; the new `import { initSentry, captureException } from './sentry'` resolves cleanly against the L0e wrapper module. `dist/server/index.js`, `dist/server/sessions-mutator.js`, and the pre-existing dist artifacts emitted. Status: **PASS**.
+
+#### Boot — Layer 0f log line + Sentry init no-op without DSN
+
+- **Probe:** `MAESTRO_DATA_DIR=/tmp/maestro-l0f MAESTRO_WEB_PORT=45689 node dist/server/index.js`
+- **Result:** Server listens at `http://192.168.86.26:45689/<token>`. Boot log shows the new L0f line:
+	```
+	[maestro-server] Layer 0f: 10/10 WRITE callbacks active (L0b: writeToSession,
+	executeCommand, interruptSession via ProcessManager; L0c-A: switchMode, closeTab,
+	renameTab, starTab, reorderTab, toggleBookmark via sessions store + broadcast;
+	L0c-C: selectSession, selectTab as headless no-ops; L0d: newTab via sessions store
+	+ broadcast, lazy process spawn on first command). L0f also wires Sentry init for
+	error capture (no-op without MAESTRO_SENTRY_DSN).
+	```
+- No Sentry-related crash, warning, or error on startup — `initSentry()` correctly returns without touching `@sentry/node` because `MAESTRO_SENTRY_DSN` is unset. Process tree clean: `node` only, no Electron Helper / GPU / Renderer descendants. Status: **PASS**.
+
+#### Smoke — newTab via WebSocket against a seeded session
+
+A small node WS client (`/tmp/maestro-l0f-smoke.mjs`) connected to `/<token>/ws`, subscribed to `sess-l0f-1` (pre-seeded in `/tmp/maestro-l0f-smoke/maestro-sessions.json` with one existing tab `tab-existing`), then fired two `new_tab` messages: one against the seeded session, one against `sess-does-not-exist`.
+
+| Probe | Message → Response | Server-log trace |
+| --- | --- | --- |
+| `new_tab` `sess-l0f-1` | `new_tab_result success=true tabId=92c3ebbf-08ae-4942-9c61-867e92216ee6` plus `tabs_changed` broadcast (`aiTabs[0]=tab-existing, aiTabs[1]=92c3ebbf-..., activeTabId=92c3ebbf-...`) | `[Web] Received new_tab message: session=sess-l0f-1` → `newTab sess-l0f-1 -> 92c3ebbf-08ae-4942-9c61-867e92216ee6` |
+| `new_tab` `sess-does-not-exist` | `new_tab_result success=false` (no tabId field — matches the `{tabId?}` schema in `handleNewTab`) | `[Web] Received new_tab message: session=sess-does-not-exist` → `newTab: session sess-does-not-exist not found; skipping` |
+
+The `tabs_changed` broadcast arrived BEFORE the `new_tab_result` (broadcast fired inside the callback before the promise resolved) — matches the L0c pattern for `closeTab` / `renameTab` / etc. Both probes round-tripped within ~100ms and 600ms of message dispatch. Status: **PASS**.
+
+#### Persistence verification
+
+After the smoke probe, `/tmp/maestro-l0f-smoke/maestro-sessions.json` shows the cumulative result:
+
+- `aiTabs[0]`: unchanged (`tab-existing`).
+- `aiTabs[1]`: new tab `92c3ebbf-08ae-4942-9c61-867e92216ee6` with `agentSessionId=null`, `name=null`, `starred=false`, `inputValue=''`, `usageStats=null`, `createdAt=1780889158261`, `state='idle'`, `thinkingStartTime=null`, `logs=[]`.
+- `activeTabId`: `tab-existing` → `92c3ebbf-08ae-4942-9c61-867e92216ee6` (focus shifted to the new tab, matching renderer behavior).
+
+The "not found" probe (`sess-does-not-exist`) left the store unchanged. Status: **PASS** for store + broadcast wiring.
+
+#### ISC-33 full-closure check — Sentry init lands, replacement is explicit
+
+- **Probe:** `grep -rn "require(.@sentry/electron" dist/server/; grep -rn "from .@sentry/electron" dist/server/; echo "EXIT=$?"`
+- **Result:** `EXIT=1` for both — no runtime require/import of `@sentry/electron` anywhere in `dist/server/`. (One match for the literal string `@sentry/electron` exists in `dist/server/index.js`, but it is inside the file-header doc comment describing the L0e layer scope — not a runtime reference.)
+- **Probe:** `grep -rn "require(.@sentry/node" dist/server/`
+- **Result:** `dist/server/sentry.js: const sentry = require('@sentry/node');` — confirms the `@sentry/node` lazy require lives in the dist artifact. The init call sequence is now: `main()` calls `initSentry()` → checks `process.env.MAESTRO_SENTRY_DSN` → if set, `require('@sentry/node')` lazily and call `sentry.init({ dsn, environment })`; if unset, silent return. `main().catch(...)` then routes errors through `captureException(err, { context: 'main_startup' })` which checks the cached `sentryModule` reference and is a no-op when uninitialized.
+- **Conclusion:** ISC-33 graduates from partial PASS ("not in dist because tsconfig happens to omit the paths that pull it") to **full PASS** ("server explicitly initializes `@sentry/node` and routes the top-level error path through `captureException`; webFull side still pending the `main.tsx` init wire-up but the server side of the split is done"). Status: **PASS** (server-side closure).
+
+#### Electron-leak guard
+
+- **Probe:** `grep -r "from 'electron'" dist/server/; echo "exit=$?"`
+- **Result:** `exit=1` (grep no-match). Adding the `addTab` mutator + Sentry init wire-up pulled zero new electron dependencies into the compiled dist tree. Status: **PASS**.
+
+#### Scope check
+
+- `git diff main..HEAD -- src/web/ | wc -c` → `0` (zero bytes — `src/web/` still untouched).
+- `git diff main..HEAD -- src/main/ | wc -c` → `0` (zero bytes — `src/main/` still untouched).
+- `git diff main..HEAD -- src/renderer/ | wc -c` → `0` (zero bytes — `src/renderer/` still untouched).
+- L0f diff against `6d683b39b` (base):
+	- 2 edited source files: `src/server/index.ts`, `src/server/sessions-mutator.ts`.
+	- 1 edited doc file: `ISA.md`.
+	- No new files; no `tsconfig.server.json` changes; no `package.json` changes.
+- `node_modules` symlink (created for the build + smoke) removed before commit; not tracked.
