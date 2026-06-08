@@ -92,3 +92,4 @@ export type { GroupChatMessagesHandle } from './GroupChatMessages';
 export { ThemePicker } from './ThemePicker';
 export { SettingCheckbox } from './SettingCheckbox';
 export type { SettingCheckboxProps } from './SettingCheckbox';
+export { WelcomeContent } from './WelcomeContent';
