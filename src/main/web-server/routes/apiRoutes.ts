@@ -417,6 +417,131 @@ function validateFsPath(p: unknown): string | null {
 	return null;
 }
 
+/* ============ Agents provider registry (W3-agents — closes ISC-44.shim.agents_routes, server-half) ============ */
+//
+// Mirrors the WakaTimeProvider / StatsProvider / FontsProvider / FsProvider /
+// MarketplaceProvider patterns above. Headless entrypoints register a provider
+// backed by `src/server/agents-manager.ts`; the Electron path leaves it unset
+// and the routes 503 cleanly. NO fallback default is constructed here — the
+// headless boot path is the only legitimate registrant. The renderer-side
+// `agents:*` IPC handlers in `src/main/ipc/handlers/agents.ts` continue to own
+// the agent surface inside Electron, and the routes here do NOT touch them.
+// Both stacks can run side-by-side because the underlying binary detection
+// (probe known paths + `which`/`where`) is the cross-mode contract.
+//
+// Route surface (3 endpoints) per the brief audit of NewInstanceModal's IPC
+// sites at `src/renderer/components/NewInstanceModal.tsx`:
+//   GET /api/agents/detected              — list installed agents (mirrors `agents:detect`)
+//   GET /api/agents/detect/<agentId>      — fresh detection + debugInfo (mirrors `agents:refresh`)
+//   GET /api/agents/capabilities/<agentId> — capabilities matrix (mirrors `agents:getCapabilities`)
+//
+// Out of scope (deliberately, per the umbrella big_3_ipc_strategy Decision):
+//   - `agents:getConfig` / `agents:setConfig` / agent-config CRUD — needs a
+//     server-side config store that doesn't yet exist. NewInstanceModal's
+//     config calls (lines 284, 971, 1288, 1791) will need a follow-up brief.
+//   - `agents:getModels` — local model discovery shells out to each agent's
+//     `models` subcommand. NewInstanceModal lines 405, 1482 will need a
+//     follow-up brief.
+//   - `agents:discoverSlashCommands` — Claude Code only, expensive, no current
+//     webFull consumer.
+//   - SSH-remote detection via `?sshRemoteId=` — sibling sub-ISC
+//     `ISC-44.shim.ssh_remotes_routes`. Returns 501 on the route layer so
+//     callers don't silently get a local-host result when a remote was
+//     requested (matches the W3-fs precedent).
+export interface AgentsProvider {
+	/**
+	 * Detect all installed agents on the local host. Returns a serializable
+	 * list (no function fields) of `AgentConfig`-shaped objects with
+	 * `available`, `path`, `capabilities` populated. Each entry mirrors the
+	 * `agents:detect` IPC reply shape after `stripAgentFunctions` runs.
+	 */
+	detectAgents: () => Promise<unknown[]>;
+	/**
+	 * Fresh detection for a specific agent id. Returns `{ agents, debugInfo }`
+	 * where `agents` is the full list (same as `detectAgents()`) and
+	 * `debugInfo` is non-null when the targeted agent was NOT found,
+	 * populated with the env context + `which` error output for diagnostics.
+	 * Mirrors the `agents:refresh` IPC reply shape at agents.ts:399-405.
+	 */
+	detectAgent: (agentId: string) => Promise<{
+		agents: unknown[];
+		debugInfo: {
+			agentId: string;
+			available: boolean;
+			path: string | null;
+			binaryName: string;
+			envPath: string;
+			homeDir: string;
+			platform: string;
+			whichCommand: string;
+			error: string | null;
+		} | null;
+	}>;
+	/**
+	 * Look up the capabilities matrix for an agent id. Unknown ids return
+	 * the default (all-false) matrix per `getAgentCapabilities()`'s
+	 * contract.
+	 */
+	getCapabilities: (agentId: string) => Record<string, unknown>;
+}
+
+let agentsProvider: AgentsProvider | null = null;
+
+/**
+ * Register the active Agents provider. Pass null to clear.
+ *
+ * The headless server boot path calls this once before `WebServer.start()` so
+ * the `/api/agents/*` routes are wired by the time the first client request
+ * arrives. Electron-host paths can ignore this — the routes 503 cleanly when
+ * no provider is registered, and the Electron renderer continues to use the
+ * `agents:*` IPC namespace directly.
+ */
+export function registerAgentsProvider(provider: AgentsProvider | null): void {
+	agentsProvider = provider;
+}
+
+/**
+ * Internal accessor for the route handlers. Returns the registered provider
+ * or `null` if none is registered (the routes translate `null` → HTTP 503).
+ * Exposed for testing.
+ */
+export function getAgentsProvider(): AgentsProvider | null {
+	return agentsProvider;
+}
+
+/**
+ * Validate an agent id for cross-process use.
+ *
+ * Agent ids are short kebab-case identifiers (`claude-code`, `codex`,
+ * `opencode`, `factory-droid`, `terminal`, `gemini-cli`, `qwen3-coder`,
+ * `aider`). The route layer accepts the agent id as a URL path segment
+ * (`/api/agents/detect/<agentId>`), so we must reject anything that could
+ * contain path-traversal or shell-injection characters before forwarding
+ * to the provider. The provider itself does NOT shell out the id —
+ * detection uses the binary NAME from `AGENT_DEFINITIONS`, not the id —
+ * but defense-in-depth: belt-and-suspenders the id at the route boundary
+ * so a future consumer that DOES use the id in a shell context can't be
+ * blindsided.
+ *
+ * Rules:
+ *   - must be a non-empty string
+ *   - must match `^[a-zA-Z0-9][a-zA-Z0-9_-]*$` (alphanumeric + dash/underscore,
+ *     leading char alphanumeric)
+ *   - max 64 characters (every defined agent id fits well under this; a
+ *     longer string is almost certainly a probe attempt)
+ *
+ * Returns `null` if the id passes; otherwise a short reason for the 400
+ * reply body.
+ */
+function validateAgentId(id: unknown): string | null {
+	if (typeof id !== 'string' || id.length === 0) return 'agentId must be a non-empty string';
+	if (id.length > 64) return 'agentId must be 64 characters or fewer';
+	if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(id)) {
+		return 'agentId must be alphanumeric with optional `-` / `_` (must start alphanumeric)';
+	}
+	return null;
+}
+
 /* ============ Marketplace provider registry (W3 — closes ISC-44.shim.w3_marketplace_routes, server-half) ============ */
 //
 // Mirrors the WakaTimeProvider / StatsProvider / FontsProvider patterns
@@ -1915,6 +2040,196 @@ export class ApiRoutes {
 						/* already closed */
 					}
 				});
+			}
+		);
+
+		// ============ Agents endpoints (W3-agents — closes ISC-44.shim.agents_routes, server-half) ============
+		//
+		// Additive REST routes that mirror the renderer-side `agents:*` IPC namespace
+		// (`agents:detect`, `agents:refresh`, `agents:getCapabilities`) — the
+		// detection-and-capabilities sub-surface that the umbrella
+		// `ISC-44.shim.big_3_ipc_strategy` Decision named as a dependency for the
+		// NewInstanceModal port to webFull. 503 when no AgentsProvider is
+		// registered (the Electron path leaves it unset). Per the umbrella Decision
+		// (2026-06-08), additive `src/main/web-server/routes/` edits are authorized.
+		// NO touch to `src/main/ipc/handlers/agents.ts` or the renderer-side preload
+		// bridge.
+		//
+		// Route surface (3 endpoints):
+		//   GET /api/agents/detected              — `{agents: unknown[], timestamp}`
+		//   GET /api/agents/detect/:agentId       — `{agents, debugInfo, timestamp}`
+		//   GET /api/agents/capabilities/:agentId — `{agentId, capabilities, timestamp}`
+		//
+		// All :agentId-accepting routes validate the input via `validateAgentId()`
+		// BEFORE invoking the provider, so traversal / shell-special characters
+		// fail loud with a 400 — the provider never sees a hostile id. Defense-
+		// in-depth posture matches the W3-fs precedent.
+		//
+		// SSH-remote support is deliberately out of scope here (see the manager
+		// doc-comment); a `?sshRemoteId=` query param returns 501 Not Implemented
+		// so callers don't silently get a local-host result when a remote was
+		// requested. Mirrors the W3-fs SSH 501 posture at apiRoutes.ts:1278+.
+		//
+		// Out of scope per the umbrella big_3_ipc_strategy Decision — will land in
+		// follow-up briefs once the NewInstanceModal port to webFull surfaces real
+		// consumers:
+		//   - `agents:getConfig` / `agents:setConfig` and custom path/args/env
+		//     CRUD — needs a server-side config store.
+		//   - `agents:getModels` — local model discovery.
+		//   - `agents:discoverSlashCommands` — Claude Code only.
+
+		// GET /api/agents/detected — mirrors `agents:detect` IPC reply, wrapped
+		// in a `{agents, timestamp}` envelope for parity with the rest of the
+		// `/api/*` surface (every other route returns a `timestamp`-stamped
+		// object, never a bare array).
+		server.get(
+			`/${token}/api/agents/detected`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getAgentsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Agents provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { sshRemoteId } = (request.query as { sshRemoteId?: string }) || {};
+				if (sshRemoteId) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side agents routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const agents = await provider.detectAgents();
+					return {
+						agents,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to detect agents: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/agents/detect/:agentId — mirrors `agents:refresh` IPC reply.
+		// Returns the full agent list PLUS a `debugInfo` payload targeted at
+		// the requested agent. When the agent is detected, `debugInfo` is null.
+		// When it is NOT detected, `debugInfo` is populated with env context
+		// + the `which`/`where` failure output so callers can diagnose missing
+		// installs without round-tripping.
+		server.get(
+			`/${token}/api/agents/detect/:agentId`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getAgentsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Agents provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { sshRemoteId } = (request.query as { sshRemoteId?: string }) || {};
+				if (sshRemoteId) {
+					return reply.code(501).send({
+						error: 'Not Implemented',
+						message:
+							'sshRemoteId is not supported by the server-side agents routes; use the Electron IPC path for SSH remote operations',
+						timestamp: Date.now(),
+					});
+				}
+				const { agentId } = request.params as { agentId?: string };
+				const reason = validateAgentId(agentId);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = await provider.detectAgent(agentId as string);
+					return {
+						...result,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to detect agent: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/agents/capabilities/:agentId — mirrors `agents:getCapabilities`.
+		// Pure lookup against `AGENT_CAPABILITIES`. Unknown ids return the default
+		// matrix (all-false) per the underlying contract.
+		server.get(
+			`/${token}/api/agents/capabilities/:agentId`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getAgentsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Agents provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { agentId } = request.params as { agentId?: string };
+				const reason = validateAgentId(agentId);
+				if (reason) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: reason,
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const capabilities = provider.getCapabilities(agentId as string);
+					return {
+						agentId,
+						capabilities,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to get capabilities: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
 			}
 		);
 

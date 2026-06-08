@@ -24,7 +24,9 @@
 		"src/main/utils/networkUtils.ts",
 		"src/main/utils/sentry.ts",
 		"src/main/process-manager/**/*.ts",
-		"src/main/parsers/**/*.ts"
+		"src/main/parsers/**/*.ts",
+		"src/main/agents/definitions.ts",
+		"src/main/agents/capabilities.ts"
 	],
 	"exclude": ["node_modules", "dist", "**/*.test.ts", "**/__tests__/**"]
 }
