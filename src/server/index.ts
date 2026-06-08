@@ -44,6 +44,7 @@ import { getDataDir } from '../shared/data-dir';
 import { ServerProcessManagerAdapter } from './process-manager-adapter';
 import * as mutator from './sessions-mutator';
 import { initSentry, captureException } from './sentry';
+import { getHistoryManager } from './history-manager';
 
 type StoredSession = {
 	id: string;
@@ -90,6 +91,13 @@ const groupsStore = new FileStore<{ groups: StoredGroup[] }>({
 	cwd: dataDir,
 	defaults: { groups: [] },
 });
+
+// Layer 0h — per-session history store. Same on-disk format as the
+// renderer-side HistoryManager (`<dataDir>/history/<sessionId>.json`), so an
+// Electron-written history directory reads correctly headless and vice-versa.
+// `initialize()` is awaited inside main() so the directory + legacy migration
+// land before the server starts responding to history queries.
+const historyManager = getHistoryManager();
 
 // Persistent token: stored in settings if present, otherwise ephemeral per boot.
 // FileStore's generic-V overload is shadowed by the keyof-T overload when T is
@@ -231,10 +239,23 @@ server.setGetCustomCommandsCallback(() => {
 	>('customAICommands', []);
 });
 
-server.setGetHistoryCallback(() => {
-	// Layer 0a stub — history requires the HistoryManager which imports electron.
-	// Returning empty until Layer 0b ports HistoryManager to a server-side variant.
-	return [];
+// Layer 0h — server-side HistoryManager wired. Mirrors the dispatch shape
+// from `src/main/web-server/web-server-factory.ts` (lines 227-245): a
+// per-session lookup when `sessionId` is supplied, a per-project lookup when
+// only `projectPath` is supplied, otherwise the cross-session feed via
+// `getAllEntries()`. All three paths return entries sorted most-recent-first
+// (per-session sort is applied here; the project/all paths are already
+// timestamp-sorted inside `HistoryManager`).
+server.setGetHistoryCallback((projectPath?: string, sessionId?: string) => {
+	if (sessionId) {
+		const entries = historyManager.getEntries(sessionId);
+		entries.sort((a, b) => b.timestamp - a.timestamp);
+		return entries;
+	}
+	if (projectPath) {
+		return historyManager.getEntriesByProjectPath(projectPath);
+	}
+	return historyManager.getAllEntries();
 });
 
 // ============ WRITE callbacks ============
@@ -524,12 +545,25 @@ async function main() {
 	// L0f: initialize Sentry FIRST so any subsequent error path can capture.
 	// No-op when MAESTRO_SENTRY_DSN is not set (the default for dev runs).
 	initSentry();
+	// L0h: prime the history directory and run the legacy `maestro-history.json`
+	// → per-session migration once. Idempotent: a marker file under `dataDir`
+	// gates re-running on subsequent boots, so this awaits a single short
+	// filesystem walk in the steady state.
+	try {
+		await historyManager.initialize();
+	} catch (err) {
+		console.error('[maestro-server] historyManager.initialize() failed', err);
+		captureException(err, { context: 'history_init' });
+	}
 	const result = await server.start();
 	console.log(`[maestro-server] listening at ${result.url}`);
 	console.log(`[maestro-server] data directory: ${dataDir}`);
 	console.log(`[maestro-server] sessions visible: ${sessionsStore.get<StoredSession[]>('sessions', []).length}`);
 	console.log(
-		'[maestro-server] Layer 0f: 10/10 WRITE callbacks active ' +
+		'[maestro-server] Layer 0h: getHistory — server-side HistoryManager wired ' +
+			'(per-session storage at <dataDir>/history/<sessionId>.json, ' +
+			'API parity with src/main/history-manager.ts). ' +
+			'10/10 WRITE callbacks active ' +
 			'(L0b: writeToSession, executeCommand, interruptSession via ProcessManager; ' +
 			'L0c-A: switchMode, closeTab, renameTab, starTab, reorderTab, toggleBookmark ' +
 			'via sessions store + broadcast; ' +
