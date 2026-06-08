@@ -107,7 +107,7 @@ function requireProcessLifecycleClient(): ProcessLifecycleClient | null {
 		// don't throw — the wizard surfaces its own error via the existing
 		// `error` return path so the UX matches the "agent not configured"
 		// case rather than crashing the host React tree.
-		 
+
 		console.warn(
 			'[webFull] conversationManager: processLifecycleClient is not wired. Call setProcessLifecycleClient() from App.tsx after building the WS client.'
 		);
@@ -149,7 +149,7 @@ let warnedAgentResolverMissing = false;
 let agentResolver: AgentResolver = async () => {
 	if (!warnedAgentResolverMissing) {
 		warnedAgentResolverMissing = true;
-		 
+
 		console.warn(
 			'[webFull] conversationManager: agentResolver not wired. Wire via setAgentResolver() from App.tsx. TODO: route /api/agents/get/:id (not yet implemented).'
 		);
