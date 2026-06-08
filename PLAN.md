@@ -62,7 +62,7 @@ Check `git log --oneline -10` and the ISA Decisions section for the freshest sta
 
 Function parity, not pixel parity. Every feature port ships with a user-story catalog of `(Given, When, Then)` triples using a fixed assertion vocabulary (`hasElement`, `hasText`, `wsFrameMatches`, `dbHasRow`, `fsHas`, `processHas`, `notificationFired`, `broadcast`) chosen deliberately to be layout-independent. The catalog is recorded against the running Electron app (the test oracle at `localhost:9222`) and replayed against webFull (at `localhost:5176`); both must pass. Pixel-perfect, DOM-identical, and CSS-identical parity are explicitly rejected as the wrong bar — the bar is "the user can do the same things in the same situations and get the same observable results." The catalog IS the spec, not the renderer source — this protects against agent hallucination and against canonizing renderer bugs. Per-feature catalogs land at `src/webFull/<feature>/parity.test.ts` and tie to per-feature ISCs formatted as `ISC-44.<feature>: parity catalog passes against both Electron and webFull, ≥N stories, including ≥1 negative-path story per happy-path story`.
 
-Full methodology, assertion grammar, and per-feature catalog template: `WEB_PARITY_VERIFICATION.md` (referenced from ISA; lands when first per-feature catalog ships).
+Full methodology, assertion grammar, and per-feature catalog template: function-parity verification methodology ([brain-aq5m](~/data/knowledge/entries/knowledge/maestro-web-port-function-parity-verification-methodology.md)).
 
 ## Standing rules (most important)
 
@@ -78,9 +78,9 @@ Full constraint list with context: [ISA.md § Constraints](ISA.md#constraints) a
 
 - [ISA.md](ISA.md) — Project source-of-truth. Constraints, ISCs, Decisions, Changelog, Verification log. Read this first; the Decisions section is the freshest narrative of what's been resolved.
 - [WEB_PORT_ORDER.md](WEB_PORT_ORDER.md) — Layered execution roadmap. Per-layer item breakdown, lift-vs-rewrite decision rule, IPC substitution reference, skip-list.
-- `WEB_CONVERSION_ASSESSMENT.md` — Codebase inventory + server-decoupling scoping (referenced by ISA; full file lands when the background research agent's report is committed).
-- `WEB_FEATURE_PARITY_SCOPE.md` — Per-feature LOC + IPC inventory; what's in / what's deferred (referenced by ISA; lands alongside the conversion assessment).
-- `WEB_PARITY_VERIFICATION.md` — Function-parity catalog methodology + assertion grammar (referenced by ISA; lands when the first per-feature parity catalog ships).
+- [brain-tlak](~/data/knowledge/entries/knowledge/maestro-web-port-codebase-conversion-assessment.md) — Maestro web-port: codebase conversion assessment. Codebase inventory + server-decoupling scoping (migrated from `WEB_CONVERSION_ASSESSMENT.md` to brain on 2026-06-08).
+- [brain-8s3r](~/data/knowledge/entries/knowledge/maestro-web-port-feature-parity-scope-inventory.md) — Maestro web-port: feature parity scope inventory. Per-feature LOC + IPC inventory; what's in / what's deferred (migrated from `WEB_FEATURE_PARITY_SCOPE.md` to brain on 2026-06-08).
+- [brain-aq5m](~/data/knowledge/entries/knowledge/maestro-web-port-function-parity-verification-methodology.md) — Maestro web-port: function-parity verification methodology. Catalog methodology + assertion grammar (migrated from `WEB_PARITY_VERIFICATION.md` to brain on 2026-06-08).
 - `/tmp/web-ui-lift-scope.md` — Lift audit (445 lines, 2026-06-07) that informs the lift-vs-rewrite rule in `WEB_PORT_ORDER.md`. Not in the repo; treat as the audit's source.
 
 ## How to extend this fork
