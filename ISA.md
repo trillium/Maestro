@@ -3882,6 +3882,7 @@ Catalog uses only the allowed assertion vocabulary (`hasElement`, `hasText`, `ws
 - `src/renderer/` — read-only oracle. The renderer continues to import `CsvTableRenderer` from `'./CsvTableRenderer'` inside `src/renderer/components/FilePreview.tsx` and render the renderer module as part of the Electron entrypoint.
 - `src/web/` — fork-hygiene read-only.
 - `src/main/` — no new IPC handlers; the renderer is purely visual and prop-callback-driven.
+
 ### Decisions 2026-06-08 — Layer 2.5 leaf-parade — paired `AutoRunExpandedModal` + `AutoRunDocumentSelector` lift
 
 **Closes:** ISC-44.layer-2.5.autorun_expanded_modal + ISC-44.layer-2.5.autorun_document_selector.
@@ -3944,6 +3945,7 @@ Both catalogs use only the allowed assertion vocabulary (`hasElement`, `hasText`
 - `src/renderer/` — read-only oracle (zero bytes diff vs main). The renderer continues to import `AutoRunExpandedModal` and `AutoRunDocumentSelector` from `'../components/AutoRunExpandedModal'` / `'../components/AutoRunDocumentSelector'` and render the renderer modules as part of the Electron entrypoint.
 - `src/web/` — fork-hygiene read-only (zero bytes diff vs main).
 - `src/main/` — no new IPC handlers; the modal SHELL is purely visual and prop-callback-driven, and the document-selector touches 0 IPC namespaces at module load or runtime (`onCreateDocument` is a parent-owned callback that may eventually reach the server via WS frames, but that wiring belongs to the parent that mounts the selector, not this leaf).
+
 ### Decisions 2026-06-08 — Layer 2.5 leaf-parade — three sibling progress modals lifted in one branch (`MergeProgressModal` + `SummarizeProgressModal` + `TransferProgressModal`)
 
 **Closes:** ISC-44.layer-2.5.merge_progress_modal, ISC-44.layer-2.5.summarize_progress_modal, ISC-44.layer-2.5.transfer_progress_modal.
@@ -4020,6 +4022,7 @@ Each catalog uses only the allowed assertion vocabulary (`hasElement`, `hasText`
 - **Wiring `CsvTableRenderer` into the webFull `FilePreview`.** The webFull file-preview surface (the consumer that would feed `content` / `searchQuery` / `onMatchCount` into the renderer) has not been ported. The renderer's `FilePreview` continues to consume the renderer module via `'./CsvTableRenderer'`. A future file-preview port would swap in `'../../webFull/components/CsvTableRenderer'` (or, more likely, route through a higher-level FilePreview lift).
 - **Sticky-header observation in the catalog.** The header cells use `position: sticky; top: 0` so they pin to the table's scroll-container — this is layout-level CSS not asserted by the catalog (catalog principle: observable behavior, not DOM structure or CSS). A future visual-regression sweep would catch sticky-header drift.
 - **Truncation-banner assertions.** The catalog covers the `MAX_DISPLAY_ROWS = 500` cap conceptually (any input over 500 filtered rows surfaces the banner) but does not ship a positive story exercising the cap — generating a 501-row fixture inline would balloon the test file without adding observable-behavior coverage the existing stories don't cover. Tracked downstream as a follow-on if the truncation copy ever changes.
+
 ---
 
 ### 2026-06-08 — Layer 2.5 leaf-parade — paired `MermaidRenderer` lift + `GroupChatModal` STOP
@@ -4093,6 +4096,7 @@ $ git diff main..HEAD -- src/web/ src/renderer/ src/main/ src/server/ | wc -c
 - **Lifting `useAgentConfiguration` into webFull.** Requires the three server-side routes enumerated above (`/api/agents/detect`, `/api/ssh-remotes/list`, `/api/agents/config/{get,set}`) plus a webFull HTTP / WebSocket adapter that implements the same hook return shape. Separate ISC-44.x sub-ticket; not opened here because the parent decision (whether webFull gets a full agent-detection surface at all) is a product decision the leaf-parade is not the right venue for.
 - **Wiring `MermaidRenderer` into the webFull `MarkdownRenderer` chain.** The webFull `MarkdownRenderer` (lifted earlier in the leaf-parade) currently renders fenced `mermaid` code blocks as plain `<pre><code>` — a downstream wire-up would swap that to `<MermaidRenderer>` for `language === 'mermaid'`. Out of scope here; this lift makes the wire-up possible by surfacing the component in the webFull tree, but does not perform the wire-up itself.
 - **Multi-instance / multi-theme mermaid singleton.** The module-scoped `lastThemeId` cache is preserved verbatim from the renderer source — same single-instance-per-document constraint applies. If a future webFull surface needs to render two mermaid charts with different themes side-by-side, the singleton needs to grow per-instance theme tracking; that's a behaviour expansion, not a parity bug.
+
 ### Decisions 2026-06-08 — Layer 2.5 leaf-parade — paired `FileSearchModal` + `AICommandsPanel` lift
 
 **Closes:** ISC-44.layer-2.5.file_search_modal + ISC-44.layer-2.5.ai_commands_panel.
