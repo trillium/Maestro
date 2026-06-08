@@ -198,3 +198,10 @@ export type {
 
 export { useModalGate, default as useModalGateDefault } from './useModalGate';
 export type { ModalGate } from './useModalGate';
+
+// ============================================================================
+// W3-marketplace transitive-hook port (companion to MarketplaceModal lift)
+// ============================================================================
+
+export { useMarketplace, default as useMarketplaceDefault } from './useMarketplace';
+export type { UseMarketplaceReturn } from './useMarketplace';
