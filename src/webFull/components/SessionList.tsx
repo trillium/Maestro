@@ -79,92 +79,9 @@
 import React, { memo, useMemo, useState } from 'react';
 import type { Theme } from '../../shared/theme-types';
 import type { Session, GroupInfo } from '../hooks/useSessions';
-import { StatusDot, type SessionStatus } from './Badge';
+import { SessionListItem } from './SessionListItem';
 
 // --- Local presentational helpers ------------------------------------------
-
-/**
- * Map a Session's wire-protocol `state` string to the four-color SessionStatus
- * vocabulary used by `<StatusDot>`. The renderer's contract (per CLAUDE.md
- * "Agent States (color-coded)") is:
- *   idle → green, busy → yellow, error → red, connecting → orange (pulsing).
- * Any other state defaults to `error` — visual parity with `SessionPillBar`.
- */
-function stateToStatus(state: string | undefined): SessionStatus {
-	if (state === 'idle') return 'idle';
-	if (state === 'busy') return 'busy';
-	if (state === 'connecting') return 'connecting';
-	return 'error';
-}
-
-interface SessionListItemProps {
-	session: Session;
-	isActive: boolean;
-	theme: Theme;
-	onSelect: (sessionId: string) => void;
-}
-
-const SessionListItem = memo(function SessionListItem(props: SessionListItemProps) {
-	const { session, isActive, theme, onSelect } = props;
-	const status = stateToStatus(session.state);
-	const isAi = session.inputMode !== 'terminal';
-
-	return (
-		<button
-			type="button"
-			role="option"
-			aria-selected={isActive}
-			data-session-id={session.id}
-			data-session-state={session.state}
-			data-active={isActive ? 'true' : 'false'}
-			onClick={() => onSelect(session.id)}
-			className="session-list-item"
-			style={{
-				display: 'flex',
-				alignItems: 'center',
-				gap: '8px',
-				width: '100%',
-				padding: '8px 12px',
-				border: 'none',
-				borderLeft: isActive ? `3px solid ${theme.colors.accent}` : `3px solid transparent`,
-				backgroundColor: isActive ? `${theme.colors.accent}15` : 'transparent',
-				color: theme.colors.textMain,
-				fontSize: '13px',
-				fontWeight: isActive ? 600 : 400,
-				textAlign: 'left',
-				cursor: 'pointer',
-				outline: 'none',
-				transition: 'background-color 0.15s ease, border-color 0.15s ease',
-			}}
-		>
-			<StatusDot status={status} size="sm" />
-			<span
-				style={{
-					flex: 1,
-					overflow: 'hidden',
-					textOverflow: 'ellipsis',
-					whiteSpace: 'nowrap',
-				}}
-			>
-				{session.name || 'Untitled'}
-			</span>
-			<span
-				aria-label={isAi ? 'AI mode' : 'Terminal mode'}
-				style={{
-					fontSize: '10px',
-					fontWeight: 600,
-					padding: '2px 4px',
-					borderRadius: '3px',
-					lineHeight: 1,
-					color: isAi ? theme.colors.accent : theme.colors.textDim,
-					backgroundColor: isAi ? `${theme.colors.accent}20` : `${theme.colors.textDim}20`,
-				}}
-			>
-				{isAi ? 'AI' : '⌘'}
-			</span>
-		</button>
-	);
-});
 
 interface SessionGroupHeaderProps {
 	label: string;

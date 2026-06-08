@@ -58,3 +58,5 @@ export { PlaybookDeleteConfirmModal } from './PlaybookDeleteConfirmModal';
 export { RenameGroupModal } from './RenameGroupModal';
 export { RenameGroupChatModal } from './RenameGroupChatModal';
 export { DeleteGroupChatModal } from './DeleteGroupChatModal';
+export { SessionListItem, stateToStatus } from './SessionListItem';
+export type { SessionListItemProps } from './SessionListItem';
