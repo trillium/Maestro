@@ -434,6 +434,10 @@ Every feature ported into `src/webFull/` gets a parity catalog at `src/webFull/<
   3. **"Use what's there today" (Tier 0):** Run upstream Electron headless-ish on mini2; expose the existing `live:getDashboardUrl` URL over Tailscale. Browser-from-anywhere with no code changes, accept the mobile-companion UX immediately, defer all conversion work. The existing token-in-URL auth + Tailscale-as-perimeter is already a working security model. The cheapest path to "browser-accessible from many machines" — and may be the right first answer.
 - **criterion_now**: ISC-41 (accept mobile-companion UX or scope desktop-class web build) and ISC-42 (accept no-browser-PTY or scope xterm.js work) are now BLOCKING for any BUILD turn. Need principal decision before sizing further.
 
+### 2026-06-08 — catalog-flaw fix wave A+B (ISC-44.testing.catalog_flaw_fix_wave_a_b)
+
+- 2026-06-08 catalog-flaw fix wave A+B: 5 catalog edits applied — AutoRun help-title selector, 2 AutoRun absence-marker swaps (vacuously-satisfied → real selector), AutoRun error-banner literal `"Auto Run Paused"`, GroupChatPanel data-testid → `.group-chat-messages`/`Beta` pattern, LightboxModal aria-label `"Confirm Delete"` → `"Confirm"`. Source-of-truth: renderer is authoritative since src/renderer is read-only.
+
 ## Verification
 
 > Per-ISC evidence lands here at VERIFY phase.

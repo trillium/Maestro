@@ -195,12 +195,17 @@ export const lightboxModalParityCatalog: ParityStory[] = [
 		then: [
 			// LightboxModal stays open
 			{ verb: 'hasElement', target: '[role="dialog"][aria-label="Image Lightbox"]' },
-			// The L2.1 ConfirmModal composes on top with its dialog
-			{ verb: 'hasElement', target: '[role="dialog"][aria-label="Confirm Delete"]' },
+			// The L2.1 ConfirmModal composes on top with its dialog. LightboxModal
+			// invokes <ConfirmModal> with no title prop (renderer source-of-truth:
+			// src/renderer/components/LightboxModal.tsx:246-253); ConfirmModal
+			// defaults title="Confirm" (ConfirmModal.tsx:24); Modal renders
+			// aria-label={title} (Modal.tsx:132). So the actual aria-label is
+			// "Confirm", not "Confirm Delete".
+			{ verb: 'hasElement', target: '[role="dialog"][aria-label="Confirm"]' },
 			// Confirmation copy references the destructive action
 			{
 				verb: 'hasText',
-				target: '[role="dialog"][aria-label="Confirm Delete"]',
+				target: '[role="dialog"][aria-label="Confirm"]',
 				value: 'remove this image',
 			},
 		],
