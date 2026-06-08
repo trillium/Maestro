@@ -103,3 +103,5 @@ export type {
 	StandingOvationData as AppOverlaysStandingOvationData,
 	FirstRunCelebrationData as AppOverlaysFirstRunCelebrationData,
 } from './AppOverlays';
+export { AutoRunSearchBar } from './AutoRunSearchBar';
+export type { AutoRunSearchBarProps } from './AutoRunSearchBar';
