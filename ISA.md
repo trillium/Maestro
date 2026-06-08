@@ -855,3 +855,94 @@ Verbatim copy (not re-export). Rationale: `EmojiPickerField.tsx` contains real c
 - `git diff main..HEAD -- src/renderer/ | wc -c` → `0` (zero bytes — `src/renderer/` untouched; the source `EmojiPickerField.tsx` lives at `src/renderer/components/ui/EmojiPickerField.tsx` and was read-only — only the destination `src/webFull/components/ui/EmojiPickerField.tsx` was written).
 - Working-tree changes for this layer (before commit): `M src/webFull/components/index.ts`, `?? src/webFull/components/ui/EmojiPickerField.tsx`, plus this `M ISA.md` append. Exactly the authorized set.
 - `node_modules` symlink (created for the build) removed before commit; not tracked.
+
+### 2026-06-08 — Layer 3.2 evidence (Settings Display + Shortcuts tabs)
+
+#### Decisions
+
+- **Pattern: rewrite-with-primitives for both tabs.** Per the L3.x lift-vs-rewrite rule.
+  - **DisplayTab.** Renderer source is 715 LOC and fans out into ≥1 IPC namespace beyond `settings` (specifically `fonts:detect` for system font enumeration in `loadFonts()`). That puts it over the "lift if ≤ 1 IPC namespace beyond settings" threshold; rewrite-with-primitives, not verbatim lift.
+  - **ShortcutsTab.** Renderer source is 212 LOC and uses ZERO `window.maestro.*` IPC. By the rule it is technically liftable, but rewriting keeps the L3.x catalog uniform and avoids a cross-tree import from `src/renderer/utils/shortcutFormatter.ts` (a utility not part of the L2.x lifted primitives). Inlined a ~20-line platform-aware key formatter in the webFull tab — pure function, no IPC.
+
+- **DisplayTab deferred IPC / Electron-only surface (surfaced inline, NOT silently dropped):**
+  - `fontFamily` picker + custom-font management (`fonts:detect` — Electron-only system font enumeration).
+  - "Window Chrome" toggles (`useNativeTitleBar`, `autoHideMenuBar`) — affect Electron's BrowserWindow chrome; no browser equivalent. Settings keys themselves still writable from a future port.
+  - Bionify info modal (non-essential algorithm reference popup). Algorithm input itself stays editable.
+  - Surfaced via the same "Coming in subsequent layers" panel template from L3.1 General. Anti-criterion: do NOT silently drop.
+
+- **DisplayTab IPC-free coverage (today):** `fontSize`, `terminalWidth`, `maxLogBuffer`, `maxOutputLines`, `userMessageAlignment`, `bionifyReadingMode`, `bionifyIntensity`, `bionifyAlgorithm` (with `BIONIFY_ALGORITHM_PATTERN` validation matching the renderer's regex), `fileExplorerIconTheme`, `documentGraphShowExternalLinks`, `documentGraphMaxNodes`, `contextManagementSettings` (nested object: `contextWarningsEnabled` + yellow/red thresholds with the renderer's mutual-bump validation), `localIgnorePatterns` (string[] edited as a one-per-line textarea), `localHonorGitignore`.
+
+- **DisplayTab data-model adapter — `maxOutputLines` Infinity sentinel.** Renderer's `maxOutputLines` toggle allows `Infinity` for the "All" option; `Infinity` is not JSON-representable, so the on-disk FileStore would coerce it on round-trip. WebFull serializes `Infinity` ↔ `-1` at the I/O boundary: the toggle reads `maxOutputLines === Infinity ? -1 : value`, and writes `value === -1 ? Infinity : value`. The renderer's Electron-store equivalent silently does the same coercion under the hood; this just makes the contract explicit in the webFull path.
+
+- **ShortcutsTab — uses the same flat settings shape.** `shortcuts: Record<id, {id,label,keys}>` and `tabShortcuts: Record<id, {id,label,keys}>` are read from `useSettings()` (zero IPC). Writes go through the existing `PATCH /api/settings` route from L3.1 — no new route needed. Live key capture uses browser KeyboardEvent (the renderer's `e.code` Alt-handling for macOS special-character keys is preserved verbatim).
+
+- **ShortcutsTab — empty-state handling.** When the server has not published a `shortcuts` map yet (e.g. early startup or fresh install) the renderer would show empty section headers; webFull instead shows a single "No customizable shortcuts have been registered yet" panel. This is the negative-path story in the parity catalog (`empty-shortcuts-map-shows-empty-state`).
+
+- **SettingsModal tab list.** Renderer's tab order with LLM disabled is `general, display, shortcuts, theme, notifications, …`; webFull L3.2 covers the first three. Tab list refactored from a hardcoded single button into a `TABS: TabDef[]` array driven by `lucide-react` icons (Settings, Monitor, Keyboard). Tab strip is now data-driven, so subsequent layers add a row to the array instead of duplicating button JSX.
+
+- **No new REST routes.** Both new tabs use the L3.1 `GET /api/settings` + `PATCH /api/settings` routes. The `customFonts` field (a Display tab feature on the renderer side) is the only setting that would have needed `fonts:detect` — explicitly deferred above. `apiRoutes.ts` UNTOUCHED in this layer.
+
+#### Files added
+
+- `src/webFull/components/Settings/tabs/DisplayTab.tsx` (789 LOC). Rewrite-with-primitives. Field accessors + JSX + two helper components (`ToggleButtonGroup<T>` for radio-style number/string pickers, `SwitchRow` for boolean toggles). Inline "Coming in subsequent layers" panel surfaces deferred IPC namespaces and Electron-only behaviors.
+- `src/webFull/components/Settings/tabs/ShortcutsTab.tsx` (370 LOC). Rewrite-with-primitives. Inline `formatShortcutKeys` (~20 LOC) so no cross-tree import from `src/renderer/utils/`. Live keyboard recording via React KeyboardEvent; macOS Alt+key special-character handling preserved. Filter input auto-focuses on mount.
+- `src/webFull/components/Settings/tabs/DisplayTab.parity.test.ts` (215 LOC). 6 parity stories: 4 happy-path (`open-display-tab-shows-known-fields`, `change-font-size-to-large-persists-to-server`, `toggle-context-warnings-persists-nested-object`, `edit-ignore-patterns-textarea-persists-array`) + 2 negative-path (`invalid-bionify-algorithm-does-not-persist`, `server-error-on-fetch-shows-error-banner`). Vitest catalog-shape guard with the allowed-verb set (`hasElement` / `hasText` / `fsHas` / `wsFrameMatches` / `dbHasRow` / `processHas` / `notificationFired` / `broadcast`). Banned-substring guard excludes `fonts:detect`, `useNativeTitleBar`, `autoHideMenuBar` (deferred surface).
+- `src/webFull/components/Settings/tabs/ShortcutsTab.parity.test.ts` (215 LOC). 6 parity stories: 4 happy-path (`open-shortcuts-tab-shows-filter-and-count`, `record-new-shortcut-persists-to-server`, `filter-input-narrows-visible-shortcuts`, `escape-during-recording-cancels-without-persisting`) + 2 negative-path (`modifier-only-keypress-does-not-persist`, `empty-shortcuts-map-shows-empty-state`). Banned-substring guard excludes `fonts:detect`, `shell:`, `dialog:`, `power:`, `wakatime:` (no IPC namespace beyond `settings`).
+
+#### Files edited (purely additive)
+
+- `src/webFull/components/Settings/SettingsModal.tsx` (was 116 LOC, now 144 LOC). `SettingsTabId` widened to `'general' | 'display' | 'shortcuts'`. New `TabDef` interface + `TABS` array with icon refs from `lucide-react` (Settings, Monitor, Keyboard). Tab strip rewritten from hardcoded single button to a `TABS.map(...)` render so subsequent layers add an array entry instead of new JSX. Tab body switch grew two new branches (`display`, `shortcuts`). All existing testids preserved (`webfull-settings-modal`, `webfull-settings-tab-strip`, `webfull-settings-tab-general`, `webfull-settings-close`, `webfull-settings-body`). New testids: `webfull-settings-tab-display`, `webfull-settings-tab-shortcuts`.
+
+#### Build — `npm run build:webfull`
+
+Symlinked `/Users/trilliumsmith/code/maestro/node_modules` into the worktree before build; removed before commit.
+
+```
+> maestro@0.15.3 build:webfull
+> vite build --config vite.config.webfull.mts
+
+vite v5.4.21 building for production...
+✓ 2534 modules transformed.
+warnings when minifying css:
+▲ [WARNING] Expected identifier but found "-" [css-syntax-error]
+    <stdin>:2714:2: -: \s|; (pre-existing in upstream CSS — same warning surfaces against src/web/ per Layer 1.1 evidence)
+computing gzip size...
+../../dist/webfull/index.html                    3.54 kB │ gzip:   1.41 kB
+../../dist/webfull/assets/mobile-Jsjq6L5g.css   47.64 kB │ gzip:   9.38 kB
+../../dist/webfull/assets/main-CB3EGn_a.js       0.81 kB │ gzip:   0.47 kB
+../../dist/webfull/assets/react-xxjwAHka.js    141.58 kB │ gzip:  45.37 kB
+../../dist/webfull/assets/mobile-BaSfynjr.js   964.13 kB │ gzip: 319.77 kB
+✓ built in 4.00s
+```
+
+Exit 0. Module count stable at 2534 (same as L3.1). The two new tabs are reachable through the SettingsModal but Rollup tree-shake folds them into the existing chunk; bundle bytes are bit-for-bit identical to L3.1 because the only consumers are the SettingsModal — which already imports `react`, `lucide-react`, the theme types, and `useSettings`. No new chunk introduced, no new top-level module count.
+
+#### Parity catalog smoke pass
+
+```
+$ npx vitest run src/webFull/components/Settings/tabs/DisplayTab.parity.test.ts src/webFull/components/Settings/tabs/ShortcutsTab.parity.test.ts
+ ✓ src/webFull/components/Settings/tabs/ShortcutsTab.parity.test.ts (6 tests) 3ms
+ ✓ src/webFull/components/Settings/tabs/DisplayTab.parity.test.ts (6 tests) 4ms
+
+ Test Files  2 passed (2)
+      Tests  12 passed (12)
+```
+
+All 12 catalog-shape tests pass. Plus the L3.1 General-tab catalog continues to pass (5 tests). Full regression: `npx vitest run src/webFull/components/Settings/` → 17 tests, 3 files, all green. The actual record-and-replay run against Electron-at-9222 + webFull-at-5176 lands when the parity harness module ships (not in this brief's scope).
+
+#### Scope checks (verified post-write, pre-commit)
+
+- `git diff main..HEAD -- src/web/ | wc -c` → `0` (zero bytes — upstream-mirror web tree untouched).
+- `git diff main..HEAD -- src/renderer/ | wc -c` → `0` (zero bytes — renderer tree untouched).
+- `git diff main..HEAD -- src/main/ | wc -c` → `0` (zero bytes — server tree untouched; L3.2 added no new REST routes).
+- Working-tree changes for this layer (before commit): `M src/webFull/components/Settings/SettingsModal.tsx`, plus four new files under `src/webFull/components/Settings/tabs/` (DisplayTab.tsx, ShortcutsTab.tsx, and the two parity catalogs). Plus this ISA append.
+- `node_modules` symlink removed before commit; not tracked.
+
+#### Deferred / out-of-scope for this brief
+
+- LLM, Theme, Notifications, AI Commands, Group Chat, SSH Hosts, Encore tabs — subsequent agents per the Layer 3.x sub-plan.
+- DisplayTab's `fontFamily` + custom-font management — needs a `GET /api/fonts/detected` route on the server backed by a non-Electron font enumerator. Surfaced in the inline "Coming in subsequent layers" panel.
+- DisplayTab's Window Chrome (`useNativeTitleBar`, `autoHideMenuBar`) — these settings have no browser equivalent. The keys remain writable through a future port if needed for Electron-mode parity; the user-visible effect is Electron-only.
+- DisplayTab's Bionify info modal — non-essential help popup. Algorithm input itself is fully functional.
+- ShortcutsTab — no deferred features. The renderer's `onRecordingChange` callback (used to coordinate with the modal's Escape handler) is replaced by the `onKeyDownCapture` `stopPropagation` pattern inside the recording flow; the layer-stack-managed modal Escape stays out of the way.
+- A `shortcuts_changed` WS broadcast for live multi-client sync — same out-of-scope note as L3.1 (no `settings_changed` broadcast exists on the server side today).

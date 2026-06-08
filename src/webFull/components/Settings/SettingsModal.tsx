@@ -25,17 +25,36 @@
  */
 
 import { memo, useState } from 'react';
-import { Settings as SettingsIcon } from 'lucide-react';
+import { Settings as SettingsIcon, Monitor, Keyboard as KeyboardIcon } from 'lucide-react';
 import type { Theme } from '../../../shared/theme-types';
 import { Modal } from '../ui/Modal';
 import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
 import { GeneralTab } from './tabs/GeneralTab';
+import { DisplayTab } from './tabs/DisplayTab';
+import { ShortcutsTab } from './tabs/ShortcutsTab';
 
 /**
  * Tabs the webFull SettingsModal supports today. Grows as subsequent
  * Layer 3.x ports land additional tab bodies.
+ *
+ * Layer 3.2 adds 'display' and 'shortcuts'. Order matches the renderer's
+ * `SettingsModal.tsx` tab navigation array (general, display, llm,
+ * shortcuts, theme, …) minus the LLM/theme/etc. tabs that are still
+ * deferred.
  */
-export type SettingsTabId = 'general';
+export type SettingsTabId = 'general' | 'display' | 'shortcuts';
+
+interface TabDef {
+	id: SettingsTabId;
+	label: string;
+	icon: typeof SettingsIcon;
+}
+
+const TABS: TabDef[] = [
+	{ id: 'general', label: 'General', icon: SettingsIcon },
+	{ id: 'display', label: 'Display', icon: Monitor },
+	{ id: 'shortcuts', label: 'Shortcuts', icon: KeyboardIcon },
+];
 
 export interface SettingsModalProps {
 	/** Whether the modal is visible. */
@@ -71,26 +90,34 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 			testId={testId ?? 'webfull-settings-modal'}
 		>
 			{/* Tab strip — matches the renderer's visual pattern.
-			    Only "general" is wired today; other tabs land as subsequent agents. */}
+			    Layer 3.2: General, Display, Shortcuts wired. */}
 			<div
 				className="flex border-b -mx-6 -mt-6 mb-4"
 				style={{ borderColor: theme.colors.border }}
 				data-testid="webfull-settings-tab-strip"
 			>
-				<button
-					onClick={() => setActiveTab('general')}
-					className={`px-4 py-4 text-sm font-bold border-b-2 cursor-pointer flex items-center gap-2 ${
-						activeTab === 'general' ? 'border-indigo-500' : 'border-transparent'
-					}`}
-					style={{
-						color: activeTab === 'general' ? theme.colors.textMain : theme.colors.textDim,
-					}}
-					title="General"
-					data-testid="webfull-settings-tab-general"
-				>
-					<SettingsIcon className="w-4 h-4" />
-					<span>General</span>
-				</button>
+				{TABS.map((tab) => {
+					const Icon = tab.icon;
+					const isActive = activeTab === tab.id;
+					return (
+						<button
+							key={tab.id}
+							onClick={() => setActiveTab(tab.id)}
+							className={`px-4 py-4 text-sm font-bold border-b-2 cursor-pointer flex items-center gap-2 ${
+								isActive ? 'border-indigo-500' : 'border-transparent'
+							}`}
+							style={{
+								color: isActive ? theme.colors.textMain : theme.colors.textDim,
+							}}
+							title={tab.label}
+							aria-pressed={isActive}
+							data-testid={`webfull-settings-tab-${tab.id}`}
+						>
+							<Icon className="w-4 h-4" />
+							<span>{tab.label}</span>
+						</button>
+					);
+				})}
 				<div className="flex-1 flex justify-end items-center pr-4">
 					<button
 						onClick={onClose}
@@ -107,6 +134,8 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 			{/* Tab body */}
 			<div className="overflow-y-auto" data-testid="webfull-settings-body">
 				{activeTab === 'general' && <GeneralTab theme={theme} isOpen={isOpen} />}
+				{activeTab === 'display' && <DisplayTab theme={theme} isOpen={isOpen} />}
+				{activeTab === 'shortcuts' && <ShortcutsTab theme={theme} isOpen={isOpen} />}
 			</div>
 		</Modal>
 	);
