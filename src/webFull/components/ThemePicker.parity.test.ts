@@ -149,8 +149,16 @@ export const themePickerParityCatalog: ParityStory[] = [
 		then: [
 			// The non-active swatch button is present
 			{ verb: 'hasElement', target: 'button' },
-			// Non-active swatches do NOT get the ring-2 class — only the active one does
-			{ verb: 'hasElement', target: 'body:not(:has(button.ring-2.ring-2))' },
+			// Non-active swatches do NOT get the ring-2 class — only the active
+			// one does. The previous form was `button.ring-2.ring-2`, where the
+			// duplicate `.ring-2` collapsed to a single class selector (CSS
+			// allows but ignores repeats) — making the assertion equivalent to
+			// `body:not(:has(button.ring-2))`, which is false when there's any
+			// active swatch and incorrectly fires on the happy path. The
+			// component renders the active swatch with `ring-2`; the inactive
+			// swatch has no ring class. Assert "there exists at least one
+			// button WITHOUT ring-2" — that is the negative-path's true intent.
+			{ verb: 'hasElement', target: 'button:not(.ring-2)' },
 		],
 		happyPath: false,
 	},

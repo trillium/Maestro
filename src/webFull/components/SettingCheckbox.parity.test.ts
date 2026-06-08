@@ -161,7 +161,13 @@ export const settingCheckboxParityCatalog: ParityStory[] = [
 			// role="switch" with aria-checked="false" reflects checked=false.
 			{ verb: 'hasElement', target: 'button[role="switch"][aria-checked="false"]' },
 			// Thumb carries the "unchecked" translate class (renderer-pinned).
-			{ verb: 'hasElement', target: 'span.translate-x-0.5' },
+			// The Tailwind class `translate-x-0.5` contains an unescaped `.`
+			// which CSS parsers treat as a class-selector descendant boundary
+			// (`span.translate-x-0` + `.5` — invalid). The CSS-safe form uses
+			// the attribute-selector `[class~="translate-x-0.5"]` (matches a
+			// whitespace-separated token in the `class` attribute, dots and
+			// all). Same renderer-pinned semantic.
+			{ verb: 'hasElement', target: 'span[class~="translate-x-0.5"]' },
 			// And NOT the checked translate class.
 			{ verb: 'hasElement', target: 'button[role="switch"]:not(:has(span.translate-x-5))' },
 		],

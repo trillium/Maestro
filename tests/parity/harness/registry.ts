@@ -60,4 +60,19 @@ export const registry: Record<string, ComponentAdapter> = {
 	CollapsibleJsonViewer: {
 		load: () => import('./adapters/CollapsibleJsonViewer.adapter').then((m) => m.default),
 	},
+	QRCode: {
+		load: () => import('./adapters/QRCode.adapter').then((m) => m.default),
+	},
+	ToggleButtonGroup: {
+		load: () => import('./adapters/ToggleButtonGroup.adapter').then((m) => m.default),
+	},
+	SettingCheckbox: {
+		load: () => import('./adapters/SettingCheckbox.adapter').then((m) => m.default),
+	},
+	ThemePicker: {
+		load: () => import('./adapters/ThemePicker.adapter').then((m) => m.default),
+	},
+	CsvTableRenderer: {
+		load: () => import('./adapters/CsvTableRenderer.adapter').then((m) => m.default),
+	},
 };
