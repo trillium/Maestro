@@ -14,6 +14,8 @@
  * `index.ts` declarative.
  */
 
+import { randomUUID } from 'crypto';
+
 export interface MutableSession {
 	id: string;
 	name?: string;
@@ -125,6 +127,68 @@ export function starTab<T extends MutableSession>(
 	tabs[idx] = { ...tabs[idx], starred };
 	found.copy.aiTabs = tabs;
 	return commit(sessions, found.index, found.copy);
+}
+
+/**
+ * Result of an `addTab` call. Mirrors `MutationResult` but adds the `newTabId`
+ * so the caller can both broadcast the new tab array AND return the new id to
+ * the WS client (the `NewTabCallback` contract is `Promise<{tabId} | null>`).
+ *
+ * `newTabId === null` is the "session not found" signal — caller skips
+ * persist + broadcast and returns null to the client.
+ */
+export interface AddTabResult<T extends MutableSession = MutableSession> {
+	sessions: T[];
+	session: T;
+	newTabId: string;
+}
+
+/**
+ * Append a new ai-tab to a session and return the new tab id.
+ *
+ * Layer 0f / pattern (B): web-driven tab creation is a pure store mutation —
+ * no underlying pty/process is spawned here. The first command-send into the
+ * new tab triggers `ProcessManager` on-demand spawn via the existing
+ * `writeToSession` / `executeCommand` callback chain. That trade-off is
+ * intentional and documented in ISA Decisions: (A) "real spawn at newTab"
+ * would require inheriting the renderer's spawn-config-building logic and
+ * is out of scope for L0f; (B) "store-only newTab + lazy spawn on first
+ * command" matches what most web-driven flows expect.
+ *
+ * Tab shape mirrors `tabsForBroadcast`'s `AITabData` contract: id (UUID),
+ * agentSessionId=null, name=null, starred=false, inputValue='', usageStats=null,
+ * createdAt=now, state='idle', thinkingStartTime=null.
+ *
+ * Returns `null` when the session id does not exist in the store.
+ */
+export function addTab<T extends MutableSession>(
+	sessions: T[],
+	sessionId: string
+): AddTabResult<T> | null {
+	const found = locate(sessions, sessionId);
+	if (!found) return null;
+	const newTabId = randomUUID();
+	const newTab: Record<string, unknown> = {
+		id: newTabId,
+		agentSessionId: null,
+		name: null,
+		starred: false,
+		inputValue: '',
+		usageStats: null,
+		createdAt: Date.now(),
+		state: 'idle',
+		thinkingStartTime: null,
+		logs: [],
+	};
+	const tabs = (found.copy.aiTabs ?? []).slice();
+	tabs.push(newTab);
+	found.copy.aiTabs = tabs;
+	// New tab becomes active — matches the renderer-side behavior where
+	// creating a tab focuses it. If a session had no active tab before, the
+	// new one is also the only choice.
+	found.copy.activeTabId = newTabId;
+	const committed = commit(sessions, found.index, found.copy);
+	return { sessions: committed.sessions, session: committed.session, newTabId };
 }
 
 export function reorderTab<T extends MutableSession>(

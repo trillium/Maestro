@@ -12,8 +12,15 @@
  *            toggleBookmark via sessions-mutator + WebServer broadcast*.
  *            Plus selectSession / selectTab as headless no-ops (each browser
  *            tab owns its view state in web mode).
- *
- * Deferred: newTab (needs spawn pipeline — L0d scope).
+ * Layer 0d — newTab via sessions-mutator (pattern B: store-only mutation,
+ *            no process spawn — first command-send on the tab triggers the
+ *            ProcessManager on-demand spawn through the L0b write callback).
+ * Layer 0e — Sentry wrapper modules scaffolded (src/server/sentry.ts +
+ *            src/webFull/utils/sentry.ts) — replaces @sentry/electron per
+ *            surface.
+ * Layer 0f — Sentry init wired into main() so any error path can use
+ *            captureException. Closes ISC-33 (explicit replacement, not
+ *            just absence-from-dist).
  *
  * Launch:
  *   node dist/server/index.js
@@ -36,6 +43,7 @@ import { FileStore } from '../shared/file-store';
 import { getDataDir } from '../shared/data-dir';
 import { ServerProcessManagerAdapter } from './process-manager-adapter';
 import * as mutator from './sessions-mutator';
+import { initSentry, captureException } from './sentry';
 
 type StoredSession = {
 	id: string;
@@ -389,15 +397,43 @@ server.setSelectTabCallback(async (sessionId: string, tabId: string): Promise<bo
 	return true;
 });
 
-// newTab — DEFERRED. Spawning is a real side effect, not a store mutation
-// (needs ProcessManager.spawn + the renderer's session-creation pipeline).
-// Out of scope for L0c; tracked in ISA.md.
-server.setNewTabCallback((async (sessionId: string) => {
-	console.warn(
-		`[maestro-server] newTab ${sessionId}: deferred — spawn pipeline is L0d scope`
-	);
-	return null;
-}) as any);
+// newTab — Layer 0f, pattern (B): store-only mutation. Append a tab to
+// `aiTabs`, broadcast the new tab array, return `{ tabId }`. NO underlying
+// process is spawned here — first command-send into the new tab triggers
+// `ProcessManager` on-demand spawn through the L0b `writeToSession` /
+// `executeCommand` callback chain. The trade-off (real spawn vs lazy spawn)
+// is documented in ISA Decisions: pattern (A) "real spawn at newTab" would
+// require lifting the renderer's spawn-config-building logic; pattern (B)
+// matches what most web-driven flows expect and keeps the L0 scope tight.
+//
+// The CallbackRegistry contract is `Promise<{ tabId: string } | null>` — we
+// return `null` when the session doesn't exist (matches L0c "session not
+// found" pattern), otherwise `{ tabId }` with a fresh UUID.
+server.setNewTabCallback(async (sessionId: string): Promise<{ tabId: string } | null> => {
+	const sessions = sessionsStore.get<StoredSession[]>('sessions', []);
+	const result = mutator.addTab(sessions, sessionId);
+	if (!result) {
+		console.warn(`[maestro-server] newTab: session ${sessionId} not found; skipping`);
+		return null;
+	}
+	try {
+		sessionsStore.set('sessions', result.sessions);
+	} catch (err) {
+		console.error(`[maestro-server] newTab ${sessionId}: failed to persist sessions`, err);
+		return null;
+	}
+	try {
+		const { aiTabs, activeTabId } = tabsForBroadcast(result.session);
+		server.broadcastTabsChange(sessionId, aiTabs, activeTabId);
+	} catch (err) {
+		console.error(
+			`[maestro-server] newTab ${sessionId}: broadcast threw (tab already persisted)`,
+			err
+		);
+	}
+	console.log(`[maestro-server] newTab ${sessionId} -> ${result.newTabId}`);
+	return { tabId: result.newTabId };
+});
 
 // closeTab — (A) drop the tab from aiTabs, broadcast new tab array.
 server.setCloseTabCallback(async (sessionId: string, tabId: string): Promise<boolean> => {
@@ -485,22 +521,27 @@ void notImplementedWrite;
 // ============ Lifecycle ============
 
 async function main() {
+	// L0f: initialize Sentry FIRST so any subsequent error path can capture.
+	// No-op when MAESTRO_SENTRY_DSN is not set (the default for dev runs).
+	initSentry();
 	const result = await server.start();
 	console.log(`[maestro-server] listening at ${result.url}`);
 	console.log(`[maestro-server] data directory: ${dataDir}`);
 	console.log(`[maestro-server] sessions visible: ${sessionsStore.get<StoredSession[]>('sessions', []).length}`);
 	console.log(
-		'[maestro-server] Layer 0c: 9/10 WRITE callbacks active ' +
+		'[maestro-server] Layer 0f: 10/10 WRITE callbacks active ' +
 			'(L0b: writeToSession, executeCommand, interruptSession via ProcessManager; ' +
 			'L0c-A: switchMode, closeTab, renameTab, starTab, reorderTab, toggleBookmark ' +
 			'via sessions store + broadcast; ' +
-			'L0c-C: selectSession, selectTab as headless no-ops). ' +
-			'newTab deferred to L0d (requires server-side spawn pipeline).'
+			'L0c-C: selectSession, selectTab as headless no-ops; ' +
+			'L0d: newTab via sessions store + broadcast, lazy process spawn on first command). ' +
+			'L0f also wires Sentry init for error capture (no-op without MAESTRO_SENTRY_DSN).'
 	);
 }
 
 main().catch((err) => {
 	console.error('[maestro-server] failed to start', err);
+	captureException(err, { context: 'main_startup' });
 	process.exit(1);
 });
 
