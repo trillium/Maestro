@@ -87,6 +87,7 @@ export type {
 	ExecutionQueueSession,
 } from './ExecutionQueueIndicator';
 export { FirstRunCelebration } from './FirstRunCelebration';
+export { KeyboardMasteryCelebration } from './KeyboardMasteryCelebration';
 export { GroupChatMessages } from './GroupChatMessages';
 export type { GroupChatMessagesHandle } from './GroupChatMessages';
 export { ThemePicker } from './ThemePicker';
