@@ -66,11 +66,11 @@ import type {
 	GroupChatState,
 } from '../../shared/group-chat-types';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { stripMarkdown } from '../../renderer/utils/textProcessing';
+import { stripMarkdown } from '../utils/textProcessing';
 import { generateParticipantColor, buildParticipantColorMap } from '../utils/participantColors';
-import { generateTerminalProseStyles } from '../../renderer/utils/markdownConfig';
+import { generateTerminalProseStyles } from '../utils/terminalProseStyles';
 import { formatShortcutKeys } from '../utils/shortcutFormatter';
-import { safeClipboardWrite } from '../../renderer/utils/clipboard';
+import { safeClipboardWrite } from '../utils/clipboard';
 
 interface GroupChatMessagesProps {
 	theme: Theme;
