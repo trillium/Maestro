@@ -55,6 +55,7 @@ import { getMarketplaceManager } from './marketplace-manager';
 import { getAgentsManager } from './agents-manager';
 import { getSshRemotesManager } from './ssh-remotes-manager';
 import { getSettingsManager } from './settings-manager';
+import { getProcessesManager } from './processes-manager';
 import {
 	registerWakatimeProvider,
 	registerStatsProvider,
@@ -65,6 +66,7 @@ import {
 	registerAgentsProvider,
 	registerSshRemotesProvider,
 	registerSettingsProvider,
+	registerProcessesProvider,
 } from '../main/web-server/routes/apiRoutes';
 import type { StatsTimeRange } from '../shared/stats-types';
 
@@ -509,6 +511,32 @@ if (!securityToken || !UUID_V4_REGEX.test(securityToken)) {
 const processManagerAdapter = new ServerProcessManagerAdapter((sessionId) => {
 	const sessions = sessionsStore.get<StoredSession[]>('sessions', []);
 	return sessions.find((s) => s.id === sessionId) ?? null;
+});
+
+// ISC-44.server.api_processes_cluster — Processes manager. Server-side port of
+// the read-side `process:*` IPC handlers (only `process:getActiveProcesses`
+// fits REST; spawn / write / kill / interrupt / resize / runCommand and all
+// 14 `on*` listeners are mutation + streaming and belong on the WS
+// process-lifecycle frame family per umbrella commit `9ec71a510`). Backs the
+// new `/api/processes` + `/api/processes/:sessionId` REST routes. The
+// renderer-side IPC handlers are NOT touched; both stacks can run side-by-side
+// because the underlying `ProcessManager` singleton is the cross-mode contract.
+//
+// MUST be wired off `processManagerAdapter.processManager` (the same
+// ProcessManager instance the WS lifecycle layer uses) — constructing a
+// second ProcessManager would yield divergent active-process lists between
+// the WS frames and the REST read surface.
+const processesManager = getProcessesManager(processManagerAdapter.processManager);
+
+// Register the manager as the default Processes provider for the REST routes.
+// MUST run before `server.start()` so the routes have a backing provider by
+// the time the first client request arrives. The renderer-side Electron path
+// does NOT register a provider — the `process:*` IPC channels continue to own
+// that surface — and the routes correctly 503 when called outside the
+// headless server.
+registerProcessesProvider({
+	list: () => processesManager.list(),
+	get: (sessionId: string) => processesManager.get(sessionId),
 });
 
 const server = new WebServer(port, securityToken);
