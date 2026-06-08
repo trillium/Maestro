@@ -186,6 +186,7 @@ Every feature ported into `src/webFull/` gets a parity catalog at `src/webFull/<
 - [ ] ISC-44.layer-4.1.jump_numbers: 1-9 / 0 keyboard shortcuts for "jump to N-th visible session". Currently DEFERRED.
 - [ ] ISC-44.layer-4.1.wand_sparkle: "Busy" sparkle animation on the brand-header wand icon when any session is busy. Currently DROPPED (cosmetic, no browser equivalent without porting the renderer's CSS keyframes — re-scope to DEFERRED if visual parity demands).
 - [x] ISC-44.layer-2.5.playbook_delete_confirm: `PlaybookDeleteConfirmModal` parity catalog passes against both Electron and webFull, ≥3 stories, including ≥1 negative-path story per happy-path story. **CLOSED 2026-06-08** on branch `leaf-playbook-delete-confirm`. Source (`src/renderer/components/PlaybookDeleteConfirmModal.tsx`, 70 LOC) lifted verbatim to `src/webFull/components/PlaybookDeleteConfirmModal.tsx` with the standard L2.4 import-path adjustments (`Theme` → `../../shared/theme-types`; `MODAL_PRIORITIES` → `../constants/modalPriorities` re-export). 0 IPC, 0 Electron APIs, 0 `src/main/` touches. Direct sibling of the L2.4 `PlaybookNameModal` lift; same ConfirmModal-shape composition over Modal + ModalFooter. Catalog ships 5 stories (3 happy + 2 negative) honouring the brief's "≥3 happy + ≥1 negative-path per happy" floor.
+- [x] ISC-44.layer-2.5.rename_group: Leaf-parade batch #4 — `RenameGroupModal` (87 LOC, 0 IPC) verbatim-lifted from `src/renderer/components/RenameGroupModal.tsx` to `src/webFull/components/RenameGroupModal.tsx`. **CLOSED 2026-06-08** on branch `leaf-rename-group`. Same shape as the L2.4 `CreateGroupModal` lift: composes `Modal` + `FormInput` + `EmojiPickerField` (all L2.1/L2.2 primitives) and consumes `Group` from `src/shared/types` directly. Import-path adapts: `Theme` → `src/shared/theme-types`; `MODAL_PRIORITIES` → webFull re-export at `src/webFull/constants/modalPriorities.ts`; barrel `./ui` split into three direct module imports. Parity catalog at `src/webFull/components/RenameGroupModal.parity.test.ts` ships 6 stories (3 happy + 3 negative — meets brief's "≥3 happy + ≥1 negative-per-happy" floor) with 5 catalog-shape vitest guards (8/8 in-suite assertions). `npm run lint` clean (after `npm run build:prompts` to materialize the pre-existing `src/generated/prompts.ts`). `src/web/` + `src/renderer/` + `src/main/` untouched (`git diff main..HEAD -- src/web/ src/renderer/ src/main/ | wc -c` → 0). Export added to `src/webFull/components/index.ts` under new "Layer 2.5 lifted primitives" section. Sibling lift `RenameGroupChatModal` runs in parallel on a separate branch with no file overlap.
 
 ## Features
 
@@ -1570,6 +1571,65 @@ Branch `layer-2.4-more-modals` off `main @ 89fd6f797`. Continuation of the L2.3 
 - Lifting consumers (`AutoRun/`, `BatchRunner/`, `SessionList/` features) that would actually wire these modals into the webFull tree — those have transitive store / IPC dependencies and are downstream-layer scope.
 - Building a `src/webFull/components/ui/index.ts` barrel to mirror the renderer's barrel pattern — punted (no current consumer needs it; adding it now is unjustified surface area).
 - Backfilling re-exports for `src/renderer/utils/ids.ts` siblings (the file has only `generateId` today, so the shim is exhaustive).
+
+### 2026-06-08 — Layer 2.5 evidence (leaf-parade batch #4 — RenameGroupModal lift)
+
+Branch `leaf-rename-group` off `main @ a771a8540` (= HEAD of `main` after the L2.4 merge + the w2-fonts merge). Continuation of the L2.3/L2.4 leaf-component wave per the Architect plan-reeval-3 audit. This wave lifts `RenameGroupModal` verbatim into `src/webFull/components/` and ships a parity catalog. A sibling lift (`RenameGroupChatModal`) runs in parallel on a separate worktree with no file overlap.
+
+#### Decisions
+
+1. **`RenameGroupModal.tsx` — verbatim lift, mirrors L2.4 `CreateGroupModal` shape exactly.** Source (`src/renderer/components/RenameGroupModal.tsx`, 87 LOC) composes `Modal` + `ModalFooter` + `FormInput` + `EmojiPickerField` and consumes the `Group` interface. Pre-flight greps on the source file came back empty for `window\.maestro`, `(dialog|shell:|devtools:|power:|tunnel:|clipboard:|fonts:|notification:show)`, and `import.*from.*electron` — 0 IPC, 0 Electron-only APIs, identical posture to the L2.4 `CreateGroupModal` lift. Two import-path adjustments: `Theme` from `'../types'` → `'../../shared/theme-types'`; `MODAL_PRIORITIES` resolves via the existing webFull re-export at `src/webFull/constants/modalPriorities.ts` (per Architect 2026-06-08 audit risk A — non-divergent constants stay re-exported from renderer to prevent silent drift). `Group` resolves directly from `src/shared/types` (where it's already declared and re-exported by `src/renderer/types/index.ts:16`) — same precedent as L2.4 `CreateGroupModal`, no type-ownership change required, the leaf-hunt's "blocked-on-infra" note for `Group` is stale.
+
+2. **Renderer composes via `from './ui'` barrel; webFull splits to direct imports.** The renderer source reads `import { Modal, ModalFooter, EmojiPickerField, FormInput } from './ui';` — that resolves to `src/renderer/components/ui/index.ts`. webFull does NOT maintain `src/webFull/components/ui/index.ts` (Modal/FormInput/EmojiPickerField are exposed via the top-level `src/webFull/components/index.ts` barrel instead). The lift therefore splits the single barrel import into three direct module imports: `./ui/Modal`, `./ui/FormInput`, `./ui/EmojiPickerField`. Pure plumbing change — no behavior diff. Same call as the L2.4 lifts; the "should we add a webFull ui-barrel" question stays punted (no current consumer needs it).
+
+3. **Theme access pattern: prop-threaded.** Kept the renderer's `theme: Theme` prop convention, matching the L2.1 primitives' policy and the L2.3 (RenameTabModal) / L2.4 (CreateGroupModal, PlaybookNameModal, ResetTasksConfirmModal) precedents. Callers in webFull will call `const { theme } = useTheme()` at the feature-component level and thread it down. Consistency over an isolated style switch.
+
+4. **Parity catalog cardinality matches the brief's tighter floor (≥3 happy + ≥1 negative-per-happy).** L2.3 (RenameTabModal) shipped 5 stories (3+2); L2.4 modals each shipped 5 (3+2). The plan-reeval-3 brief tightens the negative-path floor from "≥1 negative" to "≥1 negative per happy", so this catalog ships 6 stories (3 happy + 3 negative) and a sixth catalog-shape guard asserts `negativeCount ≥ happyCount`. The three happy stories cover (a) modal chrome + Rename button label + Group Name label, (b) prefilled name + current emoji glyph rendered, (c) Rename click closes modal. The three negative stories cover (a) Cancel closes without committing, (b) Escape closes, (c) empty trimmed name disables the Rename button (`confirmDisabled=!groupName.trim()`).
+
+#### Files added
+
+- `src/webFull/components/RenameGroupModal.tsx` (~105 LOC including extended header — verbatim lift of the 87-LOC source).
+- `src/webFull/components/RenameGroupModal.parity.test.ts` (6 stories: 3 happy + 3 negative; 5 catalog-shape vitest guards).
+- This ISA append.
+
+#### Files modified (additive only)
+
+- `src/webFull/components/index.ts` — appended Layer 2.5 section re-exporting `RenameGroupModal`. No prior exports changed.
+- `ISA.md` — this Decision entry + the new `ISC-44.layer-2.5.rename_group` sub-ISC registration under the per-feature parity-catalog section.
+
+#### Files NOT touched (scope discipline)
+
+- `src/web/` — `git diff main..HEAD -- src/web/ | wc -c` → `0` (zero bytes — upstream-mirror web tree untouched).
+- `src/renderer/` — `git diff main..HEAD -- src/renderer/ | wc -c` → `0` (zero bytes — renderer is bias-away).
+- `src/main/` — `git diff main..HEAD -- src/main/ | wc -c` → `0` (zero bytes — no new server routes needed for this purely visual wave).
+- `src/server/` — `git diff main..HEAD -- src/server/ | wc -c` → `0`.
+
+#### Verification
+
+- **0-IPC + 0-Electron-API confirmation (source file):**
+  - `grep "window\.maestro" src/renderer/components/RenameGroupModal.tsx` → empty.
+  - `grep -E "(dialog|shell:|devtools:|power:|tunnel:|clipboard:|fonts:|notification:show)" <same>` → empty.
+  - `grep "import.*from.*electron" <same>` → empty.
+  - Transitive deps: `Modal`, `FormInput`, `EmojiPickerField` re-checked clean during L2.1+L2.2.
+- **Pre-flight (from the lift template):** Tailwind glob includes `'./src/webFull/**/*.{js,ts,jsx,tsx}'`; `LayerStackProvider` mounted at `src/webFull/App.tsx`; `src/webFull/components/ui/Modal.tsx`, `src/webFull/components/ui/FormInput.tsx`, `src/webFull/components/ui/EmojiPickerField.tsx` all present.
+- **Lint:** `npm run build:prompts` (regenerates pre-existing `src/generated/prompts.ts` — this file is `.gitignore`'d but required at type-check time; baseline `main` reproduces the same `TS2307 Cannot find module '../generated/prompts'` error without the regen step, confirming the lint blocker is environmental not introduced by this layer). After `build:prompts`, `npm run lint` → exit 0, no diagnostics.
+- **Parity tests:** `npx vitest run src/webFull/components/RenameGroupModal.parity.test.ts` → `Test Files 1 passed (1); Tests 5 passed (5)` in 1.03 s. The catalog declares 6 stories total (3 happy + 3 negative ≥ the brief's "≥3 happy + ≥1 negative-per-happy" minimum), uses only the allowed assertion vocabulary (`hasElement`, `hasText`, `wsFrameMatches`, `dbHasRow`, `fsHas`, `processHas`, `notificationFired`, `broadcast`), and passes the IPC-leakage guard.
+- **Symlink hygiene:** `node_modules` symlink to `/Users/trilliumsmith/code/maestro/node_modules` created for the lint/test run; must be removed before commit.
+
+#### Scope checks (post-write, pre-commit)
+
+- Working-tree changes for this layer (before commit):
+  - `M  ISA.md` (this block + new `ISC-44.layer-2.5.rename_group` entry)
+  - `M  src/webFull/components/index.ts` (Layer 2.5 section)
+  - `?? src/webFull/components/RenameGroupModal.tsx`
+  - `?? src/webFull/components/RenameGroupModal.parity.test.ts`
+- All authorized: NEW files under `src/webFull/`, the additive append to `src/webFull/components/index.ts`, plus the append-only `ISA.md` block.
+- No edits to `src/main/`, `src/web/`, `src/renderer/`, `src/server/`.
+
+#### Deferred / out-of-scope for this brief
+
+- Lifting consumers (`SessionList/SessionGroup.tsx` etc.) that would actually wire `RenameGroupModal` into the webFull tree — those have transitive store dependencies and are downstream-layer scope.
+- Sibling `RenameGroupChatModal` lift — runs in parallel on a separate branch by a different agent; no file overlap with this branch.
 
 ### 2026-06-07 — W2 WakaTime evidence (server-side port + REST routes — ISC-44.general.wakatime closure, server-half)
 
