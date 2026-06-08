@@ -47,7 +47,12 @@ import { initSentry, captureException } from './sentry';
 import { getHistoryManager } from './history-manager';
 import { RawPtyMultiplexer } from './raw-pty-multiplexer';
 import { getWakaTimeManager } from './wakatime-manager';
-import { registerWakatimeProvider } from '../main/web-server/routes/apiRoutes';
+import { getStatsManager } from './stats-manager';
+import {
+	registerWakatimeProvider,
+	registerStatsProvider,
+} from '../main/web-server/routes/apiRoutes';
+import type { StatsTimeRange } from '../shared/stats-types';
 
 type StoredSession = {
 	id: string;
@@ -156,6 +161,47 @@ registerWakatimeProvider({
 	validateKey: (key: string) => wakatimeManager.validateApiKey(key),
 });
 
+// W2 — Stats manager. Server-side port of `src/main/stats/stats-db.ts` (+
+// its sibling CRUD modules) that backs the `/api/stats/*` REST routes,
+// closing the server-half of `ISC-44.general.stats`. The renderer-side
+// `StatsDB` + `stats:*` IPC handlers are NOT touched; both can run
+// side-by-side in a hybrid Electron + headless-sidecar deployment because
+// the on-disk `stats.db` file is the contract between modes. `stats-manager.ts`
+// is read-mostly (plus the explicit `clearOldData()` write the REST route
+// exposes); the renderer owns event insertion via the `stats:record-*` IPC
+// channels.
+//
+// The manager is initialized HERE (eagerly) rather than on first route hit so
+// migrations run at boot rather than blocking the first client request.
+// `MAESTRO_DATA_DIR` controls the on-disk path
+// (`<MAESTRO_DATA_DIR>/stats.db`), so a fresh data dir gets a fresh DB
+// with the v1→v4 migration sequence applied, and an Electron-shared dir
+// is opened in-place with no migration work.
+const statsManager = getStatsManager();
+try {
+	statsManager.initialize();
+} catch (err) {
+	console.error('[maestro-server] statsManager.initialize() failed', err);
+	captureException(err, { context: 'stats_init' });
+}
+
+// Register the manager as the default Stats provider for the REST routes.
+// MUST run before `server.start()` so the routes have a backing provider by
+// the time the first client request arrives. The renderer-side Electron path
+// does NOT register a provider — the `stats:*` IPC namespace continues to
+// own that surface — and the routes correctly 503 when called outside the
+// headless server.
+registerStatsProvider({
+	getDbSize: () => statsManager.getDbSize(),
+	getEarliestTimestamp: () => statsManager.getEarliestTimestamp(),
+	getSummary: () => statsManager.getSummary(),
+	clearOldData: (olderThanDays: number) => statsManager.clearOldData(olderThanDays),
+	getAggregation: (range: string) => statsManager.getAggregatedStats(range as StatsTimeRange),
+	getQueryEvents: (range: string) => statsManager.getQueryEvents(range as StatsTimeRange),
+	getSessionLifecycle: (range: string) =>
+		statsManager.getSessionLifecycleEvents(range as StatsTimeRange),
+});
+
 // Persistent token: stored in settings if present, otherwise ephemeral per boot.
 // FileStore's generic-V overload is shadowed by the keyof-T overload when T is
 // Record<string, unknown>, so the result widens to `unknown`. Cast at the call
@@ -202,9 +248,7 @@ const server = new WebServer(port, securityToken);
 // wrote last. Two simultaneous PATCHes serialize through Fastify's request
 // handler.
 server.setSettingsChangedCallback((changedKeys, newValues) => {
-	console.log(
-		`[maestro-server] settings_changed: keys=[${changedKeys.join(',')}]`
-	);
+	console.log(`[maestro-server] settings_changed: keys=[${changedKeys.join(',')}]`);
 	server.broadcastSettingsChanged(changedKeys, newValues);
 });
 
@@ -217,8 +261,12 @@ server.setGetSessionsCallback(() => {
 		const group = s.groupId ? groups.find((g) => g.id === s.groupId) : null;
 
 		// Build mobile-preview lastResponse (replicates web-server-factory logic)
-		let lastResponse: { text: string; timestamp: number; source: string; fullLength: number } | null =
-			null;
+		let lastResponse: {
+			text: string;
+			timestamp: number;
+			source: string;
+			fullLength: number;
+		} | null = null;
 		const activeTab =
 			(s.aiTabs?.find((t) => t.id === s.activeTabId) as Record<string, unknown> | undefined) ||
 			(s.aiTabs?.[0] as Record<string, unknown> | undefined);
@@ -369,12 +417,12 @@ server.setGetHistoryCallback((projectPath?: string, sessionId?: string) => {
 //   process (not just mutate store), which needs a server-side session-
 //   creation pipeline that is L0d scope. Kept as a stub returning null.
 
-const notImplementedWrite = (op: string) => (..._args: unknown[]): false | null => {
-	console.warn(
-		`[maestro-server] WRITE op "${op}" not implemented; deferred to a later layer.`
-	);
-	return false;
-};
+const notImplementedWrite =
+	(op: string) =>
+	(..._args: unknown[]): false | null => {
+		console.warn(`[maestro-server] WRITE op "${op}" not implemented; deferred to a later layer.`);
+		return false;
+	};
 
 // Helper: read sessions, apply a mutator, persist, broadcast. Returns true
 // iff the mutator produced a non-null result (i.e. the session existed and
@@ -430,8 +478,7 @@ function tabsForBroadcast(session: StoredSession): {
 		state: ((tab.state as 'idle' | 'busy' | undefined) ?? 'idle') as 'idle' | 'busy',
 		thinkingStartTime: (tab.thinkingStartTime as number | null | undefined) ?? null,
 	}));
-	const activeTabId =
-		session.activeTabId ?? (aiTabs.length > 0 ? aiTabs[0].id : '');
+	const activeTabId = session.activeTabId ?? (aiTabs.length > 0 ? aiTabs[0].id : '');
 	return { aiTabs, activeTabId };
 }
 
@@ -439,9 +486,7 @@ function tabsForBroadcast(session: StoredSession): {
 // POST /:token/api/session/:id/send already appends '\n' before calling this.
 server.setWriteToSessionCallback((sessionId: string, data: string): boolean => {
 	const result = processManagerAdapter.write(sessionId, data);
-	console.log(
-		`[maestro-server] writeToSession ${sessionId} (${data.length} bytes) -> ${result}`
-	);
+	console.log(`[maestro-server] writeToSession ${sessionId} (${data.length} bytes) -> ${result}`);
 	return result;
 });
 
@@ -470,22 +515,24 @@ server.setInterruptSessionCallback(async (sessionId: string): Promise<boolean> =
 // switchMode — (A) mutate inputMode, broadcast as a session_state_change
 // carrying the new inputMode (matches desktop persistence handler's existing
 // broadcast contract; renderer side already special-cases inputMode here).
-server.setSwitchModeCallback(async (sessionId: string, mode: 'ai' | 'terminal'): Promise<boolean> => {
-	const ok = applyMutation(
-		'switchMode',
-		(sessions) => mutator.switchMode(sessions, sessionId, mode),
-		(session) => {
-			server.broadcastSessionStateChange(sessionId, session.state ?? 'idle', {
-				name: session.name,
-				toolType: session.toolType,
-				inputMode: session.inputMode,
-				cwd: session.cwd,
-			});
-		}
-	);
-	console.log(`[maestro-server] switchMode ${sessionId} -> ${mode}: ${ok}`);
-	return ok;
-});
+server.setSwitchModeCallback(
+	async (sessionId: string, mode: 'ai' | 'terminal'): Promise<boolean> => {
+		const ok = applyMutation(
+			'switchMode',
+			(sessions) => mutator.switchMode(sessions, sessionId, mode),
+			(session) => {
+				server.broadcastSessionStateChange(sessionId, session.state ?? 'idle', {
+					name: session.name,
+					toolType: session.toolType,
+					inputMode: session.inputMode,
+					cwd: session.cwd,
+				});
+			}
+		);
+		console.log(`[maestro-server] switchMode ${sessionId} -> ${mode}: ${ok}`);
+		return ok;
+	}
+);
 
 // selectSession — (C) headless has no global "visible session"; each browser
 // tab manages its own view state. Acknowledge the call so the WS handler does
@@ -500,9 +547,7 @@ server.setSelectSessionCallback(async (sessionId: string, tabId?: string): Promi
 
 // selectTab — (C) same rationale as selectSession; renderer-only concept.
 server.setSelectTabCallback(async (sessionId: string, tabId: string): Promise<boolean> => {
-	console.log(
-		`[maestro-server] selectTab ${sessionId}/${tabId} — no-op in headless mode`
-	);
+	console.log(`[maestro-server] selectTab ${sessionId}/${tabId} — no-op in headless mode`);
 	return true;
 });
 
@@ -767,7 +812,9 @@ async function main() {
 	const result = await server.start();
 	console.log(`[maestro-server] listening at ${result.url}`);
 	console.log(`[maestro-server] data directory: ${dataDir}`);
-	console.log(`[maestro-server] sessions visible: ${sessionsStore.get<StoredSession[]>('sessions', []).length}`);
+	console.log(
+		`[maestro-server] sessions visible: ${sessionsStore.get<StoredSession[]>('sessions', []).length}`
+	);
 	console.log(
 		'[maestro-server] Layer 0h: getHistory — server-side HistoryManager wired ' +
 			'(per-session storage at <dataDir>/history/<sessionId>.json, ' +
@@ -782,7 +829,7 @@ async function main() {
 	);
 	console.log(
 		`[maestro-server] Layer 6.3: raw PTY multiplexer ready with disk-backed ` +
-			`scrollback (data dir: ${path.join(dataDir, 'pty-scrollback')})`,
+			`scrollback (data dir: ${path.join(dataDir, 'pty-scrollback')})`
 	);
 }
 
@@ -805,6 +852,11 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 			processManagerAdapter.shutdown();
 		} catch (err) {
 			console.error('[maestro-server] processManagerAdapter.shutdown() threw', err);
+		}
+		try {
+			statsManager.close();
+		} catch (err) {
+			console.error('[maestro-server] statsManager.close() threw', err);
 		}
 		server.stop().finally(() => process.exit(0));
 	});

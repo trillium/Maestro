@@ -56,10 +56,7 @@ export interface ApiRouteCallbacks {
 	 * no broadcast fires (the Electron path doesn't wire this; the headless
 	 * server in `src/server/index.ts` does).
 	 */
-	onSettingsChanged?: (
-		changedKeys: string[],
-		newValues: Record<string, unknown>
-	) => void;
+	onSettingsChanged?: (changedKeys: string[], newValues: Record<string, unknown>) => void;
 }
 
 /**
@@ -123,7 +120,7 @@ function getDefaultProvider(): SettingsProvider {
 		getSettings: () => ({ ...(store.store as Record<string, unknown>) }),
 		setSettings: (patch: Record<string, unknown>) => {
 			for (const [k, v] of Object.entries(patch)) {
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				 
 				(store as any).set(k, v);
 			}
 			return { ...(store.store as Record<string, unknown>) };
@@ -187,6 +184,78 @@ export function registerWakatimeProvider(provider: WakaTimeProvider | null): voi
  */
 export function getWakatimeProvider(): WakaTimeProvider | null {
 	return wakatimeProvider;
+}
+
+/* ============ Stats provider registry (W2 — closes ISC-44.general.stats, server-half) ============ */
+//
+// Mirrors the WakaTimeProvider pattern above. Headless entrypoints register a
+// provider backed by `src/server/stats-manager.ts`; the Electron path leaves
+// it unset and the routes 503 cleanly. NO fallback default is constructed
+// here: instantiating a StatsManager opens a `better-sqlite3` connection
+// against the on-disk stats DB, and the headless boot path is the only
+// surface that should own that connection. The renderer's stats DB is
+// opened by `src/main/stats/singleton.ts` and we explicitly do not want
+// the routes here to race against it by opening a parallel handle.
+export interface StatsProvider {
+	/** Database file size in bytes (matches `StatsDB.getDatabaseSize()`). */
+	getDbSize: () => number;
+	/**
+	 * Earliest timestamp across all stats tables as an ISO-8601 string, or
+	 * `null` if the DB is empty. The renderer-side IPC returns raw ms; the
+	 * REST surface returns ISO because the only consumer (Settings General
+	 * tab) displays it as a date string.
+	 */
+	getEarliestTimestamp: () => string | null;
+	/** Summary aggregate for the Settings General-tab panel. */
+	getSummary: () => {
+		dbSize: number;
+		earliestTimestamp: string | null;
+		sessionCount: number;
+		queryCount: number;
+		autoRunSessionCount: number;
+	};
+	/**
+	 * Delete data older than `olderThanDays`. Mirrors the renderer-side
+	 * `stats:clear-old-data` IPC return shape.
+	 */
+	clearOldData: (olderThanDays: number) => {
+		success: boolean;
+		deletedQueryEvents: number;
+		deletedAutoRunSessions: number;
+		deletedAutoRunTasks: number;
+		deletedSessionLifecycle: number;
+		error?: string;
+	};
+	/** Get aggregated dashboard stats for a time range. */
+	getAggregation: (range: string) => unknown;
+	/** Get query events for a time range. */
+	getQueryEvents: (range: string) => unknown;
+	/** Get session lifecycle events for a time range. */
+	getSessionLifecycle: (range: string) => unknown;
+}
+
+let statsProvider: StatsProvider | null = null;
+
+/**
+ * Register the active stats provider. Pass null to clear.
+ *
+ * The headless server boot path calls this once before `WebServer.start()` so
+ * the `/api/stats/*` routes are wired by the time the first client request
+ * arrives. Electron-host paths can ignore this — the routes 503 cleanly when
+ * no provider is registered, and the Electron renderer continues to use the
+ * `stats:*` IPC namespace directly.
+ */
+export function registerStatsProvider(provider: StatsProvider | null): void {
+	statsProvider = provider;
+}
+
+/**
+ * Internal accessor for the route handlers. Returns the registered provider
+ * or `null` if none is registered (the routes translate `null` → HTTP 503).
+ * Exposed for testing.
+ */
+export function getStatsProvider(): StatsProvider | null {
+	return statsProvider;
 }
 
 /**
@@ -564,10 +633,7 @@ export class ApiRoutes {
 						} catch (err) {
 							// Broadcast failure must NOT fail the PATCH — the
 							// settings are already on disk. Log and continue.
-							logger.warn(
-								`onSettingsChanged callback threw: ${String(err)}`,
-								LOG_CONTEXT
-							);
+							logger.warn(`onSettingsChanged callback threw: ${String(err)}`, LOG_CONTEXT);
 						}
 					}
 					return {
@@ -670,6 +736,248 @@ export class ApiRoutes {
 					return reply.code(500).send({
 						error: 'Internal Server Error',
 						message: `Failed to validate WakaTime key: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// ============ Stats endpoints (W2 — closes ISC-44.general.stats, server-half) ============
+		//
+		// Additive REST routes that mirror the renderer-side `stats:*` IPC
+		// namespace. 503 when no StatsProvider is registered (the Electron
+		// path leaves it unset). Per ISC-40 N1 legalization, additive
+		// `src/main/web-server/routes/` edits are authorized. NO touch to
+		// `src/main/ipc/handlers/stats.ts` or `src/main/stats/`.
+		//
+		// Route surface (5 endpoints):
+		//   GET  /api/stats/summary           — dbSize + earliestTimestamp + counts
+		//   POST /api/stats/clear-old-data    — bulk delete past cutoff
+		//   GET  /api/stats/aggregation       — full dashboard aggregate
+		//   GET  /api/stats/query-events      — raw query events feed
+		//   GET  /api/stats/session-lifecycle — session creation/closure events
+		//
+		// `range` query param accepts: `day|week|month|quarter|year|all`.
+		// Defaults to `all` if omitted. Unknown values fall through to the
+		// renderer-side `getTimeRangeStart()` default branch (returns 0 =
+		// "all time").
+
+		// GET /api/stats/summary — fast aggregate for the Settings General-tab panel.
+		// Reply shape: { dbSize, earliestTimestamp, sessionCount, queryCount, autoRunSessionCount, timestamp }
+		server.get(
+			`/${token}/api/stats/summary`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (_request, reply) => {
+				const provider = getStatsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Stats provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const summary = provider.getSummary();
+					return {
+						...summary,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to read stats summary: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// POST /api/stats/clear-old-data — delete rows older than N days.
+		// Body: { olderThanDays: number }. Reply: { removed, deletedQueryEvents, ..., timestamp }.
+		server.post(
+			`/${token}/api/stats/clear-old-data`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.maxPost,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getStatsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Stats provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const body = request.body as { olderThanDays?: unknown } | undefined;
+				const olderThanDays = body?.olderThanDays;
+				if (
+					typeof olderThanDays !== 'number' ||
+					!Number.isFinite(olderThanDays) ||
+					olderThanDays <= 0
+				) {
+					return reply.code(400).send({
+						error: 'Bad Request',
+						message: 'olderThanDays must be a positive number',
+						timestamp: Date.now(),
+					});
+				}
+				try {
+					const result = provider.clearOldData(olderThanDays);
+					if (!result.success) {
+						return reply.code(500).send({
+							error: 'Internal Server Error',
+							message: result.error ?? 'Failed to clear old data',
+							timestamp: Date.now(),
+						});
+					}
+					const removed =
+						result.deletedQueryEvents +
+						result.deletedAutoRunSessions +
+						result.deletedAutoRunTasks +
+						result.deletedSessionLifecycle;
+					return {
+						removed,
+						deletedQueryEvents: result.deletedQueryEvents,
+						deletedAutoRunSessions: result.deletedAutoRunSessions,
+						deletedAutoRunTasks: result.deletedAutoRunTasks,
+						deletedSessionLifecycle: result.deletedSessionLifecycle,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to clear old stats data: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/stats/aggregation?range=week — full dashboard aggregate.
+		// Heaviest route — runs ~9 sub-queries on the stats DB. Cache-friendly
+		// at the client (the dashboard polls on-demand, not on a tight loop).
+		server.get(
+			`/${token}/api/stats/aggregation`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getStatsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Stats provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { range } = request.query as { range?: string };
+				const rangeValue = range ?? 'all';
+				try {
+					const aggregation = provider.getAggregation(rangeValue);
+					return {
+						aggregation,
+						range: rangeValue,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to compute stats aggregation: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/stats/query-events?range=week — raw query events feed.
+		server.get(
+			`/${token}/api/stats/query-events`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getStatsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Stats provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { range } = request.query as { range?: string };
+				const rangeValue = range ?? 'all';
+				try {
+					const events = provider.getQueryEvents(rangeValue);
+					return {
+						events,
+						range: rangeValue,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to read query events: ${error.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			}
+		);
+
+		// GET /api/stats/session-lifecycle?range=week — session creation/closure events.
+		server.get(
+			`/${token}/api/stats/session-lifecycle`,
+			{
+				config: {
+					rateLimit: {
+						max: this.rateLimitConfig.max,
+						timeWindow: this.rateLimitConfig.timeWindow,
+					},
+				},
+			},
+			async (request, reply) => {
+				const provider = getStatsProvider();
+				if (!provider) {
+					return reply.code(503).send({
+						error: 'Service Unavailable',
+						message: 'Stats provider not configured',
+						timestamp: Date.now(),
+					});
+				}
+				const { range } = request.query as { range?: string };
+				const rangeValue = range ?? 'all';
+				try {
+					const events = provider.getSessionLifecycle(rangeValue);
+					return {
+						events,
+						range: rangeValue,
+						timestamp: Date.now(),
+					};
+				} catch (error: any) {
+					return reply.code(500).send({
+						error: 'Internal Server Error',
+						message: `Failed to read session lifecycle: ${error.message}`,
 						timestamp: Date.now(),
 					});
 				}
