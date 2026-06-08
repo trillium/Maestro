@@ -67,6 +67,35 @@ export interface LiveSessionInfo {
 }
 
 /**
+ * Audit #13 — webFull `NewInstanceModal` `onCreate` wiring. Mirrors the
+ * renderer's `useSessionCrud.createNewSession` arg shape so the client can
+ * forward the modal's submission directly.
+ *
+ * Duplicated from `web-server/types.ts#CreateSessionRequest` to keep this
+ * module free of cross-imports (the existing handler module follows the same
+ * "interfaces local to the handler file" convention for the other callback
+ * shapes — `MessageHandlerCallbacks`, `LiveSessionInfo`, etc.).
+ */
+export interface CreateSessionMessageRequest {
+	agentId: string;
+	workingDir: string;
+	name: string;
+	nudgeMessage?: string;
+	customPath?: string;
+	customArgs?: string;
+	customEnvVars?: Record<string, string>;
+	customModel?: string;
+	customContextWindow?: number;
+	customProviderPath?: string;
+	sessionSshRemoteConfig?: {
+		enabled: boolean;
+		remoteId: string | null;
+		workingDirOverride?: string;
+	};
+	groupId?: string;
+}
+
+/**
  * Layer 6.1: raw PTY callbacks. Implemented server-side by wiring through
  * RawPtyMultiplexer + ProcessManager. The MessageHandler stays decoupled
  * from those concretions via this callback shape. All four are optional —
@@ -105,6 +134,13 @@ export interface MessageHandlerCallbacks {
 	selectSession: (sessionId: string, tabId?: string) => Promise<boolean>;
 	selectTab: (sessionId: string, tabId: string) => Promise<boolean>;
 	newTab: (sessionId: string) => Promise<{ tabId: string } | null>;
+	/**
+	 * Audit #13 — webFull `NewInstanceModal` `onCreate` wiring. Mirrors the
+	 * renderer's `useSessionCrud.createNewSession` arg shape so the client can
+	 * forward the modal's submission directly. Returns `{ sessionId }` on
+	 * success or `null` on validation / persistence failure.
+	 */
+	createSession: (request: CreateSessionMessageRequest) => Promise<{ sessionId: string } | null>;
 	closeTab: (sessionId: string, tabId: string) => Promise<boolean>;
 	renameTab: (sessionId: string, tabId: string, newName: string) => Promise<boolean>;
 	starTab: (sessionId: string, tabId: string, starred: boolean) => Promise<boolean>;
@@ -202,6 +238,10 @@ export class WebSocketMessageHandler {
 
 			case 'new_tab':
 				this.handleNewTab(client, message);
+				break;
+
+			case 'create_session':
+				this.handleCreateSession(client, message);
 				break;
 
 			case 'close_tab':
@@ -519,6 +559,76 @@ export class WebSocketMessageHandler {
 			})
 			.catch((error) => {
 				this.sendError(client, `Failed to create tab: ${error.message}`);
+			});
+	}
+
+	/**
+	 * Handle create_session message — create a brand-new session.
+	 *
+	 * Audit #13. The renderer ships this via direct store mutation; on webFull
+	 * the client sends a `create_session` WS frame with the same arg shape as
+	 * `useSessionCrud.createNewSession`. The server applies the mutation,
+	 * persists, broadcasts `session_added`, and responds with `create_session_result`.
+	 *
+	 * Validation surface is intentionally thin — the modal already enforces
+	 * the renderer's validation rules (non-empty name, non-empty cwd, agent
+	 * selection). The server only re-checks the bare minimum (agentId / name /
+	 * workingDir present) so a malformed client frame doesn't poison the store.
+	 */
+	private handleCreateSession(client: WebClient, message: WebClientMessage): void {
+		const agentId = message.agentId as string | undefined;
+		const workingDir = message.workingDir as string | undefined;
+		const name = message.name as string | undefined;
+
+		logger.info(
+			`[Web] Received create_session message: agentId=${agentId}, name=${name}, cwd=${workingDir}`,
+			LOG_CONTEXT
+		);
+
+		if (!agentId || !workingDir || !name) {
+			this.sendError(client, 'Missing agentId, workingDir, or name');
+			return;
+		}
+
+		if (!this.callbacks.createSession) {
+			this.sendError(client, 'Session creation not configured');
+			return;
+		}
+
+		const request: CreateSessionMessageRequest = {
+			agentId,
+			workingDir,
+			name,
+			nudgeMessage: message.nudgeMessage as string | undefined,
+			customPath: message.customPath as string | undefined,
+			customArgs: message.customArgs as string | undefined,
+			customEnvVars: message.customEnvVars as Record<string, string> | undefined,
+			customModel: message.customModel as string | undefined,
+			customContextWindow: message.customContextWindow as number | undefined,
+			customProviderPath: message.customProviderPath as string | undefined,
+			sessionSshRemoteConfig: message.sessionSshRemoteConfig as
+				| { enabled: boolean; remoteId: string | null; workingDirOverride?: string }
+				| undefined,
+			groupId: message.groupId as string | undefined,
+		};
+
+		this.callbacks
+			.createSession(request)
+			.then((result) => {
+				this.send(client, {
+					type: 'create_session_result',
+					success: !!result,
+					sessionId: result?.sessionId,
+				});
+				if (!result) {
+					logger.warn(
+						`[Web] create_session rejected (agent=${agentId}, name=${name})`,
+						LOG_CONTEXT
+					);
+				}
+			})
+			.catch((error) => {
+				this.sendError(client, `Failed to create session: ${error.message}`);
 			});
 	}
 

@@ -213,3 +213,111 @@ export function reorderTab<T extends MutableSession>(
 	found.copy.aiTabs = tabs;
 	return commit(sessions, found.index, found.copy);
 }
+
+// ============================================================================
+// createSession — append a brand-new session to the store
+// ============================================================================
+//
+// Audit #13 / `ISC-44.wiring.new_instance_modal_create_wired`. Companion to
+// `addTab` (pattern B, store-only mutation, lazy spawn on first command). The
+// renderer-side `useSessionCrud.createNewSession` produces a `Session` with
+// ~25+ fields; on the server we only need to seed the subset that the
+// `getSessions` projection + `tabsForBroadcast` exfiltrate to the client.
+// Everything else (file tree, git refs, work log, persisted command history)
+// either lives on a separate concern (history manager) or is derived at read
+// time, so leaving those fields off the new session is a no-op from a client
+// perspective.
+//
+// Like `addTab`, this is pattern (B) — no underlying pty/process is spawned.
+// The first command-send into the session's initial tab triggers `ProcessManager`
+// on-demand spawn through the existing `writeToSession` / `executeCommand`
+// callback chain.
+//
+// Validation is intentionally minimal here (id non-empty, name non-empty,
+// no duplicate id). The renderer-side `validateNewSession` does richer checks
+// (duplicate name/cwd, agent-supported guards); web-side validation is a
+// future hardening layer — for now any well-formed webFull `NewInstanceModal`
+// submission lands.
+//
+// Returns `null` on a duplicate id collision; otherwise `{ sessions, session }`.
+// Callers can read `session` to build the broadcast payload.
+
+export interface CreateSessionInput {
+	id: string;
+	name: string;
+	toolType: string;
+	cwd: string;
+	groupId?: string | null;
+	customPath?: string;
+	customArgs?: string;
+	customEnvVars?: Record<string, string>;
+	customModel?: string;
+	customContextWindow?: number;
+	customProviderPath?: string;
+	nudgeMessage?: string;
+	sessionSshRemoteConfig?: {
+		enabled: boolean;
+		remoteId: string | null;
+		workingDirOverride?: string;
+	};
+}
+
+export function createSession<T extends MutableSession>(
+	sessions: T[],
+	input: CreateSessionInput
+): MutationResult<T> | null {
+	if (!input.id || !input.name || !input.toolType || !input.cwd) return null;
+	if (sessions.some((s) => s.id === input.id)) return null;
+	const initialTabId = randomUUID();
+	const initialTab: Record<string, unknown> = {
+		id: initialTabId,
+		agentSessionId: null,
+		name: null,
+		starred: false,
+		inputValue: '',
+		usageStats: null,
+		createdAt: Date.now(),
+		state: 'idle',
+		thinkingStartTime: null,
+		logs: [],
+	};
+	// Terminal mode is special-cased to mirror the renderer's
+	// `inputMode: agentId === 'terminal' ? 'terminal' : 'ai'` rule.
+	const inputMode = input.toolType === 'terminal' ? 'terminal' : 'ai';
+	const newSession: Record<string, unknown> = {
+		id: input.id,
+		name: input.name,
+		toolType: input.toolType,
+		state: 'idle',
+		inputMode,
+		cwd: input.cwd,
+		groupId: input.groupId ?? null,
+		aiTabs: [initialTab],
+		activeTabId: initialTabId,
+		bookmarked: false,
+		agentSessionId: null,
+		thinkingStartTime: null,
+		shellLogs: [],
+		// Customizations from the renderer's spawn-config; persisted so that
+		// `executeCommand`'s lazy spawn path can read them when the first
+		// command goes through. Undefined values are dropped to keep the
+		// on-disk shape tidy.
+		...(input.customPath !== undefined ? { customPath: input.customPath } : {}),
+		...(input.customArgs !== undefined ? { customArgs: input.customArgs } : {}),
+		...(input.customEnvVars !== undefined ? { customEnvVars: input.customEnvVars } : {}),
+		...(input.customModel !== undefined ? { customModel: input.customModel } : {}),
+		...(input.customContextWindow !== undefined
+			? { customContextWindow: input.customContextWindow }
+			: {}),
+		...(input.customProviderPath !== undefined
+			? { customProviderPath: input.customProviderPath }
+			: {}),
+		...(input.nudgeMessage !== undefined ? { nudgeMessage: input.nudgeMessage } : {}),
+		...(input.sessionSshRemoteConfig !== undefined
+			? { sessionSshRemoteConfig: input.sessionSshRemoteConfig }
+			: {}),
+	};
+	const out = sessions.slice();
+	out.push(newSession as T);
+	return { sessions: out, session: newSession as T };
+}

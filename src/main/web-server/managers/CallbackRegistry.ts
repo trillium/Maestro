@@ -16,6 +16,8 @@ import type {
 	SelectSessionCallback,
 	SelectTabCallback,
 	NewTabCallback,
+	CreateSessionCallback,
+	CreateSessionRequest,
 	CloseTabCallback,
 	RenameTabCallback,
 	StarTabCallback,
@@ -45,6 +47,7 @@ export interface WebServerCallbacks {
 	selectSession: SelectSessionCallback | null;
 	selectTab: SelectTabCallback | null;
 	newTab: NewTabCallback | null;
+	createSession: CreateSessionCallback | null;
 	closeTab: CloseTabCallback | null;
 	renameTab: RenameTabCallback | null;
 	starTab: StarTabCallback | null;
@@ -67,6 +70,7 @@ export class CallbackRegistry {
 		selectSession: null,
 		selectTab: null,
 		newTab: null,
+		createSession: null,
 		closeTab: null,
 		renameTab: null,
 		starTab: null,
@@ -132,6 +136,11 @@ export class CallbackRegistry {
 	async newTab(sessionId: string): Promise<{ tabId: string } | null> {
 		if (!this.callbacks.newTab) return null;
 		return this.callbacks.newTab(sessionId);
+	}
+
+	async createSession(request: CreateSessionRequest): Promise<{ sessionId: string } | null> {
+		if (!this.callbacks.createSession) return null;
+		return this.callbacks.createSession(request);
 	}
 
 	async closeTab(sessionId: string, tabId: string): Promise<boolean> {
@@ -215,6 +224,11 @@ export class CallbackRegistry {
 	setNewTabCallback(callback: NewTabCallback): void {
 		logger.info('[CallbackRegistry] setNewTabCallback called', LOG_CONTEXT);
 		this.callbacks.newTab = callback;
+	}
+
+	setCreateSessionCallback(callback: CreateSessionCallback): void {
+		logger.info('[CallbackRegistry] setCreateSessionCallback called', LOG_CONTEXT);
+		this.callbacks.createSession = callback;
 	}
 
 	setCloseTabCallback(callback: CloseTabCallback): void {

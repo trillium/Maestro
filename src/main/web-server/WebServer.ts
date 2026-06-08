@@ -58,6 +58,7 @@ import type {
 	SelectSessionCallback,
 	SelectTabCallback,
 	NewTabCallback,
+	CreateSessionCallback,
 	CloseTabCallback,
 	RenameTabCallback,
 	StarTabCallback,
@@ -324,6 +325,10 @@ export class WebServer {
 		this.callbackRegistry.setNewTabCallback(callback);
 	}
 
+	setCreateSessionCallback(callback: CreateSessionCallback): void {
+		this.callbackRegistry.setCreateSessionCallback(callback);
+	}
+
 	setCloseTabCallback(callback: CloseTabCallback): void {
 		this.callbackRegistry.setCloseTabCallback(callback);
 	}
@@ -496,6 +501,7 @@ export class WebServer {
 			selectTab: async (sessionId: string, tabId: string) =>
 				this.callbackRegistry.selectTab(sessionId, tabId),
 			newTab: async (sessionId: string) => this.callbackRegistry.newTab(sessionId),
+			createSession: async (request) => this.callbackRegistry.createSession(request),
 			closeTab: async (sessionId: string, tabId: string) =>
 				this.callbackRegistry.closeTab(sessionId, tabId),
 			renameTab: async (sessionId: string, tabId: string, newName: string) =>

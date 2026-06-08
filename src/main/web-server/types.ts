@@ -266,6 +266,39 @@ export type SwitchModeCallback = (sessionId: string, mode: 'ai' | 'terminal') =>
 export type SelectSessionCallback = (sessionId: string, tabId?: string) => Promise<boolean>;
 
 /**
+ * Session-lifecycle callbacks (audit #13 — webFull `NewInstanceModal` wiring).
+ *
+ * Mirror the shape of the renderer-side `useSessionCrud.createNewSession`
+ * args so the `NewInstanceModal` `onCreate` prop can forward directly. All
+ * fields beyond `agentId` / `workingDir` / `name` are optional — the modal
+ * passes whatever it has collected. The server-side mutator persists them
+ * verbatim so the lazy-spawn `executeCommand` path reads the same shape the
+ * renderer's `ProcessManager.spawn` does.
+ */
+export interface CreateSessionRequest {
+	agentId: string;
+	workingDir: string;
+	name: string;
+	nudgeMessage?: string;
+	customPath?: string;
+	customArgs?: string;
+	customEnvVars?: Record<string, string>;
+	customModel?: string;
+	customContextWindow?: number;
+	customProviderPath?: string;
+	sessionSshRemoteConfig?: {
+		enabled: boolean;
+		remoteId: string | null;
+		workingDirOverride?: string;
+	};
+	groupId?: string;
+}
+
+export type CreateSessionCallback = (
+	request: CreateSessionRequest
+) => Promise<{ sessionId: string } | null>;
+
+/**
  * Tab operation callbacks for multi-tab support.
  */
 export type SelectTabCallback = (sessionId: string, tabId: string) => Promise<boolean>;
